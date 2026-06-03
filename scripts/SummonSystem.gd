@@ -12,12 +12,7 @@ var summon_level : int = 1
 const SUMMON_LEVEL_MAX   : int   = 5
 const SUMMON_LEVEL_COSTS : Array = [100, 250, 500, 1000, 2000]  # cost to go from lvl n → n+1
 
-# ── Pity counters (per-run, resets each run) ──────────────────────────────────
-var summons_since_epic      : int = 0
-var summons_since_legendary : int = 0
-var total_summons           : int = 0
-const PITY_EPIC      : int = 20
-const PITY_LEGENDARY : int = 50
+var total_summons : int = 0
 
 # ── Summon costs ──────────────────────────────────────────────────────────────
 const BASIC_COST    : int = 20
@@ -35,6 +30,7 @@ const RARITY_COLORS : Dictionary = {
 	"rare":      Color(0.25, 0.55, 1.00),
 	"epic":      Color(0.72, 0.25, 0.90),
 	"legendary": Color(1.00, 0.72, 0.10),
+	"fusion":    Color(0.20, 1.00, 0.85),
 }
 
 # ── Summon odds per level [common, rare, epic, legendary] ────────────────────
@@ -166,15 +162,57 @@ const TURRET_DEFS : Dictionary = {
 		"cost": 0, "damage": 10.0, "range": 240.0, "fire_rate": 1.3,
 		"color": Color(0.20, 0.75, 0.30), "effect": "chain",
 	},
+	# ── Fusion (special crafted turrets) ──────────────────────────────────────
+	"venom_drake": {
+		"id": "venom_drake", "name": "Venom Drake", "rarity": "fusion", "idx": 17,
+		"desc": "Toxic storm rains\npoison on all nearby foes.",
+		"cost": 0, "damage": 35.0, "range": 195.0, "fire_rate": 0.8,
+		"color": Color(0.28, 0.78, 0.30), "effect": "aoe",
+	},
+	"frost_cannon": {
+		"id": "frost_cannon", "name": "Frost Cannon", "rarity": "fusion", "idx": 18,
+		"desc": "Penetrating icy bolt\nslows and pierces all enemies.",
+		"cost": 0, "damage": 45.0, "range": 350.0, "fire_rate": 0.5,
+		"color": Color(0.55, 0.90, 1.00), "effect": "pierce",
+	},
+	"arcane_overlord": {
+		"id": "arcane_overlord", "name": "Arcane Overlord", "rarity": "fusion", "idx": 19,
+		"desc": "Arcane inferno erupts\nin chains across the field.",
+		"cost": 0, "damage": 55.0, "range": 210.0, "fire_rate": 0.65,
+		"color": Color(0.90, 0.42, 0.12), "effect": "chain",
+	},
+	"dragon_lich": {
+		"id": "dragon_lich", "name": "Dragon Lich", "rarity": "fusion", "idx": 20,
+		"desc": "Soul-draining dragon fire\nchains to 5 enemies.",
+		"cost": 0, "damage": 80.0, "range": 230.0, "fire_rate": 0.85,
+		"color": Color(0.72, 0.55, 0.90), "effect": "storm_chain",
+	},
+	"tempest_warden": {
+		"id": "tempest_warden", "name": "Tempest Warden", "rarity": "fusion", "idx": 21,
+		"desc": "Storm lord's chosen:\nlightning slows and decimates.",
+		"cost": 0, "damage": 60.0, "range": 250.0, "fire_rate": 1.1,
+		"color": Color(0.45, 0.75, 1.00), "effect": "lightning",
+	},
 }
 
 # ── Special fusion recipes ────────────────────────────────────────────────────
-# Each requires exactly the 3 listed material IDs (bench or placed), produces result.
+# Each requires exactly the listed material IDs (bench or placed), produces result.
 const FUSION_RECIPES : Array = [
-	{ "materials": ["tesla_tower",   "frost_spire",   "arcane_cannon"], "result": "storm_lord"  },
-	{ "materials": ["infernal_core", "flame_tower",   "ballista"],      "result": "sun_dragon"  },
-	{ "materials": ["frost_spire",   "arcane_cannon", "poison_tower"],  "result": "chrono_mage" },
-	{ "materials": ["poison_tower",  "mage",          "frost_spire"],   "result": "world_tree"  },
+	# Venom Drake — no legendary (4 materials: 2 common + 1 rare + 1 epic)
+	{ "materials": ["catapult", "mage", "poison_tower", "tesla_tower"],
+	  "result": "venom_drake" },
+	# Frost Cannon — no legendary (4 materials: 1 common + 2 rare + 1 epic)
+	{ "materials": ["archer", "frost_spire", "sniper_tower", "ballista"],
+	  "result": "frost_cannon" },
+	# Arcane Overlord — no legendary (5 materials: 2 common + 1 rare + 2 epic)
+	{ "materials": ["crossbow", "catapult", "flame_tower", "arcane_cannon", "infernal_core"],
+	  "result": "arcane_overlord" },
+	# Dragon Lich — 1 legendary (4 materials: 1 common + 1 rare + 1 epic + 1 legendary)
+	{ "materials": ["mage", "poison_tower", "arcane_cannon", "sun_dragon"],
+	  "result": "dragon_lich" },
+	# Tempest Warden — 1 legendary (5 materials: 2 common + 1 rare + 1 epic + 1 legendary)
+	{ "materials": ["archer", "crossbow", "frost_spire", "tesla_tower", "storm_lord"],
+	  "result": "tempest_warden" },
 ]
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -219,26 +257,7 @@ func roll_summon(type: String) -> Dictionary:
 		odds[0] -= shift
 		odds[1] += shift
 
-	# Pity overrides
-	var rarity : String
-	if summons_since_legendary >= PITY_LEGENDARY:
-		rarity = "legendary"
-	elif summons_since_epic >= PITY_EPIC:
-		rarity = "epic" if randi() % 2 == 0 else "legendary"
-	else:
-		rarity = _roll_rarity(odds)
-
-	# Update pity counters
-	if rarity == "legendary":
-		summons_since_epic      = 0
-		summons_since_legendary = 0
-	elif rarity == "epic":
-		summons_since_epic      = 0
-		summons_since_legendary += 1
-	else:
-		summons_since_epic      += 1
-		summons_since_legendary += 1
-
+	var rarity : String = _roll_rarity(odds)
 	total_summons += 1
 	return get_random_turret_by_rarity(rarity)
 
@@ -303,11 +322,9 @@ func get_current_odds_text(type: String) -> String:
 
 
 func reset_run_state() -> void:
-	bench                   = []
-	summon_level            = 1
-	summons_since_epic      = 0
-	summons_since_legendary = 0
-	total_summons           = 0
+	bench         = []
+	summon_level  = 1
+	total_summons = 0
 
 
 func get_turret_def(id: String) -> Dictionary:

@@ -16,6 +16,7 @@ var tower_effect : String     = "none"
 var tower_data   : Dictionary = {}
 var is_held      : bool       = false
 var selected     : bool       = false
+var can_upgrade  : bool       = false
 
 var _cooldown      : float   = 0.0
 var _bullet_scene  : PackedScene
@@ -218,6 +219,19 @@ func _draw() -> void:
 	var bob := sin(_anim_time * 2.5) * 1.5 if not is_held else 0.0
 	var s   := _shoot_anim > 0.0
 
+	# Rarity glow ring drawn first so it sits behind the tower art
+	var _rar := tower_data.get("rarity", "") as String
+	if _rar != "":
+		var _rar_cols := {
+			"common":    Color(0.75, 0.75, 0.75),
+			"rare":      Color(0.25, 0.55, 1.00),
+			"epic":      Color(0.72, 0.25, 0.90),
+			"legendary": Color(1.00, 0.72, 0.10),
+			"fusion":    Color(0.20, 1.00, 0.85),
+		}
+		var rc : Color = _rar_cols.get(_rar, Color(0.75, 0.75, 0.75))
+		draw_arc(Vector2.ZERO, 27.0, 0.0, TAU, 48, Color(rc.r, rc.g, rc.b, 0.90), 2.5)
+
 	# Scale down only the towers that were sticking outside their tile
 	var _tile_sc := 0.90 if tower_type in [0, 1, 2, 3, 4, 13, 16] else 1.0
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2(_tile_sc, _tile_sc))
@@ -239,19 +253,27 @@ func _draw() -> void:
 		14: _draw_storm_lord(bob, s)
 		15: _draw_chrono_mage(bob, s)
 		16: _draw_world_tree(bob, s)
+		17: _draw_venom_drake(bob, s)
+		18: _draw_frost_cannon(bob, s)
+		19: _draw_arcane_overlord(bob, s)
+		20: _draw_dragon_lich(bob, s)
+		21: _draw_tempest_warden(bob, s)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
-	# Rarity glow ring — only for summoned turrets that have a rarity field
-	var _rar := tower_data.get("rarity", "") as String
-	if _rar != "":
-		var _rar_cols := {
-			"common":    Color(0.75, 0.75, 0.75),
-			"rare":      Color(0.25, 0.55, 1.00),
-			"epic":      Color(0.72, 0.25, 0.90),
-			"legendary": Color(1.00, 0.72, 0.10),
-		}
-		var rc : Color  = _rar_cols.get(_rar, Color(0.75, 0.75, 0.75))
-		draw_arc(Vector2.ZERO, 27.0, 0.0, TAU, 48, Color(rc.r, rc.g, rc.b, 0.90), 2.5)
+	# Upgrade-available badge — small arrow at top-right of the rarity ring
+	if can_upgrade and not is_held:
+		var bp := Vector2(20, -20)
+		var ac := Color(0.28, 1.00, 0.42)
+		draw_circle(bp, 9.0, Color(0.06, 0.06, 0.06, 0.92))
+		draw_circle(bp, 9.0, Color(0.18, 0.88, 0.28), false, 1.5)
+		# Arrowhead — filled triangle pointing up
+		draw_colored_polygon(PackedVector2Array([
+			bp + Vector2(0.0, -4.5),
+			bp + Vector2(-3.5,  0.5),
+			bp + Vector2( 3.5,  0.5),
+		]), ac)
+		# Shaft — thin rectangle below the head
+		draw_rect(Rect2(bp.x - 1.0, bp.y + 0.5, 2.0, 3.5), ac)
 
 	# Selection highlight — range ring only
 	if selected:
@@ -1125,3 +1147,122 @@ func _draw_world_tree(b: float, s: bool) -> void:
 			var ang := i * TAU / 5.0 + _anim_time
 			var lp  := Vector2(cos(ang), sin(ang)) * 22.0 + Vector2(0, -16 + b)
 			draw_circle(lp, 4.0, Color(leaf2.r, leaf2.g, leaf2.b, 0.7))
+
+
+# ── Venom Drake (type 17) ─────────────────────────────────────────────────────
+
+func _draw_venom_drake(b: float, s: bool) -> void:
+	var grn  := Color(0.20, 0.80, 0.28); var drk  := Color(0.10, 0.40, 0.14)
+	var purp := Color(0.60, 0.20, 0.80); var yel  := Color(0.85, 0.95, 0.20)
+	draw_colored_polygon(PackedVector2Array([Vector2(-10,2+b),Vector2(10,2+b),Vector2(12,22+b),Vector2(-12,22+b)]),drk)
+	draw_colored_polygon(PackedVector2Array([Vector2(-8,-10+b),Vector2(8,-10+b),Vector2(10,2+b),Vector2(-10,2+b)]),grn)
+	draw_circle(Vector2(0,-18+b),8,grn)
+	draw_circle(Vector2(0,-18+b),6,drk.lightened(0.1))
+	draw_colored_polygon(PackedVector2Array([Vector2(-5,-14+b),Vector2(-2,-14+b),Vector2(-3,-8+b)]),yel)
+	draw_colored_polygon(PackedVector2Array([Vector2(2,-14+b),Vector2(5,-14+b),Vector2(3,-8+b)]),yel)
+	draw_colored_polygon(PackedVector2Array([Vector2(-10,-6+b),Vector2(-22,-18+b),Vector2(-16,-2+b),Vector2(-10,2+b)]),purp.darkened(0.1))
+	draw_colored_polygon(PackedVector2Array([Vector2(10,-6+b),Vector2(22,-18+b),Vector2(16,-2+b),Vector2(10,2+b)]),purp.darkened(0.1))
+	var ga := 0.5 + sin(_anim_time * 4.0) * 0.25 if not s else 0.9
+	draw_circle(Vector2(0,-18+b),4,Color(0.30,1.00,0.40,ga))
+	draw_circle(Vector2(0,-18+b),2,Color(1,1,1,ga * 0.6))
+	if s:
+		for i in range(4):
+			var ang := i * TAU / 4.0 + _anim_time * 2.0
+			draw_circle(Vector2(cos(ang)*18,sin(ang)*12-10+b),3,Color(0.30,1.00,0.40,0.7))
+
+
+# ── Frost Cannon (type 18) ────────────────────────────────────────────────────
+
+func _draw_frost_cannon(b: float, s: bool) -> void:
+	var ice  := Color(0.55, 0.90, 1.00); var ice2 := Color(0.85, 0.97, 1.00)
+	var dark := Color(0.25, 0.45, 0.65); var gold := Color(0.90, 0.78, 0.22)
+	draw_circle(Vector2(-16,18+b),9,dark.darkened(0.2)); draw_circle(Vector2(-16,18+b),7,dark)
+	draw_circle(Vector2(16,18+b),9,dark.darkened(0.2));  draw_circle(Vector2(16,18+b),7,dark)
+	draw_line(Vector2(-16,18+b),Vector2(16,18+b),dark.darkened(0.2),3.5)
+	draw_colored_polygon(PackedVector2Array([Vector2(-14,2+b),Vector2(14,2+b),Vector2(16,16+b),Vector2(-16,16+b)]),dark)
+	var barrel_end := Vector2(20,-20+b) if not s else Vector2(18,-18+b)
+	draw_line(Vector2(-4,-4+b),barrel_end,dark.darkened(0.2),18)
+	draw_line(Vector2(-4,-4+b),barrel_end,ice,14)
+	draw_line(Vector2(-4,-4+b),barrel_end,ice2,5)
+	draw_circle(barrel_end,9,ice); draw_circle(barrel_end,4,ice2)
+	for i in range(3):
+		var t2 := 0.25 + i * 0.25
+		var bp := Vector2(-4 + t2*24, -4 - t2*16 + b)
+		draw_colored_polygon(PackedVector2Array([bp+Vector2(-3,0),bp+Vector2(0,-6),bp+Vector2(3,0)]),ice2)
+	draw_arc(Vector2(-4,-4+b),7,-PI*0.6,PI*0.6,10,gold,2.0)
+	if s:
+		draw_circle(barrel_end,14,Color(ice.r,ice.g,ice.b,0.3))
+
+
+# ── Arcane Overlord (type 19) ─────────────────────────────────────────────────
+
+func _draw_arcane_overlord(b: float, s: bool) -> void:
+	var orng := Color(0.90, 0.42, 0.12); var purp := Color(0.85, 0.30, 0.95)
+	var gold := Color(0.90, 0.78, 0.22); var wht  := Color(1.00, 0.95, 0.85)
+	draw_colored_polygon(PackedVector2Array([Vector2(-5,6+b),Vector2(5,6+b),Vector2(6,22+b),Vector2(-6,22+b)]),gold.darkened(0.3))
+	draw_rect(Rect2(-8,4+b,16,6),gold.darkened(0.2))
+	var cy := -6.0 + b + sin(_anim_time * 2.2) * 2.0
+	draw_circle(Vector2(0,cy),13,orng.darkened(0.3))
+	draw_circle(Vector2(0,cy),10,orng)
+	draw_circle(Vector2(0,cy),6,Color(1,0.75,0.40))
+	draw_circle(Vector2(-2,cy-2),3,wht)
+	var ra2 := _anim_time * 1.5
+	draw_arc(Vector2(0,cy),16,ra2,ra2+TAU,20,Color(purp.r,purp.g,purp.b,0.7),2.5)
+	draw_arc(Vector2(0,cy),20,ra2*0.7,ra2*0.7+TAU*0.5,10,Color(gold.r,gold.g,gold.b,0.5),1.5)
+	for i in range(4):
+		var ang := i * TAU / 4.0 + ra2
+		var ep  := Vector2(cos(ang)*18,sin(ang)*14+cy)
+		draw_line(Vector2(0,cy),ep,Color(orng.r,orng.g,orng.b,0.8),2.5)
+		draw_circle(ep,3,Color(purp.r,purp.g,purp.b,0.6))
+	if s:
+		draw_circle(Vector2(0,cy),22,Color(orng.r,orng.g,orng.b,0.20))
+
+
+# ── Dragon Lich (type 20) ─────────────────────────────────────────────────────
+
+func _draw_dragon_lich(b: float, s: bool) -> void:
+	var dkpur := Color(0.30, 0.10, 0.45); var gold := Color(0.90, 0.78, 0.22)
+	var grn   := Color(0.20, 0.90, 0.40); var bone := Color(0.88, 0.84, 0.72)
+	draw_colored_polygon(PackedVector2Array([Vector2(-9,2+b),Vector2(9,2+b),Vector2(11,22+b),Vector2(-11,22+b)]),dkpur)
+	draw_colored_polygon(PackedVector2Array([Vector2(-8,-10+b),Vector2(8,-10+b),Vector2(9,2+b),Vector2(-9,2+b)]),dkpur.lightened(0.1))
+	for i in range(3):
+		draw_line(Vector2(-8,4+i*5+b),Vector2(-2,4+i*5+b),bone,1.5)
+		draw_line(Vector2(2,4+i*5+b),Vector2(8,4+i*5+b),bone,1.5)
+	draw_circle(Vector2(0,-18+b),9,dkpur.lightened(0.05))
+	var ea := 0.7 + sin(_anim_time * 3.5) * 0.3
+	draw_circle(Vector2(-4,-17+b),3,grn); draw_circle(Vector2(4,-17+b),3,grn)
+	draw_circle(Vector2(-4,-17+b),1.5,Color(0.80,1.00,0.10,ea)); draw_circle(Vector2(4,-17+b),1.5,Color(0.80,1.00,0.10,ea))
+	draw_colored_polygon(PackedVector2Array([Vector2(-7,-12+b),Vector2(-4,-12+b),Vector2(-5,-8+b)]),bone)
+	draw_colored_polygon(PackedVector2Array([Vector2(4,-12+b),Vector2(7,-12+b),Vector2(5,-8+b)]),bone)
+	draw_colored_polygon(PackedVector2Array([Vector2(-6,-24+b),Vector2(-4,-24+b),Vector2(-8,-36+b)]),gold)
+	draw_colored_polygon(PackedVector2Array([Vector2(4,-24+b),Vector2(6,-24+b),Vector2(8,-36+b)]),gold)
+	var aura_a := 0.18 + sin(_anim_time * 2.0) * 0.07
+	draw_arc(Vector2(0,-18+b),15,0,TAU,24,Color(grn.r,grn.g,grn.b,aura_a),3.5)
+	if s:
+		draw_arc(Vector2(0,-18+b),22,0,TAU,32,Color(grn.r,grn.g,grn.b,0.35),3.0)
+
+
+# ── Tempest Warden (type 21) ──────────────────────────────────────────────────
+
+func _draw_tempest_warden(b: float, s: bool) -> void:
+	var storm := Color(0.45, 0.75, 1.00); var dark  := Color(0.20, 0.30, 0.55)
+	var wht   := Color(0.90, 0.95, 1.00); var gold  := Color(0.90, 0.78, 0.22)
+	draw_colored_polygon(PackedVector2Array([Vector2(-10,-8+b),Vector2(10,-8+b),Vector2(11,8+b),Vector2(-11,8+b)]),dark)
+	draw_colored_polygon(PackedVector2Array([Vector2(-9,8+b),Vector2(9,8+b),Vector2(10,22+b),Vector2(-10,22+b)]),dark.darkened(0.1))
+	draw_line(Vector2(-10,-8+b),Vector2(10,-8+b),storm,2.5)
+	draw_line(Vector2(-10,8+b),Vector2(10,8+b),storm,2.0)
+	draw_circle(Vector2(0,-18+b),9,dark.lightened(0.05))
+	draw_rect(Rect2(-9,-22+b,18,5),dark.lightened(0.1))
+	draw_rect(Rect2(-3,-28+b,6,10),storm)
+	var wing_flap := sin(_anim_time * 4.0) * 3.0
+	draw_colored_polygon(PackedVector2Array([Vector2(-10,-4+b),Vector2(-24,-16+b+wing_flap),Vector2(-20,-2+b),Vector2(-11,4+b)]),storm.darkened(0.15))
+	draw_colored_polygon(PackedVector2Array([Vector2(10,-4+b),Vector2(24,-16+b+wing_flap),Vector2(20,-2+b),Vector2(11,4+b)]),storm.darkened(0.15))
+	draw_line(Vector2(-14,-10+b),Vector2(-18,-2+b),wht,2.0)
+	draw_line(Vector2(-18,-2+b),Vector2(-15,4+b),wht,2.0)
+	draw_line(Vector2(14,-10+b),Vector2(18,-2+b),wht,2.0)
+	draw_line(Vector2(18,-2+b),Vector2(15,4+b),wht,2.0)
+	draw_circle(Vector2(-12,-4+b),5,gold.darkened(0.1))
+	draw_circle(Vector2(12,-4+b),5,gold.darkened(0.1))
+	if s:
+		var ba := 0.6 + sin(_anim_time * 8.0) * 0.4
+		draw_arc(Vector2(0,-8+b),26,0,TAU,32,Color(storm.r,storm.g,storm.b,ba),3.0)

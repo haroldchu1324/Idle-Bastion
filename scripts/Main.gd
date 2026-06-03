@@ -210,6 +210,8 @@ func _ready() -> void:
 	_hud.prestige_confirmed.connect(_do_prestige)
 	_hud.roll_turret_requested.connect(_on_roll_turret_requested)
 	_hud.roll_upgrade_requested.connect(_on_roll_upgrade_requested)
+	_hud.recipe_fusion_requested.connect(_on_recipe_fusion_requested)
+	_hud.upgrade_merge_requested.connect(_on_upgrade_merge_requested)
 	GameData.run_upg_damage    = 0
 	GameData.run_upg_range     = 0
 	GameData.run_upg_fire_rate = 0
@@ -248,7 +250,7 @@ func _process(delta: float) -> void:
 	if is_instance_valid(_held_tower):
 		_held_tower.position = mp + Vector2(0, -12)
 
-	if _build_grid.is_in_grid(mp):
+	if is_instance_valid(_held_tower) and _build_grid.is_in_grid(mp):
 		var t : Vector2i = _build_grid.world_to_tile(mp)
 		_build_grid.hovered_tile = t if _build_grid.can_place(t) else Vector2i(-1, -1)
 	else:
@@ -468,6 +470,108 @@ func _advance_stage() -> void:
 		return
 
 
+func _update_upgrade_indicators() -> void:
+	var counts : Dictionary = {}
+	for tile in _tower_map:
+		var tw = _tower_map[tile]
+		if not is_instance_valid(tw):
+			continue
+		var id     : String = tw.tower_data.get("id", "")
+		var rarity : String = tw.tower_data.get("rarity", "")
+		if id == "" or rarity == "legendary" or rarity == "fusion":
+			continue
+		counts[id] = counts.get(id, 0) + 1
+	for tile in _tower_map:
+		var tw = _tower_map[tile]
+		if not is_instance_valid(tw):
+			continue
+		var id     : String = tw.tower_data.get("id", "")
+		var rarity : String = tw.tower_data.get("rarity", "")
+		tw.can_upgrade = counts.get(id, 0) >= 3 and rarity != "legendary" and rarity != "fusion"
+
+
+func _count_same_type_on_map(id: String) -> int:
+	if id == "":
+		return 0
+	var count := 0
+	for tile in _tower_map:
+		var tw = _tower_map[tile]
+		if is_instance_valid(tw) and tw.tower_data.get("id", "") == id:
+			count += 1
+	return count
+
+
+func _on_upgrade_merge_requested() -> void:
+	if not is_instance_valid(_selected_tower):
+		return
+	var td      : Dictionary = _selected_tower.tower_data
+	var id      : String     = td.get("id", "")
+	var rarity  : String     = td.get("rarity", "")
+	if id == "" or rarity == "legendary" or rarity == "fusion":
+		return
+	if _count_same_type_on_map(id) < 3:
+		return
+
+	var next_rarity : String = SummonSystem.get_rarity_next(rarity)
+
+	# Find the selected tower's tile
+	var sel_tile := Vector2i(-1, -1)
+	for tile in _tower_map:
+		if _tower_map[tile] == _selected_tower:
+			sel_tile = tile
+			break
+
+	_hud.hide_tower_info()
+	_deselect_tower()
+
+	# Remove 3 of this type from the map
+	var removed := 0
+	var tiles_to_remove : Array = []
+	if sel_tile != Vector2i(-1, -1):
+		tiles_to_remove.append(sel_tile)
+		removed += 1
+	for tile in _tower_map:
+		if removed >= 3:
+			break
+		if tile == sel_tile:
+			continue
+		var tw = _tower_map[tile]
+		if is_instance_valid(tw) and tw.tower_data.get("id", "") == id:
+			tiles_to_remove.append(tile)
+			removed += 1
+	for tile in tiles_to_remove:
+		var tw = _tower_map[tile]
+		if is_instance_valid(tw):
+			tw.queue_free()
+		_tower_map.erase(tile)
+		_build_grid.unplace(tile)
+
+	# Place one random turret of the next rarity
+	var raw : Dictionary = SummonSystem.get_random_turret_by_rarity(next_rarity)
+	var tidx : int = raw.get("idx", 0)
+	raw["damage"]    = raw["damage"]    * GameData.final_damage_mult(tidx)
+	raw["range"]     = raw["range"]     * GameData.final_range_mult(tidx)
+	raw["fire_rate"] = raw["fire_rate"] * GameData.final_fire_rate_mult(tidx)
+	_place_turret_random(raw)
+	_hud.show_notification("⬆  %s!" % raw.get("name", "Upgraded"))
+	_refresh_hud()
+
+
+func _get_all_owned_turret_ids() -> Dictionary:
+	var ids : Dictionary = {}
+	for tile in _tower_map:
+		var tw = _tower_map[tile]
+		if is_instance_valid(tw):
+			var tid : String = tw.tower_data.get("id", "")
+			if tid != "":
+				ids[tid] = true
+	for t in SummonSystem.bench:
+		var tid : String = t.get("id", "")
+		if tid != "":
+			ids[tid] = true
+	return ids
+
+
 func _refresh_hud() -> void:
 	var total_waves  : int  = STAGES[min(_stage, STAGES.size()) - 1]["waves"].size()
 	var can_next     : bool = _wave_active and not _boss_active
@@ -479,12 +583,15 @@ func _refresh_hud() -> void:
 	_hud.refresh(_gold, _lives, _stage, _wave_in_stage, total_waves,
 				 _wave_active, _boss_active, _boss_timer, can_next,
 				 boss_hp, boss_max_hp)
+	_hud.update_recipe_notifications(SummonSystem.get_available_recipe_fusions(_tower_map), _get_all_owned_turret_ids())
+	_update_upgrade_indicators()
 
 
 # ── Gacha roll system ─────────────────────────────────────────────────────────
 
-const TURRET_ROLL_COST  : int = 80
-const UPGRADE_ROLL_COST : int = 60
+const TURRET_ROLL_COST_BASE : int = 80
+var   _turret_roll_cost     : int = 80
+const UPGRADE_ROLL_COST     : int = 60
 
 func _get_turret_pool() -> Array:
 	var pool : Array = []
@@ -492,6 +599,8 @@ func _get_turret_pool() -> Array:
 		pool.append(t.duplicate())
 	for id in SummonSystem.TURRET_DEFS:
 		var def : Dictionary = SummonSystem.TURRET_DEFS[id].duplicate()
+		if def.get("rarity", "") == "fusion":
+			continue   # fusion turrets are crafted only, never rolled
 		if not def.has("cost"):
 			var rar : String = def.get("rarity", "common")
 			def["cost"] = RARITY_COSTS.get(rar, 100)
@@ -500,17 +609,17 @@ func _get_turret_pool() -> Array:
 
 
 func _on_roll_turret_requested() -> void:
-	if _gold < TURRET_ROLL_COST:
-		_hud.show_roll_error("Not enough gold! (need %d)" % TURRET_ROLL_COST)
+	if _gold < _turret_roll_cost:
+		_hud.show_roll_error("Not enough gold! (need %d)" % _turret_roll_cost)
 		return
 	var free : Array = _get_free_tiles()
 	if free.is_empty():
 		_hud.show_roll_error("Map is full! Move or wait.")
 		return
-	_gold -= TURRET_ROLL_COST
-	var pool : Array = _get_turret_pool()
-	pool.shuffle()
-	var raw : Dictionary = pool[0].duplicate()
+	_gold -= _turret_roll_cost
+	_turret_roll_cost += 1
+	_hud.update_pull_cost(_turret_roll_cost)
+	var raw : Dictionary = SummonSystem.roll_summon("basic")
 	var idx : int = raw.get("idx", 0)
 	raw["damage"]    = raw["damage"]    * GameData.final_damage_mult(idx)
 	raw["range"]     = raw["range"]     * GameData.final_range_mult(idx)
@@ -556,6 +665,48 @@ func _apply_upgrade_direct(idx: int) -> void:
 		2: GameData.run_upg_fire_rate += 1
 		3: GameData.run_upg_lives     += 1
 
+
+func _on_recipe_fusion_requested(result_id: String) -> void:
+	var available : Array = SummonSystem.get_available_recipe_fusions(_tower_map)
+	var fusion    : Dictionary = {}
+	for f in available:
+		if f["recipe"]["result"] == result_id:
+			fusion = f
+			break
+	if fusion.is_empty():
+		return
+	var result_def    : Dictionary = SummonSystem.TURRET_DEFS.get(result_id, {})
+	if result_def.is_empty():
+		return
+
+	# Remove placed material towers from the board
+	for tile in fusion["placed_tiles"]:
+		if _tower_map.has(tile):
+			var tw = _tower_map[tile]
+			if is_instance_valid(tw):
+				tw.queue_free()
+			_tower_map.erase(tile)
+			_build_grid.unplace(tile)
+
+	# Remove bench material turrets (consume from bench)
+	var sorted_bench_idxs : Array = fusion["bench_indices"].duplicate()
+	sorted_bench_idxs.sort()
+	sorted_bench_idxs.reverse()  # remove highest indices first to keep lower valid
+	for bi in sorted_bench_idxs:
+		SummonSystem.remove_from_bench(bi)
+
+	# Apply global multipliers to the fusion turret
+	var raw : Dictionary = result_def.duplicate()
+	var tidx : int = raw.get("idx", 0)
+	raw["damage"]    = raw["damage"]    * GameData.final_damage_mult(tidx)
+	raw["range"]     = raw["range"]     * GameData.final_range_mult(tidx)
+	raw["fire_rate"] = raw["fire_rate"] * GameData.final_fire_rate_mult(tidx)
+
+	# Place the fusion turret on the map
+	_place_turret_random(raw)
+	_hud.show_turret_result(raw)
+	_hud.show_notification("✨ Fusion! %s!" % result_def.get("name", ""))
+	_refresh_hud()
 
 
 func _place_turret_random(data: Dictionary) -> void:
@@ -621,7 +772,12 @@ func _unhandled_input(event: InputEvent) -> void:
 	_drag_pending_tile = Vector2i(-1, -1)
 	if not is_instance_valid(_held_tower):
 		if is_instance_valid(_selected_tower) and mp.distance_to(_press_position) <= _CLICK_MAX_DIST:
-			_hud.show_tower_info(_selected_tower)
+			var _merge_cnt := _count_same_type_on_map(_selected_tower.tower_data.get("id", ""))
+			_hud.show_tower_info(_selected_tower, _merge_cnt)
+			if _selected_tower.can_upgrade:
+				_hud.show_upgrade_popup(_selected_tower.position)
+			else:
+				_hud.hide_upgrade_popup()
 		return
 
 	if _build_grid.is_in_grid(mp):
@@ -656,6 +812,7 @@ func _place_held_tower(tile: Vector2i) -> void:
 	_held_tower.move_to(_build_grid.tile_center(tile))
 	_held_tower = null
 	_held_from_tile = Vector2i(-1, -1)
+	_hud.update_recipe_notifications(SummonSystem.get_available_recipe_fusions(_tower_map), _get_all_owned_turret_ids())
 
 
 func _swap_towers(other_tile: Vector2i) -> void:
@@ -667,6 +824,7 @@ func _swap_towers(other_tile: Vector2i) -> void:
 	_held_tower.move_to(_build_grid.tile_center(other_tile))
 	_held_tower     = null
 	_held_from_tile = Vector2i(-1, -1)
+	_hud.update_recipe_notifications(SummonSystem.get_available_recipe_fusions(_tower_map), _get_all_owned_turret_ids())
 
 
 func _cancel_hold() -> void:
@@ -691,6 +849,7 @@ func _deselect_tower() -> void:
 		_selected_tower.selected = false
 	_selected_tower = null
 	_hud.hide_tower_info()
+	_hud.hide_upgrade_popup()
 
 
 func _on_wave_btn_pressed() -> void:

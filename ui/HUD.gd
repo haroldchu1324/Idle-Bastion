@@ -8,6 +8,8 @@ signal upgrade_purchased(idx: int, cost: int)
 signal prestige_confirmed
 signal roll_turret_requested
 signal roll_upgrade_requested
+signal recipe_fusion_requested(result_id: String)
+signal upgrade_merge_requested
 
 # ── Palette ───────────────────────────────────────────────────────────────────
 const C_BG       := Color(0.10, 0.07, 0.04, 0.94)
@@ -49,6 +51,7 @@ var _tab_pages   : Array = []
 
 # Gacha result state
 var _turret_result_card  : Control = null
+var _roll_turret_btn     : Button  = null
 var _upgrade_result_card : Control = null
 var _roll_status_lbl     : Label   = null
 var _upg_roll_status_lbl : Label   = null
@@ -69,6 +72,7 @@ var _info_dmg_lbl       : Label
 var _info_rng_lbl       : Label
 var _info_rate_lbl      : Label
 var _info_effect_lbl    : Label
+var _info_upgrade_btn   : Button
 
 # Screens
 var _game_over_screen   : Control
@@ -81,6 +85,22 @@ var _go_stage_lbl       : Label
 var _btn_tweens : Dictionary = {}
 var _font_reg   : FontFile
 var _font_bold  : FontFile
+
+# Floating in-world upgrade button
+var _upgrade_popup_btn : Button = null
+
+# Recipe notification panel (right side of track)
+var _recipe_panel        : Control = null
+var _recipe_notif_cards  : Array   = []
+var _recipe_scroll_offset: int     = 0
+var _cached_fusions      : Array   = []
+var _recipe_scroll_up    : Button  = null
+var _recipe_scroll_dn    : Button  = null
+
+# Recipe book modal
+var _recipe_modal        : Control = null
+var _recipe_btn_badge    : Label   = null
+var _recipe_row_refs     : Array   = []   # [{result_id, badge_lbl, craft_btn, mat_refs:[{panel,id}]}]
 
 const _UPG_DATA : Array = [
 	["⚔  Tower Damage", "Increase all tower damage by 15%.", 100],
@@ -181,66 +201,8 @@ func show_boss_notification() -> void:
 
 # ── Gacha result display ──────────────────────────────────────────────────────
 
-func show_turret_result(data: Dictionary) -> void:
-	if _turret_result_card == null or _roll_status_lbl == null:
-		return
-	for child in _turret_result_card.get_children():
-		child.queue_free()
-
-	_roll_status_lbl.text      = ""
-	_roll_status_lbl.modulate  = C_WHITE
-
-	var rarity : String = data.get("rarity", "")
-	var rarity_cols := {"common": Color(0.7,0.7,0.7), "rare": Color(0.25,0.55,1.0),
-						"epic": Color(0.72,0.25,0.90), "legendary": Color(1.0,0.72,0.10)}
-	var rc : Color = rarity_cols.get(rarity, C_WHITE)
-
-	# Background tint based on color
-	var bg_col : Color = (data.get("color", Color(0.3,0.3,0.3)) as Color).darkened(0.55)
-	_turret_result_card.add_theme_stylebox_override("panel", _rounded(bg_col))
-
-	var cw := 248   # card width
-
-	# Turret preview — left side of card, vertically centered
-	var preview := _TurretPreview.new()
-	preview.turret_data = data
-	preview.position    = Vector2(4, 8)
-	_turret_result_card.add_child(preview)
-
-	# Rarity badge and name — right of preview
-	var tx := 72
-	if rarity != "":
-		var rar_lbl := _label(rarity.capitalize(), _font_bold, 11, rc)
-		rar_lbl.position = Vector2(tx, 10)
-		rar_lbl.size     = Vector2(cw - tx - 4, 18)
-		_turret_result_card.add_child(rar_lbl)
-
-	var name_lbl := _label(data.get("name", "Tower"), _font_bold, 14, C_WHITE)
-	name_lbl.position      = Vector2(tx, 28)
-	name_lbl.size          = Vector2(cw - tx - 4, 22)
-	name_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD
-	_turret_result_card.add_child(name_lbl)
-
-	var stats := "⚔ %.1f  🎯 %.0f  ⚡ %.1f/s" % [data.get("damage",0.0), data.get("range",0.0), data.get("fire_rate",0.0)]
-	var stat_lbl := _label(stats, _font_reg, 10, Color(0.85, 0.85, 0.85))
-	stat_lbl.position = Vector2(tx, 52)
-	stat_lbl.size     = Vector2(cw - tx - 4, 18)
-	_turret_result_card.add_child(stat_lbl)
-
-	if data.get("effect", "none") != "none":
-		var eff_map := {"pierce": "🔵 Pierce", "aoe": "💥 AoE", "chain": "⚡ Chain",
-						"lightning": "⚡ Lightning", "storm_chain": "🌩 Storm Chain",
-						"slow_zone": "❄ Slow Zone"}
-		var eff_lbl := _label(eff_map.get(data["effect"], ""), _font_bold, 10, C_GOLD)
-		eff_lbl.position = Vector2(tx, 70)
-		eff_lbl.size     = Vector2(cw - tx - 4, 16)
-		_turret_result_card.add_child(eff_lbl)
-
-	var placed_lbl := _label("✅  Placed on map!", _font_bold, 11, C_BTN.lightened(0.2))
-	placed_lbl.position             = Vector2(0, 152)
-	placed_lbl.size                 = Vector2(cw, 22)
-	placed_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_turret_result_card.add_child(placed_lbl)
+func show_turret_result(_data: Dictionary) -> void:
+	pass
 
 
 func show_upgrade_result(upg_idx: int, new_level: int) -> void:
@@ -303,6 +265,11 @@ func _upg_bonus_name(idx: int) -> String:
 	return ""
 
 
+func update_pull_cost(cost: int) -> void:
+	if is_instance_valid(_roll_turret_btn):
+		_roll_turret_btn.text = "🎲  Pull Turret  (%dg)" % cost
+
+
 func show_roll_error(msg: String) -> void:
 	_show_notification(msg)
 
@@ -350,6 +317,7 @@ func _refresh_upg_row_set(rows: Array, _ingame: bool) -> void:
 # ── Build all UI ──────────────────────────────────────────────────────────────
 
 func _build_ui() -> void:
+	_build_upgrade_popup()
 	_build_rarity_modal()       # build modal before right panel so info_btn can reference it
 	_build_right_panel()
 	_build_wave_label()
@@ -359,6 +327,8 @@ func _build_ui() -> void:
 	_build_game_over_screen()
 	_build_upgrades_screen()
 	_build_victory_screen()
+	_build_recipe_panel()
+	_build_recipe_modal()
 
 
 # ── Top labels ────────────────────────────────────────────────────────────────
@@ -479,11 +449,58 @@ func _build_hud_bar() -> void:
 	speed_btn.pressed.connect(_on_speed_btn_pressed)
 	bar.add_child(speed_btn)
 
+	# Recipe button — center of bar
+	var C_RECIPE := Color(0.18, 0.42, 0.38)
+	var recipe_btn := Button.new()
+	recipe_btn.text         = "📖  Recipe"
+	recipe_btn.position     = Vector2(493, 10)
+	recipe_btn.size         = Vector2(165, 50)
+	recipe_btn.pivot_offset = Vector2(82, 25)
+	recipe_btn.focus_mode   = FOCUS_NONE
+	recipe_btn.add_theme_font_override("font",           _font_bold)
+	recipe_btn.add_theme_font_size_override("font_size", 15)
+	recipe_btn.add_theme_color_override("font_color",    C_WHITE)
+	recipe_btn.add_theme_stylebox_override("normal",  _btn_style(C_RECIPE))
+	recipe_btn.add_theme_stylebox_override("hover",   _btn_style(C_RECIPE.lightened(0.12)))
+	recipe_btn.add_theme_stylebox_override("pressed", _btn_style(C_RECIPE.darkened(0.12)))
+	recipe_btn.add_theme_stylebox_override("focus",   _btn_style(C_RECIPE))
+	recipe_btn.pressed.connect(func():
+		_tween_scale(recipe_btn, Vector2(0.92, 0.92), 0.07)
+		if is_instance_valid(_recipe_modal):
+			_refresh_recipe_modal()
+			_recipe_modal.visible = true
+	)
+	bar.add_child(recipe_btn)
+
+	# Badge showing number of available crafts
+	var badge_bg := StyleBoxFlat.new()
+	badge_bg.bg_color                   = Color(0.90, 0.15, 0.15)
+	badge_bg.corner_radius_top_left     = 11
+	badge_bg.corner_radius_top_right    = 11
+	badge_bg.corner_radius_bottom_left  = 11
+	badge_bg.corner_radius_bottom_right = 11
+	var badge_panel := Panel.new()
+	badge_panel.position     = Vector2(493 + 138, 2)
+	badge_panel.size         = Vector2(22, 22)
+	badge_panel.mouse_filter = MOUSE_FILTER_IGNORE
+	badge_panel.visible      = false
+	badge_panel.add_theme_stylebox_override("panel", badge_bg)
+	bar.add_child(badge_panel)
+	_recipe_btn_badge = _label("0", _font_bold, 12, C_WHITE)
+	_recipe_btn_badge.position             = Vector2(0, 0)
+	_recipe_btn_badge.size                 = Vector2(22, 22)
+	_recipe_btn_badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_recipe_btn_badge.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	_recipe_btn_badge.mouse_filter         = MOUSE_FILTER_IGNORE
+	badge_panel.add_child(_recipe_btn_badge)
+	# Store badge_panel ref on the label's metadata so update_recipe_notifications can show/hide it
+	_recipe_btn_badge.set_meta("panel", badge_panel)
+
 	wave_btn = Button.new()
 	wave_btn.text         = "▶  Start Wave 1  [Space]"
-	wave_btn.position     = Vector2(500, 10)
-	wave_btn.size         = Vector2(280, 50)
-	wave_btn.pivot_offset = Vector2(140, 25)
+	wave_btn.position     = Vector2(668, 10)
+	wave_btn.size         = Vector2(345, 50)
+	wave_btn.pivot_offset = Vector2(172, 25)
 	wave_btn.focus_mode   = FOCUS_NONE
 	wave_btn.add_theme_font_override("font",           _font_bold)
 	wave_btn.add_theme_font_size_override("font_size", 17)
@@ -498,6 +515,38 @@ func _build_hud_bar() -> void:
 		wave_pressed.emit()
 	)
 	bar.add_child(wave_btn)
+
+
+func _build_upgrade_popup() -> void:
+	var C_UPG := Color(0.42, 0.24, 0.06)
+	_upgrade_popup_btn = Button.new()
+	_upgrade_popup_btn.text       = "⬆  Upgrade"
+	_upgrade_popup_btn.size       = Vector2(88, 26)
+	_upgrade_popup_btn.focus_mode = FOCUS_NONE
+	_upgrade_popup_btn.visible    = false
+	_upgrade_popup_btn.z_index    = 20
+	_upgrade_popup_btn.add_theme_font_override("font",           _font_bold)
+	_upgrade_popup_btn.add_theme_font_size_override("font_size", 12)
+	_upgrade_popup_btn.add_theme_color_override("font_color",    C_WHITE)
+	_upgrade_popup_btn.add_theme_stylebox_override("normal",  _btn_style(C_UPG))
+	_upgrade_popup_btn.add_theme_stylebox_override("hover",   _btn_style(C_UPG.lightened(0.18)))
+	_upgrade_popup_btn.add_theme_stylebox_override("pressed", _btn_style(C_UPG.darkened(0.15)))
+	_upgrade_popup_btn.add_theme_stylebox_override("focus",   _btn_style(C_UPG))
+	_upgrade_popup_btn.pressed.connect(func(): upgrade_merge_requested.emit())
+	add_child(_upgrade_popup_btn)
+
+
+func show_upgrade_popup(world_pos: Vector2) -> void:
+	if not is_instance_valid(_upgrade_popup_btn):
+		return
+	# Center the button horizontally above the tower
+	_upgrade_popup_btn.position = world_pos + Vector2(-44, -52)
+	_upgrade_popup_btn.visible  = true
+
+
+func hide_upgrade_popup() -> void:
+	if is_instance_valid(_upgrade_popup_btn):
+		_upgrade_popup_btn.visible = false
 
 
 func _build_rarity_modal() -> void:
@@ -757,7 +806,7 @@ func _fill_turrets_tab(page: Control) -> void:
 	desc.autowrap_mode        = TextServer.AUTOWRAP_WORD
 	page.add_child(desc)
 
-	var cost_lbl := _label("💰 80 gold · any rarity!", _font_bold, 13, C_GOLD)
+	var cost_lbl := _label("Click  ℹ  for rarity odds", _font_bold, 12, C_DIM)
 	cost_lbl.position             = Vector2(0, 84)
 	cost_lbl.size                 = Vector2(w, 22)
 	cost_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -782,6 +831,7 @@ func _fill_turrets_tab(page: Control) -> void:
 		roll_turret_requested.emit()
 	)
 	page.add_child(roll_btn)
+	_roll_turret_btn = roll_btn
 
 	# Connect ℹ to open the centered rarity modal
 	info_btn.pressed.connect(func():
@@ -789,6 +839,7 @@ func _fill_turrets_tab(page: Control) -> void:
 			_rarity_modal.visible = true
 			_refresh_rarity_modal()
 	)
+
 
 
 # ── Upgrades Tab (Gacha) ──────────────────────────────────────────────────────
@@ -864,7 +915,7 @@ func _fill_upgrades_tab(page: Control) -> void:
 
 func _build_tower_info_panel() -> void:
 	const PW : int = 210   # panel width
-	const PH : int = 318   # panel height
+	const PH : int = 358   # panel height
 
 	var info_style := _rounded(C_PANEL)
 	info_style.border_width_left   = 2
@@ -977,14 +1028,25 @@ func _build_tower_info_panel() -> void:
 	div3.mouse_filter = MOUSE_FILTER_IGNORE
 	panel.add_child(div3)
 
-	var hint := _label("Click to deselect", _font_reg, 10, Color(0.40,0.40,0.40))
-	hint.position = Vector2(0,294); hint.size = Vector2(PW, 20)
-	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hint.mouse_filter = MOUSE_FILTER_IGNORE
-	panel.add_child(hint)
+	var C_UPG := Color(0.48, 0.28, 0.08)
+	_info_upgrade_btn = Button.new()
+	_info_upgrade_btn.text         = "⬆  Upgrade  (3×)"
+	_info_upgrade_btn.position     = Vector2(8, 298)
+	_info_upgrade_btn.size         = Vector2(PW - 16, 30)
+	_info_upgrade_btn.focus_mode   = FOCUS_NONE
+	_info_upgrade_btn.visible      = false
+	_info_upgrade_btn.add_theme_font_override("font",           _font_bold)
+	_info_upgrade_btn.add_theme_font_size_override("font_size", 13)
+	_info_upgrade_btn.add_theme_color_override("font_color",    C_WHITE)
+	_info_upgrade_btn.add_theme_stylebox_override("normal",  _btn_style(C_UPG))
+	_info_upgrade_btn.add_theme_stylebox_override("hover",   _btn_style(C_UPG.lightened(0.15)))
+	_info_upgrade_btn.add_theme_stylebox_override("pressed", _btn_style(C_UPG.darkened(0.15)))
+	_info_upgrade_btn.add_theme_stylebox_override("focus",   _btn_style(C_UPG))
+	_info_upgrade_btn.pressed.connect(func(): upgrade_merge_requested.emit())
+	panel.add_child(_info_upgrade_btn)
 
 
-func show_tower_info(tower) -> void:
+func show_tower_info(tower, merge_count: int = 0) -> void:
 	if not is_instance_valid(tower):
 		return
 	var d : Dictionary = tower.tower_data
@@ -996,6 +1058,7 @@ func show_tower_info(tower) -> void:
 		"rare":      Color(0.25, 0.55, 1.00),
 		"epic":      Color(0.72, 0.25, 0.90),
 		"legendary": Color(1.00, 0.72, 0.10),
+		"fusion":    Color(0.20, 1.00, 0.85),
 	}
 	var rarity : String = d.get("rarity", "")
 	var rc     : Color  = rarity_cols.get(rarity, Color(0.5, 0.5, 0.5, 0.4))
@@ -1020,11 +1083,18 @@ func show_tower_info(tower) -> void:
 					"lightning": "Lightning", "storm_chain": "Storm Chain",
 					"slow_zone": "❄ Slow Zone"}
 	_info_effect_lbl.text = eff_map.get(d.get("effect", "none"), "—")
+	var can_upgrade : bool = merge_count >= 3 and \
+		rarity != "legendary" and rarity != "fusion" and rarity != ""
+	if is_instance_valid(_info_upgrade_btn):
+		_info_upgrade_btn.visible = can_upgrade
 	_info_panel.visible = true
 
 
 func hide_tower_info() -> void:
 	_info_panel.visible = false
+	if is_instance_valid(_info_upgrade_btn):
+		_info_upgrade_btn.visible = false
+	hide_upgrade_popup()
 
 
 # ── Notification ──────────────────────────────────────────────────────────────
@@ -1032,7 +1102,7 @@ func hide_tower_info() -> void:
 func _build_notification() -> void:
 	_notify_lbl = Label.new()
 	_notify_lbl.text     = ""
-	_notify_lbl.position = Vector2(310, 320)
+	_notify_lbl.position = Vector2(350, 320)
 	_notify_lbl.size     = Vector2(400, 60)
 	_notify_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_notify_lbl.add_theme_font_override("font",           _font_bold)
@@ -1050,7 +1120,7 @@ func _show_notification(msg: String) -> void:
 	if _notify_tween and is_instance_valid(_notify_tween):
 		_notify_tween.kill()
 	_notify_lbl.modulate.a = 1.0
-	_notify_lbl.position   = Vector2(310, 320)
+	_notify_lbl.position   = Vector2(350, 320)
 	_notify_tween = create_tween()
 	_notify_tween.tween_property(_notify_lbl, "position:y", 270.0, 1.0) \
 		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
@@ -1361,6 +1431,468 @@ func _on_victory_btn(idx: int) -> void:
 			prestige_confirmed.emit()
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# RECIPE NOTIFICATION PANEL  (right side of track, x=865–1012)
+# ══════════════════════════════════════════════════════════════════════════════
+
+func _build_recipe_panel() -> void:
+	# Right-side panel replaced by modal + Recipe button badge — keep node but hide it
+	var panel := Control.new()
+	panel.position     = Vector2(862, 68)
+	panel.size         = Vector2(152, 576)
+	panel.mouse_filter = MOUSE_FILTER_IGNORE
+	panel.visible      = false
+	add_child(panel)
+	_recipe_panel = panel
+
+	# Scroll up button
+	_recipe_scroll_up = Button.new()
+	_recipe_scroll_up.text         = "▲"
+	_recipe_scroll_up.position     = Vector2(0, 0)
+	_recipe_scroll_up.size         = Vector2(152, 28)
+	_recipe_scroll_up.focus_mode   = FOCUS_NONE
+	_recipe_scroll_up.visible      = false
+	_recipe_scroll_up.add_theme_font_override("font",           _font_bold)
+	_recipe_scroll_up.add_theme_font_size_override("font_size", 12)
+	_recipe_scroll_up.add_theme_color_override("font_color",    C_WHITE)
+	_recipe_scroll_up.add_theme_stylebox_override("normal",  _btn_style(Color(0.18, 0.28, 0.38, 0.9)))
+	_recipe_scroll_up.add_theme_stylebox_override("hover",   _btn_style(Color(0.25, 0.38, 0.50, 0.9)))
+	_recipe_scroll_up.add_theme_stylebox_override("pressed", _btn_style(Color(0.12, 0.20, 0.28, 0.9)))
+	_recipe_scroll_up.add_theme_stylebox_override("focus",   _btn_style(Color(0.18, 0.28, 0.38, 0.9)))
+	_recipe_scroll_up.pressed.connect(func():
+		_recipe_scroll_offset = maxi(0, _recipe_scroll_offset - 1)
+		_rebuild_recipe_cards()
+	)
+	panel.add_child(_recipe_scroll_up)
+
+	# Scroll down button
+	_recipe_scroll_dn = Button.new()
+	_recipe_scroll_dn.text         = "▼"
+	_recipe_scroll_dn.position     = Vector2(0, 548)
+	_recipe_scroll_dn.size         = Vector2(152, 28)
+	_recipe_scroll_dn.focus_mode   = FOCUS_NONE
+	_recipe_scroll_dn.visible      = false
+	_recipe_scroll_dn.add_theme_font_override("font",           _font_bold)
+	_recipe_scroll_dn.add_theme_font_size_override("font_size", 12)
+	_recipe_scroll_dn.add_theme_color_override("font_color",    C_WHITE)
+	_recipe_scroll_dn.add_theme_stylebox_override("normal",  _btn_style(Color(0.18, 0.28, 0.38, 0.9)))
+	_recipe_scroll_dn.add_theme_stylebox_override("hover",   _btn_style(Color(0.25, 0.38, 0.50, 0.9)))
+	_recipe_scroll_dn.add_theme_stylebox_override("pressed", _btn_style(Color(0.12, 0.20, 0.28, 0.9)))
+	_recipe_scroll_dn.add_theme_stylebox_override("focus",   _btn_style(Color(0.18, 0.28, 0.38, 0.9)))
+	_recipe_scroll_dn.pressed.connect(func():
+		_recipe_scroll_offset += 1
+		_rebuild_recipe_cards()
+	)
+	panel.add_child(_recipe_scroll_dn)
+
+
+var _all_owned_ids : Dictionary = {}
+
+func update_recipe_notifications(available_fusions: Array, all_owned_ids: Dictionary = {}) -> void:
+	_cached_fusions  = available_fusions
+	_all_owned_ids   = all_owned_ids
+	# Update Recipe button badge
+	if is_instance_valid(_recipe_btn_badge):
+		var count : int = available_fusions.size()
+		var badge_panel = _recipe_btn_badge.get_meta("panel") as Panel
+		if is_instance_valid(badge_panel):
+			badge_panel.visible = count > 0
+		_recipe_btn_badge.text = str(count)
+	# Refresh modal if it's open
+	if is_instance_valid(_recipe_modal) and _recipe_modal.visible:
+		_refresh_recipe_modal()
+
+
+func _rebuild_recipe_cards() -> void:
+	# Clear old cards
+	for c in _recipe_notif_cards:
+		if is_instance_valid(c):
+			c.queue_free()
+	_recipe_notif_cards.clear()
+
+	var total   : int  = _cached_fusions.size()
+	var has_scroll_up : bool = _recipe_scroll_offset > 0
+	var has_scroll_dn : bool = (_recipe_scroll_offset + 4) < total
+	_recipe_scroll_up.visible = has_scroll_up
+	_recipe_scroll_dn.visible = has_scroll_dn
+
+	const CARD_H   : int = 134
+	const CARD_GAP : int = 6
+	var y_start    : int = 32 if has_scroll_up else 0
+
+	for i in range(4):
+		var fi : int = i + _recipe_scroll_offset
+		if fi >= total:
+			break
+		var fusion    : Dictionary = _cached_fusions[fi]
+		var recipe    : Dictionary = fusion["recipe"]
+		var result_id : String     = recipe["result"]
+		var result_def: Dictionary = SummonSystem.TURRET_DEFS.get(result_id, {})
+		if result_def.is_empty():
+			continue
+
+		var card := Panel.new()
+		card.position     = Vector2(0, y_start + i * (CARD_H + CARD_GAP))
+		card.size         = Vector2(152, CARD_H)
+		card.mouse_filter = MOUSE_FILTER_STOP
+
+		var bg_col : Color = (result_def.get("color", Color(0.3, 0.6, 0.5)) as Color).darkened(0.55)
+		var border_s := _rounded(bg_col)
+		border_s.border_width_left   = 2
+		border_s.border_width_right  = 2
+		border_s.border_width_top    = 2
+		border_s.border_width_bottom = 2
+		border_s.border_color        = Color(0.20, 1.00, 0.85, 0.85)
+		card.add_theme_stylebox_override("panel", border_s)
+		_recipe_panel.add_child(card)
+		_recipe_notif_cards.append(card)
+
+		# Turret preview circle background
+		var circle_bg := ColorRect.new()
+		circle_bg.color        = Color(0.12, 0.18, 0.18, 0.95)
+		circle_bg.position     = Vector2(10, 10)
+		circle_bg.size         = Vector2(64, 64)
+		circle_bg.mouse_filter = MOUSE_FILTER_IGNORE
+		card.add_child(circle_bg)
+
+		var preview := _TurretPreview.new()
+		preview.turret_data = result_def
+		preview.position    = Vector2(10, 10)
+		card.add_child(preview)
+
+		# Exclamation badge top-right of circle
+		var badge := Panel.new()
+		badge.position     = Vector2(58, 2)
+		badge.size         = Vector2(22, 22)
+		badge.mouse_filter = MOUSE_FILTER_IGNORE
+		var badge_s := StyleBoxFlat.new()
+		badge_s.bg_color                   = Color(0.95, 0.18, 0.18)
+		badge_s.corner_radius_top_left     = 11
+		badge_s.corner_radius_top_right    = 11
+		badge_s.corner_radius_bottom_left  = 11
+		badge_s.corner_radius_bottom_right = 11
+		badge.add_theme_stylebox_override("panel", badge_s)
+		card.add_child(badge)
+		var badge_lbl := _label("!", _font_bold, 14, C_WHITE)
+		badge_lbl.position             = Vector2(0, 0)
+		badge_lbl.size                 = Vector2(22, 22)
+		badge_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		badge_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+		badge_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+		badge.add_child(badge_lbl)
+
+		# Name label
+		var name_lbl := _label(result_def.get("name", "?"), _font_bold, 11, Color(0.20, 1.00, 0.85))
+		name_lbl.position      = Vector2(4, 78)
+		name_lbl.size          = Vector2(144, 20)
+		name_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD
+		name_lbl.mouse_filter  = MOUSE_FILTER_IGNORE
+		name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		card.add_child(name_lbl)
+
+		# "Craft!" button
+		var C_CRAFT := Color(0.12, 0.50, 0.42)
+		var craft_btn := Button.new()
+		craft_btn.text         = "✨ Craft!"
+		craft_btn.position     = Vector2(6, 100)
+		craft_btn.size         = Vector2(140, 28)
+		craft_btn.focus_mode   = FOCUS_NONE
+		craft_btn.add_theme_font_override("font",           _font_bold)
+		craft_btn.add_theme_font_size_override("font_size", 12)
+		craft_btn.add_theme_color_override("font_color",    C_WHITE)
+		craft_btn.add_theme_stylebox_override("normal",  _btn_style(C_CRAFT))
+		craft_btn.add_theme_stylebox_override("hover",   _btn_style(C_CRAFT.lightened(0.15)))
+		craft_btn.add_theme_stylebox_override("pressed", _btn_style(C_CRAFT.darkened(0.15)))
+		craft_btn.add_theme_stylebox_override("focus",   _btn_style(C_CRAFT))
+		var capture_result_id := (_cached_fusions[fi]["recipe"]["result"]) as String
+		craft_btn.pressed.connect(func():
+			recipe_fusion_requested.emit(capture_result_id)
+		)
+		card.add_child(craft_btn)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RECIPE BOOK MODAL
+# ══════════════════════════════════════════════════════════════════════════════
+
+func _build_recipe_modal() -> void:
+	_recipe_row_refs.clear()
+
+	var overlay := ColorRect.new()
+	overlay.color        = Color(0, 0, 0, 0.80)
+	overlay.position     = Vector2.ZERO
+	overlay.size         = Vector2(1280, 720)
+	overlay.mouse_filter = MOUSE_FILTER_STOP
+	overlay.visible      = false
+	add_child(overlay)
+	_recipe_modal = overlay
+
+	const MW : int = 900
+	const MH : int = 660
+	var card := Panel.new()
+	card.position = Vector2((1280 - MW) / 2, (720 - MH) / 2)
+	card.size     = Vector2(MW, MH)
+	card.add_theme_stylebox_override("panel", _rounded(C_PANEL))
+	overlay.add_child(card)
+
+	# Title bar
+	var title_bar := Panel.new()
+	title_bar.position = Vector2.ZERO
+	title_bar.size     = Vector2(MW, 58)
+	title_bar.add_theme_stylebox_override("panel", _flat(Color(0.08, 0.25, 0.22), 10))
+	card.add_child(title_bar)
+
+	var title_lbl := _label("📖  Recipe Book  —  Special Fusion Turrets", _font_bold, 20, Color(0.20, 1.00, 0.85))
+	title_lbl.position             = Vector2(0, 0)
+	title_lbl.size                 = Vector2(MW - 50, 58)
+	title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	title_bar.add_child(title_lbl)
+
+	var xbtn := Button.new()
+	xbtn.text       = "✕"
+	xbtn.position   = Vector2(MW - 46, 11)
+	xbtn.size       = Vector2(36, 36)
+	xbtn.focus_mode = FOCUS_NONE
+	xbtn.add_theme_font_override("font",           _font_bold)
+	xbtn.add_theme_font_size_override("font_size", 16)
+	xbtn.add_theme_color_override("font_color",    C_WHITE)
+	xbtn.add_theme_stylebox_override("normal",  _btn_style(Color(0.55,0.12,0.12)))
+	xbtn.add_theme_stylebox_override("hover",   _btn_style(Color(0.75,0.18,0.18)))
+	xbtn.add_theme_stylebox_override("pressed", _btn_style(Color(0.40,0.08,0.08)))
+	xbtn.add_theme_stylebox_override("focus",   _btn_style(Color(0.55,0.12,0.12)))
+	xbtn.pressed.connect(func(): overlay.visible = false)
+	title_bar.add_child(xbtn)
+
+	var hdiv := ColorRect.new()
+	hdiv.color = Color(1,1,1,0.08); hdiv.position = Vector2(12, 62); hdiv.size = Vector2(MW-24, 2)
+	card.add_child(hdiv)
+
+	const RECIPE_NAMES : Array = [
+		"venom_drake", "frost_cannon", "arcane_overlord", "dragon_lich", "tempest_warden"
+	]
+	const RARITY_COLORS_MAP : Dictionary = {
+		"common":    Color(0.78, 0.78, 0.78),
+		"rare":      Color(0.25, 0.55, 1.00),
+		"epic":      Color(0.72, 0.25, 0.90),
+		"legendary": Color(1.00, 0.72, 0.10),
+	}
+
+	for ri in range(RECIPE_NAMES.size()):
+		var result_id  : String     = RECIPE_NAMES[ri]
+		var result_def : Dictionary = SummonSystem.TURRET_DEFS.get(result_id, {})
+		if result_def.is_empty():
+			continue
+
+		var recipe_mats : Array = []
+		for rec in SummonSystem.FUSION_RECIPES:
+			if rec["result"] == result_id:
+				recipe_mats = rec["materials"]
+				break
+
+		var row_y : int = 70 + ri * 116
+
+		# Row hover bg (also used as craft-available highlight)
+		var row_bg := ColorRect.new()
+		row_bg.color        = Color(1,1,1, 0.03 if ri % 2 == 0 else 0.0)
+		row_bg.position     = Vector2(8, row_y - 4)
+		row_bg.size         = Vector2(MW - 16, 108)
+		row_bg.mouse_filter = MOUSE_FILTER_IGNORE
+		card.add_child(row_bg)
+
+		# Result preview
+		var preview := _TurretPreview.new()
+		preview.turret_data = result_def
+		preview.position    = Vector2(16, row_y + 4)
+		card.add_child(preview)
+
+		# Result name — shortened to leave room for inline craft button
+		var res_name := _label(result_def.get("name", "?"), _font_bold, 14, Color(0.20, 1.00, 0.85))
+		res_name.position = Vector2(82, row_y + 8)
+		res_name.size     = Vector2(96, 22)
+		card.add_child(res_name)
+
+		# Compact craft button inline with name — hidden until craftable
+		var craft_s := StyleBoxFlat.new()
+		craft_s.bg_color                   = Color(0.14, 0.14, 0.10)
+		craft_s.corner_radius_top_left     = 5
+		craft_s.corner_radius_top_right    = 5
+		craft_s.corner_radius_bottom_left  = 5
+		craft_s.corner_radius_bottom_right = 5
+		craft_s.border_width_left   = 2; craft_s.border_width_right  = 2
+		craft_s.border_width_top    = 2; craft_s.border_width_bottom = 2
+		craft_s.border_color        = C_GOLD
+		var craft_h := craft_s.duplicate() as StyleBoxFlat
+		craft_h.bg_color = Color(0.26, 0.24, 0.10)
+		var craft_p := craft_s.duplicate() as StyleBoxFlat
+		craft_p.bg_color = Color(0.08, 0.08, 0.06)
+		var craft_btn := Button.new()
+		craft_btn.text         = "✨ Craft!"
+		craft_btn.position     = Vector2(180, row_y + 7)
+		craft_btn.size         = Vector2(74, 22)
+		craft_btn.focus_mode   = FOCUS_NONE
+		craft_btn.visible      = false
+		craft_btn.add_theme_font_override("font",           _font_bold)
+		craft_btn.add_theme_font_size_override("font_size", 11)
+		craft_btn.add_theme_color_override("font_color",    C_GOLD)
+		craft_btn.add_theme_stylebox_override("normal",  craft_s)
+		craft_btn.add_theme_stylebox_override("hover",   craft_h)
+		craft_btn.add_theme_stylebox_override("pressed", craft_p)
+		craft_btn.add_theme_stylebox_override("focus",   craft_s)
+		var cap_result_id := result_id
+		craft_btn.pressed.connect(func():
+			overlay.visible = false
+			recipe_fusion_requested.emit(cap_result_id)
+		)
+		card.add_child(craft_btn)
+
+		var res_rar := _label("✨ Fusion", _font_bold, 11, Color(0.20, 1.00, 0.85))
+		res_rar.position = Vector2(82, row_y + 32)
+		res_rar.size     = Vector2(170, 18)
+		card.add_child(res_rar)
+
+		var res_desc := _label(result_def.get("desc", ""), _font_reg, 10, C_DIM)
+		res_desc.position      = Vector2(82, row_y + 52)
+		res_desc.size          = Vector2(170, 44)
+		res_desc.autowrap_mode = TextServer.AUTOWRAP_WORD
+		card.add_child(res_desc)
+
+		# Hidden badge label (kept for _recipe_row_refs compat but invisible)
+		var badge_lbl := _label("", _font_bold, 11, C_GOLD)
+		badge_lbl.visible = false
+		card.add_child(badge_lbl)
+
+		# Arrow
+		var arrow := _label("→", _font_bold, 22, C_GOLD)
+		arrow.position = Vector2(260, row_y + 36)
+		arrow.size     = Vector2(26, 36)
+		arrow.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		card.add_child(arrow)
+
+		# Material cards
+		var mat_refs : Array = []
+		for mi in range(recipe_mats.size()):
+			var mat_id  : String     = recipe_mats[mi]
+			var mat_def : Dictionary = SummonSystem.TURRET_DEFS.get(mat_id, {})
+			if mat_def.is_empty():
+				continue
+
+			var mat_rarity : String = mat_def.get("rarity", "common")
+			var mat_col    : Color  = RARITY_COLORS_MAP.get(mat_rarity, C_WHITE)
+			const RARITY_BG : Dictionary = {
+				"common":    Color(0.26, 0.26, 0.28),
+				"rare":      Color(0.10, 0.18, 0.42),
+				"epic":      Color(0.22, 0.08, 0.36),
+				"legendary": Color(0.38, 0.24, 0.04),
+			}
+			var mat_bg_col : Color = RARITY_BG.get(mat_rarity, Color(0.22, 0.22, 0.24))
+
+			var mat_card := Panel.new()
+			mat_card.position     = Vector2(292 + mi * 118, row_y + 4)
+			mat_card.size         = Vector2(110, 100)
+			mat_card.mouse_filter = MOUSE_FILTER_IGNORE
+			var mat_style := _rounded(mat_bg_col)
+			mat_style.border_width_left   = 2
+			mat_style.border_width_right  = 2
+			mat_style.border_width_top    = 2
+			mat_style.border_width_bottom = 2
+			mat_style.border_color        = Color(0.35, 0.35, 0.35, 0.5)  # default: grey (not owned)
+			mat_card.add_theme_stylebox_override("panel", mat_style)
+			card.add_child(mat_card)
+
+			var mat_pv := _TurretPreview.new()
+			mat_pv.turret_data = mat_def
+			mat_pv.position    = Vector2(2, 4)
+			mat_card.add_child(mat_pv)
+
+			var mat_rar_lbl := _label(mat_rarity.capitalize(), _font_bold, 9, mat_col)
+			mat_rar_lbl.position             = Vector2(0, 64)
+			mat_rar_lbl.size                 = Vector2(110, 14)
+			mat_rar_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			mat_rar_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+			mat_card.add_child(mat_rar_lbl)
+
+			var mat_name_lbl := _label(mat_def.get("name", "?"), _font_bold, 10, C_WHITE)
+			mat_name_lbl.position             = Vector2(0, 78)
+			mat_name_lbl.size                 = Vector2(110, 20)
+			mat_name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			mat_name_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+			mat_card.add_child(mat_name_lbl)
+
+			# Plus between cards
+			if mi < recipe_mats.size() - 1:
+				var plus := _label("+", _font_bold, 16, C_DIM)
+				plus.position = Vector2(292 + mi * 118 + 112, row_y + 40)
+				plus.size     = Vector2(14, 24)
+				plus.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+				card.add_child(plus)
+
+			mat_refs.append({"panel": mat_card, "id": mat_id, "style": mat_style,
+							  "base_col": mat_bg_col, "rarity_col": mat_col})
+
+		_recipe_row_refs.append({
+			"result_id":  result_id,
+			"badge_lbl":  badge_lbl,
+			"craft_btn":  craft_btn,
+			"row_bg":     row_bg,
+			"mat_refs":   mat_refs,
+		})
+
+	overlay.gui_input.connect(func(ev: InputEvent):
+		if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT:
+			if not card.get_rect().has_point(card.get_parent().get_local_mouse_position()):
+				overlay.visible = false
+	)
+
+
+func _refresh_recipe_modal() -> void:
+	if _recipe_row_refs.is_empty():
+		return
+
+	var craftable_ids : Dictionary = {}
+	for fusion in _cached_fusions:
+		craftable_ids[fusion["recipe"]["result"]] = true
+
+	for row in _recipe_row_refs:
+		var result_id    : String     = row["result_id"]
+		var is_craftable : bool       = craftable_ids.has(result_id)
+		var badge_lbl    : Label      = row["badge_lbl"]
+		var craft_btn    : Button     = row["craft_btn"]
+		var row_bg       : ColorRect  = row["row_bg"]
+
+		badge_lbl.visible = is_craftable
+		if is_craftable:
+			badge_lbl.text = "✓ Can Craft"
+		craft_btn.visible = is_craftable
+
+		# Yellow highlight on the row bg when craftable
+		row_bg.color = Color(1.00, 0.85, 0.10, 0.07) if is_craftable else Color(1,1,1,0.03)
+
+		# Update material card borders: yellow if owned, gray/dark if not
+		for mat_ref in row["mat_refs"]:
+			var mat_id    : String        = mat_ref["id"]
+			var mat_style : StyleBoxFlat  = mat_ref["style"]
+			var base_col  : Color         = mat_ref["base_col"]
+			var panel     : Panel         = mat_ref["panel"]
+			var owned     : bool          = _all_owned_ids.has(mat_id)
+			if owned:
+				mat_style.bg_color     = base_col.lightened(0.10)
+				mat_style.border_color = C_GOLD
+				mat_style.border_width_left   = 2
+				mat_style.border_width_right  = 2
+				mat_style.border_width_top    = 2
+				mat_style.border_width_bottom = 2
+				panel.modulate = Color(1, 1, 1, 1)
+			else:
+				mat_style.bg_color     = base_col.darkened(0.45)
+				mat_style.border_color = Color(0.28, 0.28, 0.28, 0.5)
+				mat_style.border_width_left   = 2
+				mat_style.border_width_right  = 2
+				mat_style.border_width_top    = 2
+				mat_style.border_width_bottom = 2
+				panel.modulate = Color(0.55, 0.55, 0.55, 1)
+
+
 # ── Button helpers ────────────────────────────────────────────────────────────
 
 func _tween_scale(node: Control, target: Vector2, dur: float) -> void:
@@ -1395,6 +1927,11 @@ func _btn_style(bg: Color) -> StyleBoxFlat:
 	s.content_margin_right  = 14
 	s.content_margin_top    = 8
 	s.content_margin_bottom = 8
+	s.border_width_left     = 1
+	s.border_width_right    = 1
+	s.border_width_top      = 1
+	s.border_width_bottom   = 1
+	s.border_color          = Color(1.0, 1.0, 1.0, 0.22)
 	return s
 
 
@@ -1423,8 +1960,9 @@ class _TurretPreview extends Node2D:
 		var idx : int   = turret_data.get("idx", -1)
 		var sc  : float
 		match idx:
-			6, 7, 8, 10, 12: sc = 0.67   # frost spire, poison, sniper, infernal core, arcane cannon
-			_:               sc = 0.56   # all others stay at original size
+			6, 7, 8, 10, 12:     sc = 0.67   # frost spire, poison, sniper, infernal core, arcane cannon
+			17, 18, 19, 20, 21:  sc = 0.60   # fusion turrets
+			_:                   sc = 0.56   # all others stay at original size
 		draw_set_transform(Vector2(cx, cy), 0.0, Vector2(sc, sc))
 		var tc := turret_data.get("color", Color(0.5, 0.5, 0.5)) as Color
 		match turret_data.get("idx", -1):
@@ -1445,6 +1983,11 @@ class _TurretPreview extends Node2D:
 			14: _pv_storm_lord()
 			15: _pv_chrono()
 			16: _pv_world_tree()
+			17: _pv_venom_drake()
+			18: _pv_frost_cannon()
+			19: _pv_arcane_overlord()
+			20: _pv_dragon_lich()
+			21: _pv_tempest_warden()
 			_:  _pv_generic(tc)
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
@@ -1673,6 +2216,115 @@ class _TurretPreview extends Node2D:
 		draw_circle(Vector2(-2,2),2.5,Color(0.50,1.00,0.55,0.6))
 		draw_circle(Vector2(3,10),2.5,Color(0.50,1.00,0.55,0.5))
 
+	func _pv_venom_drake() -> void:
+		var grn  := Color(0.20, 0.80, 0.28); var drk  := Color(0.10, 0.40, 0.14)
+		var purp := Color(0.60, 0.20, 0.80); var yel  := Color(0.85, 0.95, 0.20)
+		# Body
+		draw_colored_polygon(PackedVector2Array([Vector2(-10,2),Vector2(10,2),Vector2(12,22),Vector2(-12,22)]),drk)
+		draw_colored_polygon(PackedVector2Array([Vector2(-8,-10),Vector2(8,-10),Vector2(10,2),Vector2(-10,2)]),grn)
+		# Neck/head
+		draw_circle(Vector2(0,-18),8,grn)
+		draw_circle(Vector2(0,-18),6,drk.lightened(0.1))
+		# Fangs
+		draw_colored_polygon(PackedVector2Array([Vector2(-5,-14),Vector2(-2,-14),Vector2(-3,-8)]),yel)
+		draw_colored_polygon(PackedVector2Array([Vector2(2,-14),Vector2(5,-14),Vector2(3,-8)]),yel)
+		# Wings
+		draw_colored_polygon(PackedVector2Array([Vector2(-10,-6),Vector2(-22,-18),Vector2(-16,-2),Vector2(-10,2)]),purp.darkened(0.1))
+		draw_colored_polygon(PackedVector2Array([Vector2(10,-6),Vector2(22,-18),Vector2(16,-2),Vector2(10,2)]),purp.darkened(0.1))
+		# Toxic orb glow
+		draw_circle(Vector2(0,-18),4,Color(0.30,1.00,0.40,0.7))
+		draw_circle(Vector2(0,-18),2,Color(1,1,1,0.5))
+
+	func _pv_frost_cannon() -> void:
+		var ice  := Color(0.55, 0.90, 1.00); var ice2 := Color(0.85, 0.97, 1.00)
+		var dark := Color(0.25, 0.45, 0.65); var gold := Color(0.90, 0.78, 0.22)
+		# Wheels
+		draw_circle(Vector2(-16,18),9,dark.darkened(0.2)); draw_circle(Vector2(-16,18),7,dark)
+		draw_circle(Vector2(16,18),9,dark.darkened(0.2));  draw_circle(Vector2(16,18),7,dark)
+		draw_line(Vector2(-16,18),Vector2(16,18),dark.darkened(0.2),3.5)
+		# Carriage
+		draw_colored_polygon(PackedVector2Array([Vector2(-14,2),Vector2(14,2),Vector2(16,16),Vector2(-16,16)]),dark)
+		# Barrel
+		draw_line(Vector2(-4,-4),Vector2(20,-20),dark.darkened(0.2),18)
+		draw_line(Vector2(-4,-4),Vector2(20,-20),ice,14)
+		draw_line(Vector2(-4,-4),Vector2(20,-20),ice2,5)
+		draw_circle(Vector2(20,-20),9,ice)
+		draw_circle(Vector2(20,-20),4,ice2)
+		# Frost crystals on barrel
+		for i in range(3):
+			var t := 0.25 + i * 0.25
+			var bp := Vector2(-4 + t*24, -4 - t*16)
+			draw_colored_polygon(PackedVector2Array([bp+Vector2(-3,0),bp+Vector2(0,-6),bp+Vector2(3,0)]),ice2)
+		# Gold ring
+		draw_arc(Vector2(-4,-4),7,-PI*0.6,PI*0.6,10,gold,2.0)
+
+	func _pv_arcane_overlord() -> void:
+		var orng := Color(0.90, 0.42, 0.12); var purp := Color(0.85, 0.30, 0.95)
+		var gold := Color(0.90, 0.78, 0.22); var wht  := Color(1.00, 0.95, 0.85)
+		# Floating core
+		draw_circle(Vector2(0,-6),13,orng.darkened(0.3))
+		draw_circle(Vector2(0,-6),10,orng)
+		draw_circle(Vector2(0,-6),6,Color(1,0.75,0.40))
+		draw_circle(Vector2(-2,-8),3,wht)
+		# Arcane rings
+		draw_arc(Vector2(0,-6),16,0,TAU,20,Color(purp.r,purp.g,purp.b,0.7),2.5)
+		draw_arc(Vector2(0,-6),20,-PI*0.4,PI*0.4,10,Color(gold.r,gold.g,gold.b,0.5),1.5)
+		# Flame tendrils
+		for i in range(4):
+			var ang := i * TAU / 4.0 + PI * 0.25
+			var ep  := Vector2(cos(ang)*18 + 0, sin(ang)*14 - 6)
+			draw_line(Vector2(0,-6),ep,Color(orng.r,orng.g,orng.b,0.8),2.5)
+			draw_circle(ep,3,Color(purp.r,purp.g,purp.b,0.6))
+		# Base pillar
+		draw_colored_polygon(PackedVector2Array([Vector2(-5,6),Vector2(5,6),Vector2(6,22),Vector2(-6,22)]),gold.darkened(0.3))
+		draw_rect(Rect2(-8,4,16,6),gold.darkened(0.2))
+
+	func _pv_dragon_lich() -> void:
+		var dkpur := Color(0.30, 0.10, 0.45); var gold := Color(0.90, 0.78, 0.22)
+		var grn   := Color(0.20, 0.90, 0.40); var bone := Color(0.88, 0.84, 0.72)
+		# Skeletal body
+		draw_colored_polygon(PackedVector2Array([Vector2(-9,2),Vector2(9,2),Vector2(11,22),Vector2(-11,22)]),dkpur)
+		draw_colored_polygon(PackedVector2Array([Vector2(-8,-10),Vector2(8,-10),Vector2(9,2),Vector2(-9,2)]),dkpur.lightened(0.1))
+		# Rib cage lines
+		for i in range(3):
+			draw_line(Vector2(-8,4+i*5),Vector2(-2,4+i*5),bone,1.5)
+			draw_line(Vector2(2,4+i*5),Vector2(8,4+i*5),bone,1.5)
+		# Dragon skull
+		draw_circle(Vector2(0,-18),9,dkpur.lightened(0.05))
+		draw_circle(Vector2(-4,-17),3,grn); draw_circle(Vector2(4,-17),3,grn)
+		draw_circle(Vector2(-4,-17),1.5,Color(0.80,1.00,0.10)); draw_circle(Vector2(4,-17),1.5,Color(0.80,1.00,0.10))
+		draw_colored_polygon(PackedVector2Array([Vector2(-7,-12),Vector2(-4,-12),Vector2(-5,-8)]),bone)
+		draw_colored_polygon(PackedVector2Array([Vector2(4,-12),Vector2(7,-12),Vector2(5,-8)]),bone)
+		# Horns
+		draw_colored_polygon(PackedVector2Array([Vector2(-6,-24),Vector2(-4,-24),Vector2(-8,-36)]),gold)
+		draw_colored_polygon(PackedVector2Array([Vector2(4,-24),Vector2(6,-24),Vector2(8,-36)]),gold)
+		# Death aura
+		draw_arc(Vector2(0,-18),14,0,TAU,20,Color(grn.r,grn.g,grn.b,0.25),3.0)
+
+	func _pv_tempest_warden() -> void:
+		var storm := Color(0.45, 0.75, 1.00); var dark  := Color(0.20, 0.30, 0.55)
+		var wht   := Color(0.90, 0.95, 1.00); var gold  := Color(0.90, 0.78, 0.22)
+		# Armored body
+		draw_colored_polygon(PackedVector2Array([Vector2(-10,-8),Vector2(10,-8),Vector2(11,8),Vector2(-11,8)]),dark)
+		draw_colored_polygon(PackedVector2Array([Vector2(-9,8),Vector2(9,8),Vector2(10,22),Vector2(-10,22)]),dark.darkened(0.1))
+		draw_line(Vector2(-10,-8),Vector2(10,-8),storm,2.5)
+		draw_line(Vector2(-10,8),Vector2(10,8),storm,2.0)
+		# Helmet
+		draw_circle(Vector2(0,-18),9,dark.lightened(0.05))
+		draw_rect(Rect2(-9,-22,18,5),dark.lightened(0.1))
+		draw_rect(Rect2(-3,-28,6,10),storm)
+		# Storm wings
+		draw_colored_polygon(PackedVector2Array([Vector2(-10,-4),Vector2(-24,-16),Vector2(-20,-2),Vector2(-11,4)]),storm.darkened(0.15))
+		draw_colored_polygon(PackedVector2Array([Vector2(10,-4),Vector2(24,-16),Vector2(20,-2),Vector2(11,4)]),storm.darkened(0.15))
+		# Lightning bolts on wings
+		draw_line(Vector2(-14,-10),Vector2(-18,-2),wht,2.0)
+		draw_line(Vector2(-18,-2),Vector2(-15,4),wht,2.0)
+		draw_line(Vector2(14,-10),Vector2(18,-2),wht,2.0)
+		draw_line(Vector2(18,-2),Vector2(15,4),wht,2.0)
+		# Gold pauldrons
+		draw_circle(Vector2(-12,-4),5,gold.darkened(0.1))
+		draw_circle(Vector2(12,-4),5,gold.darkened(0.1))
+
 	func _pv_generic(tc: Color) -> void:
 		var rar := turret_data.get("rarity","common") as String
 		draw_colored_polygon(PackedVector2Array([Vector2(-10,2),Vector2(10,2),Vector2(12,14),Vector2(-12,14)]),tc.darkened(0.3))
@@ -1684,4 +2336,5 @@ class _TurretPreview extends Node2D:
 			"rare":      rc = Color(0.25,0.55,1.0)
 			"epic":      rc = Color(0.72,0.25,0.90)
 			"legendary": rc = Color(1.0,0.72,0.10)
+			"fusion":    rc = Color(0.20,1.00,0.85)
 		draw_circle(Vector2(0,-12),3,rc)

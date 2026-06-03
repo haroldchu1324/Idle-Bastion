@@ -11,11 +11,13 @@ var is_boss    : bool  = false
 var enemy_type : int   = 0   # 0=slime 1=goblin 2=skeleton 3=orc 4=shadow
 var boss_stage : int   = 1   # 1-10
 
-var _path       : Array = []
-var _current_wp : int   = 1
-var _anim_time  : float = 0.0
-var _slow_timer : float = 0.0
-var _base_speed : float = 0.0
+var _path          : Array   = []
+var _current_wp    : int     = 1
+var _anim_time     : float   = 0.0
+var _slow_timer    : float   = 0.0
+var _base_speed    : float   = 0.0
+var _travel_dir    : Vector2 = Vector2.RIGHT
+var _wobble_offset : Vector2 = Vector2.ZERO
 
 
 func setup(path: Array, enemy_hp: float, enemy_speed: float,
@@ -56,7 +58,13 @@ func _process(delta: float) -> void:
 	if to_target.length() < 6.0:
 		_current_wp += 1
 	else:
-		position += to_target.normalized() * speed * delta
+		var dir : Vector2 = to_target.normalized()
+		_travel_dir = dir
+		position += dir * speed * delta
+	# Perpendicular wobble — oscillates sideways relative to travel direction
+	var perp : Vector2 = Vector2(-_travel_dir.y, _travel_dir.x)
+	var amp  : float   = 4.0 if not is_boss else 2.5
+	_wobble_offset = perp * sin(_anim_time * 5.5) * amp
 	queue_redraw()
 
 
@@ -69,16 +77,20 @@ func take_damage(amount: float) -> void:
 
 
 func _draw() -> void:
+	# Apply perpendicular wobble offset to body only (not HP bar)
+	draw_set_transform(_wobble_offset, 0.0, Vector2.ONE)
 	if is_boss:
 		_draw_boss()
 	else:
 		_draw_enemy()
-	_draw_hp_bar()
 	if _slow_timer > 0.0:
 		var sa := clampf(_slow_timer, 0.0, 1.0)
 		var r   := 22.0 if is_boss else 16.0
 		draw_circle(Vector2.ZERO, r, Color(0.45, 0.82, 1.0, 0.18 * sa))
 		draw_arc(Vector2.ZERO, r, 0.0, TAU, 20, Color(0.55, 0.90, 1.0, 0.55 * sa), 1.5)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	# HP bar stays fixed (no wobble)
+	_draw_hp_bar()
 
 
 func _draw_hp_bar() -> void:
