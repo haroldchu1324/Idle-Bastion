@@ -1,0 +1,35 @@
+[gd_scene load_steps=7 format=3 uid="uid://c_main"]
+
+[ext_resource type="Script" path="res://scripts/Main.gd"        id="1_main"]
+[ext_resource type="Script" path="res://scripts/MapRenderer.gd" id="2_renderer"]
+[ext_resource type="Script" path="res://scripts/Decorations.gd" id="3_deco"]
+[ext_resource type="Script" path="res://scripts/BuildGrid.gd"   id="4_grid"]
+[ext_resource type="Script" path="res://ui/HUD.gd"              id="5_hud"]
+
+[node name="Main" type="Node2D"]
+script = ExtResource("1_main")
+
+; ── Grass tile background ──────────────────────────────────────────────────────
+[node name="TerrainLayer" type="TileMapLayer" parent="."]
+
+; ── Road + island shapes ───────────────────────────────────────────────────────
+[node name="MapRenderer" type="Node2D" parent="."]
+script = ExtResource("2_renderer")
+
+; ── Decorative layer ───────────────────────────────────────────────────────────
+[node name="Decorations" type="Node2D" parent="."]
+script = ExtResource("3_deco")
+
+; ── Tower build grid ───────────────────────────────────────────────────────────
+[node name="BuildGrid" type="Node2D" parent="."]
+script = ExtResource("4_grid")
+
+; ── UI overlay ─────────────────────────────────────────────────────────────────
+; With stretch/mode = "viewport" the CanvasLayer already lives in 1920×1080
+; space, so no follow_viewport_enabled needed.
+[node name="UI" type="CanvasLayer" parent="."]
+
+[node name="HUD" type="Control" parent="UI"]
+script        = ExtResource("5_hud")
+anchor_right  = 1.0
+anchor_bottom = 1.0
