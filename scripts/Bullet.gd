@@ -5,10 +5,12 @@
 extends Node2D
 
 
-var _target     : Node2D = null
-var _damage     : float  = 3.0
-var _speed      : float  = 480.0
-var bullet_type : String = "normal"
+var _target      : Node2D = null
+var _damage      : float  = 3.0
+var _speed       : float  = 480.0
+var bullet_type  : String = "normal"
+var bullet_color : Color  = Color(1.0, 0.85, 0.1)
+var bullet_style : String = "orb"   # orb | bolt | spark | fireball
 
 var _straight  : bool    = false
 var _direction : Vector2 = Vector2.ZERO
@@ -20,11 +22,12 @@ const _MAX_LIFETIME : float = 4.0
 var _prev_dist : float = INF
 
 # Ice-zone state
-var _is_zone    : bool    = false
-var _zone_timer : float   = 5.0   # zone stays on ground for 5 seconds
-var _zone_radius: float   = 45.0
-var _target_pos : Vector2 = Vector2.ZERO
-var _landed     : bool    = false
+var _is_zone       : bool       = false
+var _zone_timer    : float      = 3.0   # puddle lasts 3 seconds
+var _zone_radius   : float      = 45.0
+var _target_pos    : Vector2    = Vector2.ZERO
+var _landed        : bool       = false
+var _slowed_enemies: Dictionary = {}    # enemies already slowed by this puddle
 
 
 func setup(target: Node2D, damage: float) -> void:
@@ -62,8 +65,21 @@ func _process(delta: float) -> void:
 		return
 
 	if not is_instance_valid(_target):
-		queue_free()
-		return
+		# Target died — redirect to nearest enemy, or vanish
+		var nearest : Node2D = null
+		var nearest_dist := INF
+		for enemy in get_tree().get_nodes_in_group("enemies"):
+			if not is_instance_valid(enemy):
+				continue
+			var d := position.distance_to(enemy.position)
+			if d < nearest_dist:
+				nearest_dist = d
+				nearest = enemy
+		if nearest != null:
+			_target = nearest
+		else:
+			queue_free()
+			return
 
 	var dir  : Vector2 = _target.position - position
 	var dist : float   = dir.length()
@@ -82,17 +98,22 @@ func _process(delta: float) -> void:
 func _process_ice_zone(delta: float) -> void:
 	queue_redraw()
 	if not _landed:
+		_lifetime += delta
+		if _lifetime > 1.0 or get_tree().get_nodes_in_group("enemies").is_empty():
+			queue_free()
+			return
 		var dir  := _target_pos - position
 		var dist := dir.length()
 		if dist < 8.0:
 			_landed  = true
 			position = _target_pos
 			add_to_group("ice_zones")
-			# Remove any overlapping landed zones to prevent flickering pileup
+			# If an existing puddle already covers this spot, discard self instead
 			for other in get_tree().get_nodes_in_group("ice_zones"):
 				if other != self and is_instance_valid(other) and other._landed:
 					if position.distance_to(other.position) < _zone_radius * 0.8:
-						other.queue_free()
+						queue_free()
+						return
 		else:
 			position += dir.normalized() * _speed * delta
 	else:
@@ -101,8 +122,13 @@ func _process_ice_zone(delta: float) -> void:
 			queue_free()
 			return
 		for enemy in get_tree().get_nodes_in_group("enemies"):
+			if not is_instance_valid(enemy):
+				continue
 			if position.distance_to(enemy.position) < _zone_radius:
-				enemy.apply_slow(3.0, 0.45)
+				# Apply slow only once per enemy per puddle — never refresh while inside
+				if not _slowed_enemies.has(enemy):
+					enemy.apply_slow(3.0, 0.45)
+					_slowed_enemies[enemy] = true
 
 
 func _draw() -> void:
@@ -123,8 +149,11 @@ func _draw() -> void:
 		"ice_zone":
 			_draw_ice_zone_proj()
 		_:
-			draw_circle(Vector2.ZERO, 7.0, Color(1.0, 0.85, 0.1))
-			draw_circle(Vector2.ZERO, 3.5, Color(1.0, 1.0, 0.7))
+			match bullet_style:
+				"bolt":     _draw_bolt()
+				"spark":    _draw_spark()
+				"fireball": _draw_fireball()
+				_:          _draw_orb()
 
 
 func _draw_arrow_proj() -> void:
@@ -174,23 +203,88 @@ func _draw_ice_zone_proj() -> void:
 		]), Color(1.00, 1.00, 1.00, 0.45), 1.2)
 		draw_circle(Vector2(0, -4), 3, Color(1.00, 1.00, 1.00, 0.75))
 	else:
-		var a := clampf(_zone_timer / 5.0, 0.0, 1.0)
-		# Slow zone ground area
-		draw_circle(Vector2.ZERO, _zone_radius, Color(0.50, 0.82, 1.00, 0.12 * a))
+		var a := clampf(_zone_timer / 3.0, 0.0, 1.0)
+		draw_circle(Vector2.ZERO, _zone_radius, Color(0.20, 0.65, 1.00, 0.35 * a))
 		draw_arc(Vector2.ZERO, _zone_radius, 0.0, TAU, 36,
-			Color(0.60, 0.88, 1.00, 0.50 * a), 2.0)
-		# Outer ring
+			Color(0.40, 0.80, 1.00, 0.90 * a), 2.5)
 		draw_arc(Vector2.ZERO, _zone_radius - 4, 0.0, TAU, 36,
-			Color(0.80, 0.95, 1.00, 0.25 * a), 1.0)
-		# Mini crystals around edge
+			Color(0.70, 0.92, 1.00, 0.50 * a), 1.5)
 		for i in range(6):
 			var ang := i * TAU / 6.0
 			var cp  := Vector2(cos(ang), sin(ang)) * 22.0
 			draw_colored_polygon(PackedVector2Array([
 				cp + Vector2(0, -7), cp + Vector2(-3, 2), cp + Vector2(3, 2)
-			]), Color(0.72, 0.92, 1.00, 0.72 * a))
-		# Centre shard
+			]), Color(0.50, 0.88, 1.00, 0.90 * a))
 		draw_colored_polygon(PackedVector2Array([
 			Vector2(0, -18), Vector2(-8, 2), Vector2(0, 9), Vector2(8, 2)
-		]), Color(0.82, 0.96, 1.00, 0.88 * a))
-		draw_circle(Vector2(0, -8), 4.5, Color(1.00, 1.00, 1.00, 0.65 * a))
+		]), Color(0.70, 0.92, 1.00, 1.00 * a))
+		draw_circle(Vector2(0, -8), 4.5, Color(1.00, 1.00, 1.00, 0.90 * a))
+
+
+# ── Styled bullet draw functions ──────────────────────────────────────────────
+
+func _draw_orb() -> void:
+	# Soft outer glow
+	draw_circle(Vector2.ZERO, 9.0, Color(bullet_color.r, bullet_color.g, bullet_color.b, 0.22))
+	# Main body
+	draw_circle(Vector2.ZERO, 5.5, bullet_color)
+	# Bright highlight
+	draw_circle(Vector2(-2.0, -2.0), 2.2, bullet_color.lightened(0.55))
+
+
+func _draw_bolt() -> void:
+	var angle := 0.0
+	if _straight:
+		angle = _direction.angle() + PI * 0.5
+	elif is_instance_valid(_target):
+		angle = (_target.position - position).angle() + PI * 0.5
+	draw_set_transform(Vector2.ZERO, angle)
+	# Shadow
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(1, -9), Vector2(-3, -1), Vector2(1, 6), Vector2(5, -1)
+	]), Color(0, 0, 0, 0.25))
+	# Body — elongated diamond
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(0, -10), Vector2(-4, -1), Vector2(0, 6), Vector2(4, -1)
+	]), bullet_color)
+	# Bright rim
+	draw_polyline(PackedVector2Array([
+		Vector2(0, -10), Vector2(-4, -1), Vector2(0, 6), Vector2(4, -1), Vector2(0, -10)
+	]), bullet_color.lightened(0.45), 1.2)
+	# Tip highlight
+	draw_circle(Vector2(0, -9), 2.0, bullet_color.lightened(0.6))
+	draw_set_transform(Vector2.ZERO, 0.0)
+
+
+func _draw_spark() -> void:
+	var c := bullet_color
+	# Four angled spikes
+	var spike_pts : Array = [
+		[Vector2(0, -4),  Vector2(2, -11), Vector2(-2, -8)],
+		[Vector2(4,  0),  Vector2(11, -2), Vector2(8,   2)],
+		[Vector2(0,  4),  Vector2(-2, 11), Vector2(2,   8)],
+		[Vector2(-4, 0),  Vector2(-11, 2), Vector2(-8, -2)],
+	]
+	for pts in spike_pts:
+		draw_colored_polygon(PackedVector2Array(pts as Array),
+			Color(c.r, c.g, c.b, 0.75))
+	# Core glow
+	draw_circle(Vector2.ZERO, 5.0, Color(c.r, c.g, c.b, 0.40))
+	draw_circle(Vector2.ZERO, 3.5, c)
+	# White hot center
+	draw_circle(Vector2.ZERO, 1.8, Color(1.0, 1.0, 1.0, 0.92))
+
+
+func _draw_fireball() -> void:
+	var c := bullet_color
+	# Outer haze
+	draw_circle(Vector2.ZERO, 11.0, Color(c.r, c.g, c.b, 0.15))
+	# Mid glow
+	draw_circle(Vector2.ZERO, 8.0,  Color(c.r, c.g, c.b, 0.40))
+	# Core
+	draw_circle(Vector2.ZERO, 5.5,  c)
+	# Bright inner core (yellow-white)
+	var hot := Color(minf(c.r + 0.45, 1.0), minf(c.g + 0.35, 1.0), minf(c.b + 0.1, 1.0))
+	draw_circle(Vector2.ZERO, 2.8,  hot)
+	# Small specular highlight
+	draw_circle(Vector2(-2.0, -2.0), 1.2, Color(1.0, 1.0, 1.0, 0.80))

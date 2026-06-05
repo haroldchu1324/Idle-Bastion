@@ -19,6 +19,16 @@ const BASIC_COST    : int = 20
 const ADVANCED_COST : int = 75
 const RITUAL_COST   : int = 200
 
+# ── New pool costs (flat; common increases per-pull in Main.gd) ───────────────
+const COMMON_SUMMON_COST_BASE : int = 40
+const RARE_SUMMON_COST        : int = 100
+const EPIC_SUMMON_COST        : int = 250
+
+# ── New pool odds [common, rare, epic, legendary] ─────────────────────────────
+const COMMON_POOL_ODDS : Array = [75, 22,  3,  0]
+const RARE_POOL_ODDS   : Array = [ 0, 75, 22,  3]
+const EPIC_POOL_ODDS   : Array = [ 0, 15, 75, 10]
+
 # ── Sell values per rarity ────────────────────────────────────────────────────
 const SELL_VALUES : Dictionary = {
 	"common": 5, "rare": 15, "epic": 40, "legendary": 100
@@ -54,8 +64,8 @@ const ADVANCED_ODDS : Array = [40, 45, 14,  1]
 const RITUAL_ODDS   : Array = [ 0, 55, 40,  5]
 
 # ── Rarity pools ──────────────────────────────────────────────────────────────
-const COMMON_IDS    : Array = ["archer", "crossbow", "mage", "catapult"]
-const RARE_IDS      : Array = ["flame_tower", "frost_spire", "poison_tower", "sniper_tower"]
+const COMMON_IDS    : Array = ["archer", "crossbow", "mage", "catapult", "spearman", "rogue"]
+const RARE_IDS      : Array = ["flame_tower", "frost_spire", "poison_tower", "sniper_tower", "elite_knight", "iron_guard"]
 const EPIC_IDS      : Array = ["tesla_tower", "infernal_core", "ballista", "arcane_cannon"]
 const LEGENDARY_IDS : Array = ["sun_dragon", "storm_lord", "chrono_mage", "world_tree"]
 
@@ -65,89 +75,113 @@ const TURRET_DEFS : Dictionary = {
 	# ── Common ────────────────────────────────────────────────────────────────
 	"archer": {
 		"id": "archer", "name": "Archer", "rarity": "common", "idx": 0,
-		"desc": "Fast, accurate shots.\nTargets nearest enemy.",
-		"cost": 0, "damage": 2.5, "range": 180.0, "fire_rate": 2.0,
-		"color": Color(0.35, 0.75, 0.25), "effect": "none",
+		"desc": "Focused shots — each\nconsecutive hit deals +50% dmg.",
+		"cost": 0, "damage": 5.0, "range": 200.0, "fire_rate": 1.0,
+		"color": Color(0.35, 0.75, 0.25), "effect": "focused_shot",
 	},
 	"crossbow": {
 		"id": "crossbow", "name": "Crossbow", "rarity": "common", "idx": 1,
-		"desc": "Heavy bolt pierces\nthrough multiple enemies.",
-		"cost": 0, "damage": 7.0, "range": 230.0, "fire_rate": 0.9,
-		"color": Color(0.35, 0.55, 0.90), "effect": "pierce",
+		"desc": "Fires 2 bolts at once,\nhitting 2 separate enemies.",
+		"cost": 0, "damage": 5.0, "range": 200.0, "fire_rate": 1.2,
+		"color": Color(0.35, 0.55, 0.90), "effect": "dual_shot",
 	},
 	"mage": {
 		"id": "mage", "name": "Mage Tower", "rarity": "common", "idx": 3,
-		"desc": "Magic bolt chains\nto 2 nearby enemies.",
-		"cost": 0, "damage": 4.0, "range": 200.0, "fire_rate": 1.2,
+		"desc": "Hits 3 enemies — main target\ntakes full, others take 50%.",
+		"cost": 0, "damage": 4.0, "range": 200.0, "fire_rate": 1.0,
 		"color": Color(0.70, 0.28, 0.92), "effect": "chain",
 	},
 	"catapult": {
 		"id": "catapult", "name": "Catapult", "rarity": "common", "idx": 2,
-		"desc": "Slow but massive\narea-of-effect damage.",
-		"cost": 0, "damage": 15.0, "range": 160.0, "fire_rate": 0.35,
-		"color": Color(0.80, 0.50, 0.20), "effect": "aoe",
+		"desc": "Slow AoE blast hits\nup to 5 enemies at once.",
+		"cost": 0, "damage": 8.0, "range": 180.0, "fire_rate": 0.35,
+		"color": Color(0.80, 0.50, 0.20), "effect": "aoe_burst",
+	},
+	"spearman": {
+		"id": "spearman", "name": "Spearman", "rarity": "common", "idx": 26,
+		"desc": "Melee fighter — every 3rd\nhit cleaves all nearby enemies.",
+		"cost": 0, "damage": 8.0, "range": 120.0, "fire_rate": 1.0,
+		"color": Color(0.72, 0.52, 0.28), "effect": "melee_cleave",
+	},
+	"rogue": {
+		"id": "rogue", "name": "Rogue", "rarity": "common", "idx": 27,
+		"desc": "Melee AoE — each hit bleeds\nenemies up to 3 stacks.",
+		"cost": 0, "damage": 3.0, "range": 120.0, "fire_rate": 1.5,
+		"color": Color(0.22, 0.22, 0.28), "effect": "bleed_aoe",
 	},
 	# ── Rare ──────────────────────────────────────────────────────────────────
 	"flame_tower": {
 		"id": "flame_tower", "name": "Flame Tower", "rarity": "rare", "idx": 5,
 		"desc": "Burns enemies in a\nwide area of fire.",
-		"cost": 0, "damage": 9.0, "range": 170.0, "fire_rate": 1.2,
+		"cost": 0, "damage": 9.0, "range": 190.0, "fire_rate": 1.2,
 		"color": Color(1.00, 0.38, 0.08), "effect": "aoe",
 	},
 	"frost_spire": {
 		"id": "frost_spire", "name": "Frost Spire", "rarity": "rare", "idx": 6,
-		"desc": "Drops ice zones that slow\nenemies for 3s on contact.",
-		"cost": 0, "damage": 0.0, "range": 220.0, "fire_rate": 1.2,
+		"desc": "Icy shots slow enemies;\nevery 5th drops a slow zone.",
+		"cost": 0, "damage": 12.0, "range": 200.0, "fire_rate": 1.2,
 		"color": Color(0.50, 0.85, 1.00), "effect": "slow_zone",
 	},
 	"poison_tower": {
 		"id": "poison_tower", "name": "Poison Tower", "rarity": "rare", "idx": 7,
-		"desc": "Toxic cloud spreads\nto nearby enemies.",
-		"cost": 0, "damage": 5.0, "range": 190.0, "fire_rate": 1.5,
-		"color": Color(0.30, 0.80, 0.20), "effect": "chain",
+		"desc": "Poisons enemies — 10% extra\ndmg taken for 5s. Prioritizes fresh targets.",
+		"cost": 0, "damage": 12.0, "range": 200.0, "fire_rate": 1.0,
+		"color": Color(0.30, 0.80, 0.20), "effect": "poison_debuff",
 	},
 	"sniper_tower": {
 		"id": "sniper_tower", "name": "Sniper Tower", "rarity": "rare", "idx": 8,
-		"desc": "Extreme range.\nDeadly single-target shot.",
-		"cost": 0, "damage": 30.0, "range": 400.0, "fire_rate": 0.4,
-		"color": Color(0.60, 0.55, 0.45), "effect": "none",
+		"desc": "Deals up to 2× damage\nbased on enemy's current HP%.",
+		"cost": 0, "damage": 25.0, "range": 200.0, "fire_rate": 1.0,
+		"color": Color(0.60, 0.55, 0.45), "effect": "execute_shot",
+	},
+	"iron_guard": {
+		"id": "iron_guard", "name": "Iron Guard", "rarity": "rare", "idx": 29,
+		"desc": "Melee — every 3rd swing is AoE\nand pushes enemies back 1 tile.",
+		"cost": 0, "damage": 38.0, "range": 120.0, "fire_rate": 0.7,
+		"color": Color(0.55, 0.60, 0.72), "effect": "knight_slam",
+	},
+	"elite_knight": {
+		"id": "elite_knight", "name": "Elite Knight", "rarity": "rare", "idx": 28,
+		"desc": "Heavy melee — every 3rd hit\ncleaves all enemies in range.",
+		"cost": 0, "damage": 25.0, "range": 120.0, "fire_rate": 1.5,
+		"color": Color(0.65, 0.70, 0.82), "effect": "melee_cleave",
 	},
 	# ── Epic ──────────────────────────────────────────────────────────────────
 	"tesla_tower": {
 		"id": "tesla_tower", "name": "Tesla Tower", "rarity": "epic", "idx": 9,
 		"desc": "Chains lightning\nto 4 enemies at once.",
-		"cost": 0, "damage": 12.5, "range": 210.0, "fire_rate": 1.0,
+		"cost": 0, "damage": 12.5, "range": 230.0, "fire_rate": 1.0,
 		"color": Color(0.40, 0.80, 1.00), "effect": "lightning",
 	},
 	"infernal_core": {
 		"id": "infernal_core", "name": "Infernal Core", "rarity": "epic", "idx": 10,
-		"desc": "Fires a continuous red\nlaser at a single target.",
-		"cost": 0, "damage": 27.5, "range": 180.0, "fire_rate": 0.5,
-		"color": Color(1.00, 0.25, 0.10), "effect": "none",
+		"desc": "Locks beam on one target.\nDamage ramps +50% over 5s.",
+		"cost": 0, "damage": 27.0, "range": 200.0, "fire_rate": 1.0,
+		"color": Color(1.00, 0.25, 0.10), "effect": "lock_beam",
 	},
 	"ballista": {
 		"id": "ballista", "name": "Ballista", "rarity": "epic", "idx": 11,
-		"desc": "Giant bolt pierces\nthrough all enemies in line.",
-		"cost": 0, "damage": 22.5, "range": 260.0, "fire_rate": 0.65,
-		"color": Color(0.55, 0.42, 0.30), "effect": "pierce",
+		"desc": "Bolt deals base dmg + 1% of\nenemy's current HP (non-boss).",
+		"cost": 0, "damage": 40.0, "range": 260.0, "fire_rate": 1.0,
+		"color": Color(0.55, 0.42, 0.30), "effect": "hp_strike",
 	},
 	"arcane_cannon": {
 		"id": "arcane_cannon", "name": "Arcane Cannon", "rarity": "epic", "idx": 12,
-		"desc": "Arcane burst chains\nto 3 targets.",
-		"cost": 0, "damage": 15.0, "range": 200.0, "fire_rate": 0.9,
-		"color": Color(0.80, 0.30, 0.90), "effect": "chain",
+		"desc": "Charges over 20 hits — releases\na blue ray hitting all enemies.",
+		"cost": 0, "damage": 40.0, "range": 220.0, "fire_rate": 1.0,
+		"color": Color(0.80, 0.30, 0.90), "effect": "arcane_charge",
 	},
 	# ── Legendary ─────────────────────────────────────────────────────────────
 	"sun_dragon": {
 		"id": "sun_dragon", "name": "Sun Dragon", "rarity": "legendary", "idx": 13,
 		"desc": "Devastating AoE fire.\nBurns all enemies in range.",
-		"cost": 0, "damage": 60.0, "range": 220.0, "fire_rate": 0.7,
+		"cost": 0, "damage": 60.0, "range": 240.0, "fire_rate": 0.7,
 		"color": Color(1.00, 0.62, 0.05), "effect": "aoe",
 	},
 	"storm_lord": {
 		"id": "storm_lord", "name": "Storm Lord", "rarity": "legendary", "idx": 14,
 		"desc": "Chains lightning to\n5 enemies simultaneously.",
-		"cost": 0, "damage": 35.0, "range": 230.0, "fire_rate": 0.9,
+		"cost": 0, "damage": 35.0, "range": 250.0, "fire_rate": 0.9,
 		"color": Color(0.60, 0.80, 1.00), "effect": "storm_chain",
 	},
 	"chrono_mage": {
@@ -166,7 +200,7 @@ const TURRET_DEFS : Dictionary = {
 	"venom_drake": {
 		"id": "venom_drake", "name": "Venom Drake", "rarity": "fusion", "idx": 17,
 		"desc": "Toxic storm rains\npoison on all nearby foes.",
-		"cost": 0, "damage": 35.0, "range": 195.0, "fire_rate": 0.8,
+		"cost": 0, "damage": 35.0, "range": 215.0, "fire_rate": 0.8,
 		"color": Color(0.28, 0.78, 0.30), "effect": "aoe",
 	},
 	"frost_cannon": {
@@ -178,13 +212,13 @@ const TURRET_DEFS : Dictionary = {
 	"arcane_overlord": {
 		"id": "arcane_overlord", "name": "Arcane Overlord", "rarity": "fusion", "idx": 19,
 		"desc": "Arcane inferno erupts\nin chains across the field.",
-		"cost": 0, "damage": 55.0, "range": 210.0, "fire_rate": 0.65,
+		"cost": 0, "damage": 55.0, "range": 230.0, "fire_rate": 0.65,
 		"color": Color(0.90, 0.42, 0.12), "effect": "chain",
 	},
 	"dragon_lich": {
 		"id": "dragon_lich", "name": "Dragon Lich", "rarity": "fusion", "idx": 20,
 		"desc": "Soul-draining dragon fire\nchains to 5 enemies.",
-		"cost": 0, "damage": 80.0, "range": 230.0, "fire_rate": 0.85,
+		"cost": 0, "damage": 80.0, "range": 250.0, "fire_rate": 0.85,
 		"color": Color(0.72, 0.55, 0.90), "effect": "storm_chain",
 	},
 	"tempest_warden": {
@@ -192,6 +226,30 @@ const TURRET_DEFS : Dictionary = {
 		"desc": "Storm lord's chosen:\nlightning slows and decimates.",
 		"cost": 0, "damage": 60.0, "range": 250.0, "fire_rate": 1.1,
 		"color": Color(0.45, 0.75, 1.00), "effect": "lightning",
+	},
+	"infernal_serpent": {
+		"id": "infernal_serpent", "name": "Infernal Serpent", "rarity": "fusion", "idx": 22,
+		"desc": "Erupts in a pillar of dragonfire,\nincinerating all nearby foes.",
+		"cost": 0, "damage": 90.0, "range": 220.0, "fire_rate": 0.75,
+		"color": Color(1.00, 0.30, 0.05), "effect": "aoe",
+	},
+	"shadow_weaver": {
+		"id": "shadow_weaver", "name": "Shadow Weaver", "rarity": "fusion", "idx": 23,
+		"desc": "Void bolts pierce all enemies\nand freeze them in place.",
+		"cost": 0, "damage": 55.0, "range": 420.0, "fire_rate": 0.55,
+		"color": Color(0.55, 0.20, 0.85), "effect": "pierce",
+	},
+	"natures_wrath": {
+		"id": "natures_wrath", "name": "Nature's Wrath", "rarity": "fusion", "idx": 24,
+		"desc": "Ancient roots chain poison\nthrough entire enemy groups.",
+		"cost": 0, "damage": 40.0, "range": 250.0, "fire_rate": 1.3,
+		"color": Color(0.22, 0.85, 0.35), "effect": "chain",
+	},
+	"void_titan": {
+		"id": "void_titan", "name": "Void Titan", "rarity": "fusion", "idx": 25,
+		"desc": "Collapses space around it,\npulling and annihilating all foes.",
+		"cost": 0, "damage": 75.0, "range": 235.0, "fire_rate": 0.9,
+		"color": Color(0.30, 0.15, 0.55), "effect": "aoe",
 	},
 }
 
@@ -213,6 +271,18 @@ const FUSION_RECIPES : Array = [
 	# Tempest Warden — 1 legendary (5 materials: 2 common + 1 rare + 1 epic + 1 legendary)
 	{ "materials": ["archer", "crossbow", "frost_spire", "tesla_tower", "storm_lord"],
 	  "result": "tempest_warden" },
+	# Infernal Serpent — 1 legendary (4 materials: 1 common + 1 rare + 1 epic + 1 legendary)
+	{ "materials": ["catapult", "flame_tower", "infernal_core", "sun_dragon"],
+	  "result": "infernal_serpent" },
+	# Shadow Weaver — 1 legendary (4 materials: 1 common + 2 rare + 1 legendary)
+	{ "materials": ["crossbow", "sniper_tower", "ballista", "chrono_mage"],
+	  "result": "shadow_weaver" },
+	# Nature's Wrath — 1 legendary (5 materials: 1 common + 1 rare + 2 epic + 1 legendary)
+	{ "materials": ["mage", "poison_tower", "tesla_tower", "arcane_cannon", "world_tree"],
+	  "result": "natures_wrath" },
+	# Void Titan — 1 legendary (4 materials: 1 common + 1 epic + 2 legendary)
+	{ "materials": ["catapult", "arcane_cannon", "storm_lord", "chrono_mage"],
+	  "result": "void_titan" },
 ]
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -243,19 +313,22 @@ func _roll_rarity(odds: Array) -> String:
 	return "common"
 
 
+func roll_by_pool(pool_type: String) -> Dictionary:
+	var odds : Array
+	match pool_type:
+		"common": odds = COMMON_POOL_ODDS
+		"rare":   odds = RARE_POOL_ODDS
+		"epic":   odds = EPIC_POOL_ODDS
+		_:        odds = COMMON_POOL_ODDS
+	var rarity : String = _roll_rarity(odds)
+	total_summons += 1
+	return get_random_turret_by_rarity(rarity)
+
+
 func roll_summon(type: String) -> Dictionary:
 	var li       : int = clamp(summon_level - 1, 0, LEVEL_ODDS.size() - 1)
 	var ti       : int = {"basic": 0, "advanced": 1, "ritual": 2}.get(type, 0)
 	var odds     := (LEVEL_ODDS[li][ti] as Array).duplicate()
-
-	# Summoner's Dice relic: each upgrade level shifts 3% from common → rare
-	var dice_lvl := 0
-	if GameData.has_relic(11):
-		dice_lvl = GameData.relic_level(11)
-	if dice_lvl > 0:
-		var shift := mini(dice_lvl * 3, odds[0])
-		odds[0] -= shift
-		odds[1] += shift
 
 	var rarity : String = _roll_rarity(odds)
 	total_summons += 1
@@ -296,10 +369,6 @@ func get_summon_cost(type: String) -> int:
 		"advanced": base = ADVANCED_COST
 		"ritual":   base = RITUAL_COST
 		_:          base = BASIC_COST
-	# Merchant's Coin relic: -5% per upgrade level
-	if GameData.has_relic(13):
-		var disc := GameData.relic_level(13) * 5
-		base = int(base * (1.0 - disc * 0.01))
 	return maxi(base, 1)
 
 

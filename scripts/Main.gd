@@ -93,95 +93,98 @@ const PATH : Array = [
 
 # ── Stage definitions ─────────────────────────────────────────────────────────
 const STAGES : Array = [
-	# Stage 1
+	# Stage 1  (old totals: 15 / 21 / 36g)
 	{ "waves": [
-		[5,  10.0,  80.0,  5],
-		[7,  14.0,  85.0,  6],
-		[9,  18.0,  90.0,  7],
-	], "boss": [250.0,  50.0, 120] },
-	# Stage 2
+		[8,  12.0,  80.0,  2],
+		[10, 17.0,  85.0,  2],
+		[13, 22.0,  90.0,  3],
+	], "boss": [250.0,  50.0, 100] },
+	# Stage 2  (old totals: 28 / 36 / 55g)
 	{ "waves": [
-		[7,  22.0,  90.0,  7],
-		[9,  28.0,  95.0,  8],
-		[11, 36.0, 100.0,  9],
-	], "boss": [500.0,  48.0, 180] },
-	# Stage 3
+		[10, 26.0,  90.0,  3],
+		[13, 34.0,  95.0,  3],
+		[15, 43.0, 100.0,  4],
+	], "boss": [500.0,  48.0, 150] },
+	# Stage 3  (old totals: 40 / 50 / 72 / 60g)
 	{ "waves": [
-		[8,  44.0,  95.0,  9],
-		[10, 55.0, 100.0, 10],
-		[12, 68.0, 105.0, 11],
-		[10, 80.0, 108.0, 12],
-	], "boss": [950.0,  46.0, 260] },
-	# Stage 4
+		[11,  53.0,  95.0,  4],
+		[14,  66.0, 100.0,  4],
+		[17,  82.0, 105.0,  4],
+		[15,  96.0, 108.0,  4],
+	], "boss": [950.0,  46.0, 200] },
+	# Stage 4  (old totals: 60 / 84 / 98 / 96g)
 	{ "waves": [
-		[10,  90.0, 100.0, 11],
-		[12, 108.0, 105.0, 12],
-		[14, 128.0, 110.0, 13],
-		[12, 150.0, 113.0, 14],
-	], "boss": [1600.0, 44.0, 360] },
-	# Stage 5
+		[15, 108.0, 100.0,  4],
+		[17, 130.0, 105.0,  5],
+		[20, 154.0, 110.0,  5],
+		[17, 180.0, 113.0,  6],
+	], "boss": [1600.0, 44.0, 250] },
+	# Stage 5  (old totals: 96 / 112 / 144 / 126 / 180g)
 	{ "waves": [
-		[12, 165.0, 108.0, 13],
-		[14, 190.0, 112.0, 14],
-		[16, 220.0, 116.0, 16],
-		[14, 250.0, 119.0, 17],
-		[18, 285.0, 122.0, 19],
-	], "boss": [2600.0, 42.0, 480] },
-	# Stage 6
+		[18, 198.0, 108.0,  5],
+		[20, 228.0, 112.0,  6],
+		[23, 264.0, 116.0,  6],
+		[20, 300.0, 119.0,  6],
+		[26, 342.0, 122.0,  7],
+	], "boss": [2600.0, 42.0, 300] },
+	# Stage 6  (old totals: 126 / 160 / 180 / 176 / 220g)
 	{ "waves": [
-		[14, 300.0, 115.0, 17],
-		[16, 345.0, 119.0, 18],
-		[18, 395.0, 123.0, 20],
-		[16, 450.0, 126.0, 22],
-		[20, 510.0, 129.0, 24],
-	], "boss": [4000.0, 40.0, 640] },
-	# Stage 7
+		[21, 360.0, 115.0,  6],
+		[23, 414.0, 119.0,  7],
+		[26, 474.0, 123.0,  7],
+		[23, 540.0, 126.0,  8],
+		[28, 612.0, 129.0,  8],
+	], "boss": [4000.0, 40.0, 350] },
+	# Stage 7  (old totals: 176 / 216 / 240 / 234 / 286g)
 	{ "waves": [
-		[16, 540.0, 122.0, 21],
-		[18, 615.0, 126.0, 23],
-		[20, 700.0, 130.0, 25],
-		[18, 795.0, 133.0, 27],
-		[22, 900.0, 136.0, 30],
-	], "boss": [6200.0, 38.0, 850] },
-	# Stage 8
+		[23,  648.0, 122.0,  8],
+		[26,  738.0, 126.0,  8],
+		[28,  840.0, 130.0,  9],
+		[26,  954.0, 133.0,  9],
+		[30, 1080.0, 136.0, 10],
+	], "boss": [6200.0, 38.0, 400] },
+	# Stage 8  (old totals: 234 / 280 / 308 / 300 / 360 / 352g)
 	{ "waves": [
-		[18,  950.0, 128.0, 26],
-		[20, 1080.0, 132.0, 28],
-		[22, 1220.0, 136.0, 31],
-		[20, 1380.0, 139.0, 34],
-		[24, 1560.0, 142.0, 37],
-		[22, 1760.0, 144.0, 40],
-	], "boss": [9000.0, 36.0, 1100] },
-	# Stage 9
+		[26, 1140.0, 128.0,  9],
+		[28, 1296.0, 132.0, 10],
+		[30, 1464.0, 136.0, 10],
+		[28, 1656.0, 139.0, 11],
+		[32, 1872.0, 142.0, 11],
+		[30, 2112.0, 144.0, 12],
+	], "boss": [9000.0, 36.0, 450] },
+	# Stage 9  (old totals: 300 / 352 / 384 / 374 / 442 / 432g)
 	{ "waves": [
-		[20, 1850.0, 135.0, 34],
-		[22, 2100.0, 139.0, 37],
-		[24, 2380.0, 143.0, 41],
-		[22, 2700.0, 146.0, 45],
-		[26, 3060.0, 149.0, 50],
-		[24, 3460.0, 151.0, 55],
-	], "boss": [13000.0, 34.0, 1500] },
-	# Stage 10 — Final
+		[28, 2220.0, 135.0, 11],
+		[30, 2520.0, 139.0, 12],
+		[32, 2856.0, 143.0, 12],
+		[30, 3240.0, 146.0, 12],
+		[34, 3672.0, 149.0, 13],
+		[32, 4152.0, 151.0, 13],
+	], "boss": [13000.0, 34.0, 500] },
+	# Stage 10 — Final  (old totals: 374 / 432 / 468 / 456 / 532 / 520g)
 	{ "waves": [
-		[22, 3600.0, 142.0, 45],
-		[24, 4100.0, 146.0, 50],
-		[26, 4650.0, 150.0, 55],
-		[24, 5300.0, 153.0, 61],
-		[28, 6000.0, 156.0, 68],
-		[26, 6800.0, 158.0, 75],
-	], "boss": [22000.0, 30.0, 2800] },
+		[30, 4320.0, 142.0, 12],
+		[32, 4920.0, 146.0, 13],
+		[34, 5580.0, 150.0, 14],
+		[32, 6360.0, 153.0, 14],
+		[36, 7200.0, 156.0, 15],
+		[34, 8160.0, 158.0, 15],
+	], "boss": [22000.0, 30.0, 600] },
 ]
 
 @onready var _terrain    : TileMapLayer = $TerrainLayer
 @onready var _hud                       = $UI/HUD
 @onready var _build_grid                = $BuildGrid
 
-var _gold          : int   = 100
-var _lives         : int   = 20
-var _stage         : int   = 1
-var _wave_in_stage : int   = 0
-var _wave_active   : bool  = false
-var _enemies_alive : int   = 0
+var _gold              : int   = 100
+var _lives             : int   = 20
+var _stage             : int   = 1
+var _wave_in_stage     : int   = 0
+var _wave_active       : bool  = false
+var _enemies_alive     : int   = 0
+var _enemies_killed    : int   = 0
+var _bosses_killed     : int   = 0
+var _gems_this_run     : int   = 0
 var _spawn_queue   : Array = []
 var _spawn_timer   : float = 0.0
 
@@ -206,19 +209,15 @@ func _ready() -> void:
 	_hud.setup(self)
 	_hud.wave_pressed.connect(_on_wave_btn_pressed)
 	_hud.start_battle_pressed.connect(_on_start_battle_pressed)
-	_hud.upgrade_purchased.connect(_on_upgrade_purchased)
-	_hud.prestige_confirmed.connect(_do_prestige)
 	_hud.roll_turret_requested.connect(_on_roll_turret_requested)
-	_hud.roll_upgrade_requested.connect(_on_roll_upgrade_requested)
+	_hud.roll_rare_requested.connect(_on_roll_rare_requested)
+	_hud.roll_epic_requested.connect(_on_roll_epic_requested)
 	_hud.recipe_fusion_requested.connect(_on_recipe_fusion_requested)
 	_hud.upgrade_merge_requested.connect(_on_upgrade_merge_requested)
-	GameData.run_upg_damage    = 0
-	GameData.run_upg_range     = 0
-	GameData.run_upg_fire_rate = 0
-	GameData.run_upg_lives     = 0
+	_hud.debug_gold_requested.connect(func(): _gold += 10000; _refresh_hud())
 	GameData.current_run_highest_stage = 0
-	_gold  = 100 + GameData.total_bonus_gold()
-	_lives = 20  + GameData.total_bonus_lives()
+	_gold  = 100
+	_lives = 20
 	_refresh_hud()
 	_spawn_knight()
 
@@ -228,11 +227,13 @@ func _spawn_knight() -> void:
 	_build_grid.place(tile)
 	var tower : Node2D = TOWER_SCENE.instantiate()
 	add_child(tower)
-	var k_data := KNIGHT_DATA.duplicate()
-	k_data["damage"]    = KNIGHT_DATA["damage"]    * GameData.final_damage_mult(4)
-	k_data["range"]     = KNIGHT_DATA["range"]     * GameData.final_range_mult(4)
-	k_data["fire_rate"] = KNIGHT_DATA["fire_rate"] * GameData.final_fire_rate_mult(4)
-	tower.init_type(k_data)
+	var hero_base : Dictionary = GameData.HERO_DEFS.get(GameData.selected_hero_id, KNIGHT_DATA)
+	var h_data := hero_base.duplicate()
+	var h_idx  : int = hero_base.get("idx", 4)
+	h_data["damage"]    = hero_base.get("damage",    20.0) * GameData.final_damage_mult(h_idx)
+	h_data["range"]     = hero_base.get("range",  1500.0) * GameData.final_range_mult(h_idx)
+	h_data["fire_rate"] = hero_base.get("fire_rate", 0.9) * GameData.final_fire_rate_mult(h_idx)
+	tower.init_type(h_data)
 	tower.drop_from_sky(_build_grid.tile_center(tile), 2.0)
 	_tower_map[tile] = tower
 
@@ -330,6 +331,10 @@ func _spawn_next_enemy() -> void:
 func _on_enemy_died(reward: int) -> void:
 	_gold          += reward
 	_enemies_alive -= 1
+	_enemies_killed += 1
+	GameData.blue_gems += 1
+	_gems_this_run     += 1
+	_hud.refresh_gems()
 	_check_wave_done()
 	_refresh_hud()
 
@@ -362,6 +367,11 @@ func _on_boss_died(reward: int) -> void:
 	if not _boss_active:
 		return
 	_gold          += reward
+	_bosses_killed += 1
+	var boss_gems  : int = 10 + (_bosses_killed - 1) * 12
+	GameData.blue_gems += boss_gems
+	_gems_this_run     += boss_gems
+	_hud.refresh_gems()
 	_boss_active    = false
 	_boss_ref       = null
 	_wave_active    = false
@@ -407,6 +417,10 @@ func _check_lives() -> void:
 		_trigger_game_over()
 
 
+func _calc_gems() -> int:
+	return _gems_this_run
+
+
 func _trigger_game_over() -> void:
 	_game_over = true
 	_lives      = 0
@@ -416,18 +430,13 @@ func _trigger_game_over() -> void:
 		GameData.current_run_highest_stage = _stage
 	if GameData.current_run_highest_stage > GameData.all_time_highest_stage:
 		GameData.all_time_highest_stage = GameData.current_run_highest_stage
+	var gems_earned : int = _calc_gems()
 	GameData.save_game()
-	_hud.show_game_over(_stage)
-
-
-func _on_upgrade_purchased(idx: int, cost: int) -> void:
-	if _gold < cost:
-		return
-	_gold -= cost
-	_hud._apply_upgrade(idx)
-	_hud._refresh_upgrade_rows()  # refreshes pre-battle rows only now
-	GameData.save_game()
-	_refresh_hud()
+	var turrets : Array = []
+	for tower in _tower_map.values():
+		if is_instance_valid(tower) and not tower.tower_data.is_empty():
+			turrets.append(tower.tower_data)
+	_hud.show_run_results(_stage, _enemies_killed, _bosses_killed, gems_earned, turrets)
 
 
 func _on_start_battle_pressed() -> void:
@@ -442,17 +451,13 @@ func _trigger_victory() -> void:
 	GameData.current_run_highest_stage = 10
 	if 10 > GameData.all_time_highest_stage:
 		GameData.all_time_highest_stage = 10
+	var gems_earned : int = _calc_gems()
 	GameData.save_game()
-	_hud.show_victory_screen()
-
-
-func _do_prestige() -> void:
-	GameData.current_run_highest_stage = 0
-	GameData.run_gold = 0
-	GameData.total_prestiges += 1
-	GameData.save_game()
-	Engine.time_scale = 1.0
-	get_tree().reload_current_scene()
+	var turrets : Array = []
+	for tower in _tower_map.values():
+		if is_instance_valid(tower) and not tower.tower_data.is_empty():
+			turrets.append(tower.tower_data)
+	_hud.show_run_results(_stage, _enemies_killed, _bosses_killed, gems_earned, turrets, true)
 
 
 func _advance_stage() -> void:
@@ -522,6 +527,7 @@ func _on_upgrade_merge_requested() -> void:
 			break
 
 	_hud.hide_tower_info()
+	_hud.hide_upgrade_popup()
 	_deselect_tower()
 
 	# Remove 3 of this type from the map
@@ -589,9 +595,10 @@ func _refresh_hud() -> void:
 
 # ── Gacha roll system ─────────────────────────────────────────────────────────
 
-const TURRET_ROLL_COST_BASE : int = 80
-var   _turret_roll_cost     : int = 80
-const UPGRADE_ROLL_COST     : int = 60
+const TURRET_ROLL_COST_BASE : int = 40
+var   _turret_roll_cost     : int = 40
+var   _rare_roll_cost       : int = SummonSystem.RARE_SUMMON_COST
+var   _epic_roll_cost       : int = SummonSystem.EPIC_SUMMON_COST
 
 func _get_turret_pool() -> Array:
 	var pool : Array = []
@@ -608,6 +615,40 @@ func _get_turret_pool() -> Array:
 	return pool
 
 
+func _on_roll_rare_requested() -> void:
+	if _gold < _rare_roll_cost:
+		_hud.show_roll_error("Not enough gold! (need %dg)" % _rare_roll_cost)
+		return
+	var free : Array = _get_free_tiles()
+	if free.is_empty():
+		_hud.show_roll_error("Map is full! Move or wait.")
+		return
+	_gold -= _rare_roll_cost
+	_rare_roll_cost += 3
+	_hud.update_rare_cost(_rare_roll_cost)
+	var raw : Dictionary = SummonSystem.roll_by_pool("rare")
+	_place_turret_random(raw)
+	_hud.show_turret_result(raw)
+	_refresh_hud()
+
+
+func _on_roll_epic_requested() -> void:
+	if _gold < _epic_roll_cost:
+		_hud.show_roll_error("Not enough gold! (need %dg)" % _epic_roll_cost)
+		return
+	var free : Array = _get_free_tiles()
+	if free.is_empty():
+		_hud.show_roll_error("Map is full! Move or wait.")
+		return
+	_gold -= _epic_roll_cost
+	_epic_roll_cost += 5
+	_hud.update_epic_cost(_epic_roll_cost)
+	var raw : Dictionary = SummonSystem.roll_by_pool("epic")
+	_place_turret_random(raw)
+	_hud.show_turret_result(raw)
+	_refresh_hud()
+
+
 func _on_roll_turret_requested() -> void:
 	if _gold < _turret_roll_cost:
 		_hud.show_roll_error("Not enough gold! (need %d)" % _turret_roll_cost)
@@ -619,51 +660,11 @@ func _on_roll_turret_requested() -> void:
 	_gold -= _turret_roll_cost
 	_turret_roll_cost += 1
 	_hud.update_pull_cost(_turret_roll_cost)
-	var raw : Dictionary = SummonSystem.roll_summon("basic")
+	var raw : Dictionary = SummonSystem.roll_by_pool("common")
 	var idx : int = raw.get("idx", 0)
-	raw["damage"]    = raw["damage"]    * GameData.final_damage_mult(idx)
-	raw["range"]     = raw["range"]     * GameData.final_range_mult(idx)
-	raw["fire_rate"] = raw["fire_rate"] * GameData.final_fire_rate_mult(idx)
 	_place_turret_random(raw)
 	_hud.show_turret_result(raw)
 	_refresh_hud()
-
-
-func _on_roll_upgrade_requested() -> void:
-	if _gold < UPGRADE_ROLL_COST:
-		_hud.show_roll_error("Not enough gold! (need %d)" % UPGRADE_ROLL_COST)
-		return
-	# Gather non-maxed upgrades
-	var available : Array = []
-	for i in range(4):
-		if _get_upg_level_main(i) < GameData.MAX_LEVEL:
-			available.append(i)
-	if available.is_empty():
-		_hud.show_roll_error("All upgrades are maxed!")
-		return
-	_gold -= UPGRADE_ROLL_COST
-	available.shuffle()
-	var chosen_idx : int = available[0]
-	_apply_upgrade_direct(chosen_idx)
-	_hud.show_upgrade_result(chosen_idx, _get_upg_level_main(chosen_idx))
-	_refresh_hud()
-
-
-func _get_upg_level_main(idx: int) -> int:
-	match idx:
-		0: return GameData.run_upg_damage
-		1: return GameData.run_upg_range
-		2: return GameData.run_upg_fire_rate
-		3: return GameData.run_upg_lives
-	return 0
-
-
-func _apply_upgrade_direct(idx: int) -> void:
-	match idx:
-		0: GameData.run_upg_damage    += 1
-		1: GameData.run_upg_range     += 1
-		2: GameData.run_upg_fire_rate += 1
-		3: GameData.run_upg_lives     += 1
 
 
 func _on_recipe_fusion_requested(result_id: String) -> void:
@@ -734,6 +735,12 @@ func _get_free_tiles() -> Array:
 
 # ── Tower placement (click-select) ────────────────────────────────────────────
 
+func _input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed:
+		if not _hud.is_upgrade_popup_clicked(event.position):
+			_hud.hide_upgrade_popup()
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_SPACE:
@@ -776,8 +783,6 @@ func _unhandled_input(event: InputEvent) -> void:
 			_hud.show_tower_info(_selected_tower, _merge_cnt)
 			if _selected_tower.can_upgrade:
 				_hud.show_upgrade_popup(_selected_tower.position)
-			else:
-				_hud.hide_upgrade_popup()
 		return
 
 	if _build_grid.is_in_grid(mp):
@@ -840,6 +845,7 @@ func _cancel_hold() -> void:
 func _select_tower(tower: Node2D) -> void:
 	if is_instance_valid(_selected_tower) and _selected_tower != tower:
 		_selected_tower.selected = false
+		_hud.hide_upgrade_popup()
 	_selected_tower = tower
 	tower.selected  = true
 

@@ -11,6 +11,10 @@ var is_boss    : bool  = false
 var enemy_type : int   = 0   # 0=slime 1=goblin 2=skeleton 3=orc 4=shadow
 var boss_stage : int   = 1   # 1-10
 
+var is_poisoned      : bool  = false
+var poison_timer     : float = 0.0
+var damage_taken_mult: float = 1.0
+
 var _path          : Array   = []
 var _current_wp    : int     = 1
 var _anim_time     : float   = 0.0
@@ -18,6 +22,19 @@ var _slow_timer    : float   = 0.0
 var _base_speed    : float   = 0.0
 var _travel_dir    : Vector2 = Vector2.RIGHT
 var _wobble_offset : Vector2 = Vector2.ZERO
+
+var is_bleeding         : bool    = false
+var _bleed_trail        : Array   = []   # Array of {pos: Vector2, age: float}
+var _bleed_trail_timer  : float   = 0.0
+var _bleed_duration     : float   = 0.0   # seconds of bleed remaining
+
+var _knockback_active   : bool    = false
+var _knockback_timer    : float   = 0.0
+var _knockback_duration : float   = 0.45
+var _knockback_start    : Vector2 = Vector2.ZERO
+var _knockback_end      : Vector2 = Vector2.ZERO
+var _knockback_arc_y    : float   = 0.0   # visual elevation offset (negative = upward)
+const _KNOCKBACK_HEIGHT : float   = 38.0
 
 
 func setup(path: Array, enemy_hp: float, enemy_speed: float,
@@ -43,12 +60,64 @@ func apply_slow(duration: float, factor: float = 0.5) -> void:
 		_slow_timer = max(_slow_timer, duration)
 
 
+func apply_bleed() -> void:
+	is_bleeding      = true
+	_bleed_duration  = max(_bleed_duration, 3.0)   # refresh/extend bleed to 3s
+
+
+func apply_poison(duration: float) -> void:
+	is_poisoned       = true
+	poison_timer      = duration
+	damage_taken_mult = 1.1
+
+
+func pushback() -> void:
+	if is_boss or _knockback_active:
+		return
+	_knockback_active   = true
+	_knockback_timer    = 0.0
+	_knockback_start    = position
+	_knockback_end      = position - _travel_dir * 100.0
+	_knockback_arc_y    = 0.0
+
+
 func _process(delta: float) -> void:
 	_anim_time += delta
+	if _knockback_active:
+		_knockback_timer += delta
+		var t := minf(_knockback_timer / _knockback_duration, 1.0)
+		position        = _knockback_start.lerp(_knockback_end, t)
+		_knockback_arc_y = -sin(t * PI) * _KNOCKBACK_HEIGHT
+		queue_redraw()
+		if t >= 1.0:
+			_knockback_active = false
+			_knockback_arc_y  = 0.0
+		return
+	# Bleed trail tracking
+	if is_bleeding:
+		_bleed_duration -= delta
+		if _bleed_duration <= 0.0:
+			is_bleeding = false
+		else:
+			_bleed_trail_timer -= delta
+			if _bleed_trail_timer <= 0.0:
+				_bleed_trail_timer = 0.12
+				_bleed_trail.append({"pos": position, "age": 0.0})
+	# Age and prune trail entries
+	for i in range(_bleed_trail.size() - 1, -1, -1):
+		_bleed_trail[i]["age"] += delta
+		if _bleed_trail[i]["age"] >= 1.5:
+			_bleed_trail.remove_at(i)
+
 	if _slow_timer > 0.0:
 		_slow_timer -= delta
 		if _slow_timer <= 0.0 and _base_speed > 0.0:
 			speed = _base_speed
+	if poison_timer > 0.0:
+		poison_timer -= delta
+		if poison_timer <= 0.0:
+			is_poisoned       = false
+			damage_taken_mult = 1.0
 	if _current_wp >= _path.size():
 		reached_end.emit()
 		queue_free()
@@ -69,7 +138,7 @@ func _process(delta: float) -> void:
 
 
 func take_damage(amount: float) -> void:
-	hp = max(0.0, hp - amount)
+	hp = max(0.0, hp - amount * damage_taken_mult)
 	queue_redraw()
 	if hp <= 0.0:
 		died.emit(reward)
@@ -77,8 +146,25 @@ func take_damage(amount: float) -> void:
 
 
 func _draw() -> void:
-	# Apply perpendicular wobble offset to body only (not HP bar)
-	draw_set_transform(_wobble_offset, 0.0, Vector2.ONE)
+	# Bleed trail — drawn in world-relative local coords before any transform
+	for entry in _bleed_trail:
+		var age_frac : float   = entry["age"]
+		age_frac /= 1.5
+		var alpha    : float   = (1.0 - age_frac) * 0.70
+		var radius   : float   = 2.8 - age_frac * 1.2
+		var drop     : Vector2 = (entry["pos"] as Vector2) - position
+		draw_circle(drop, radius, Color(0.72, 0.06, 0.10, alpha))
+		# Small drip streak
+		draw_line(drop, drop + Vector2(0, radius * 1.2), Color(0.60, 0.04, 0.08, alpha * 0.6), 1.0)
+
+	# Ground shadow while airborne — shrinks as enemy rises
+	if _knockback_active and _knockback_arc_y < -4.0:
+		var rise_frac := absf(_knockback_arc_y) / _KNOCKBACK_HEIGHT
+		var shadow_r  := (22.0 if is_boss else 15.0) * (1.0 - rise_frac * 0.6)
+		draw_circle(Vector2.ZERO, shadow_r, Color(0.0, 0.0, 0.0, 0.28 * (1.0 - rise_frac * 0.5)))
+
+	# Body — wobble + arc elevation
+	draw_set_transform(_wobble_offset + Vector2(0.0, _knockback_arc_y), 0.0, Vector2.ONE)
 	if is_boss:
 		_draw_boss()
 	else:
@@ -88,6 +174,11 @@ func _draw() -> void:
 		var r   := 22.0 if is_boss else 16.0
 		draw_circle(Vector2.ZERO, r, Color(0.45, 0.82, 1.0, 0.18 * sa))
 		draw_arc(Vector2.ZERO, r, 0.0, TAU, 20, Color(0.55, 0.90, 1.0, 0.55 * sa), 1.5)
+	if is_poisoned:
+		var pa := 0.18 + sin(_anim_time * 5.0) * 0.08
+		var pr  := 22.0 if is_boss else 16.0
+		draw_circle(Vector2.ZERO, pr, Color(0.30, 0.88, 0.20, pa))
+		draw_arc(Vector2.ZERO, pr, 0.0, TAU, 20, Color(0.42, 1.0, 0.28, pa * 2.5), 1.5)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	# HP bar stays fixed (no wobble)
 	_draw_hp_bar()
