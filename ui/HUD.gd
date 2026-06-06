@@ -4,6 +4,7 @@ extends Control
 signal wave_pressed
 signal speed_toggled(factor: float)
 signal start_battle_pressed
+signal buff_chosen(buff_id: String)
 signal upgrade_purchased(idx: int, cost: int)
 signal prestige_confirmed
 signal roll_turret_requested
@@ -66,6 +67,17 @@ var _current_gold        : int     = 0
 # Rarity info modal (centered overlay)
 var _rarity_modal      : Control = null
 var _modal_odds_lbls   : Array   = []   # [pool][rarity] — 3 pools × 4 rarities
+
+# Boss buff card overlay
+var _boss_buff_overlay    : Control = null
+
+# Buff history (upgrades tab)
+var _buff_history_scroll  : ScrollContainer = null
+var _buff_history_flow    : HFlowContainer  = null
+var _buff_empty_lbl       : Label           = null
+var _buff_tooltip         : Panel           = null
+var _buff_tooltip_name    : Label           = null
+var _buff_tooltip_desc    : Label           = null
 
 # Tower info panel
 var _info_panel         : Control
@@ -162,6 +174,8 @@ func _ready() -> void:
 	mouse_filter = MOUSE_FILTER_IGNORE
 	_load_fonts()
 	_build_ui()
+	# Wire hover after one frame so all button sizes are finalized
+	call_deferred("_wire_all_button_hovers")
 
 
 func _load_fonts() -> void:
@@ -180,6 +194,14 @@ func setup(_main) -> void:
 func refresh_gems() -> void:
 	if is_instance_valid(_gem_hud_lbl):
 		_gem_hud_lbl.text = "🔷 %d" % GameData.blue_gems
+
+func hide_wave_btn() -> void:
+	if is_instance_valid(wave_btn):
+		wave_btn.visible = false
+
+func show_wave_btn() -> void:
+	if is_instance_valid(wave_btn):
+		wave_btn.visible = true
 
 
 # ── Public refresh ────────────────────────────────────────────────────────────
@@ -550,7 +572,7 @@ func _build_hud_bar() -> void:
 	var C_RECIPE := Color(0.18, 0.42, 0.38)
 	var recipe_btn := Button.new()
 	recipe_btn.text         = "📖  Recipe"
-	recipe_btn.position     = Vector2(493, 10)
+	recipe_btn.position     = Vector2(507, 10)
 	recipe_btn.size         = Vector2(165, 50)
 	recipe_btn.pivot_offset = Vector2(82, 25)
 	recipe_btn.focus_mode   = FOCUS_NONE
@@ -786,6 +808,14 @@ func _refresh_rarity_modal() -> void:
 				lbl.text = "%d%%" % val if val > 0 else "—"
 
 
+func _process(_delta: float) -> void:
+	if is_instance_valid(_buff_tooltip) and _buff_tooltip.visible:
+		var mp : Vector2 = get_global_mouse_position()
+		var tx : float = clampf(mp.x + 14.0, 0.0, 1280.0 - _buff_tooltip.size.x)
+		var ty : float = clampf(mp.y - _buff_tooltip.size.y - 6.0, 0.0, 720.0 - _buff_tooltip.size.y)
+		_buff_tooltip.position = Vector2(tx, ty)
+
+
 func _unhandled_key_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
 		if is_instance_valid(_rarity_modal) and _rarity_modal.visible:
@@ -856,11 +886,11 @@ func _build_right_panel() -> void:
 	for i in range(tab_names.size()):
 		var tb := Button.new()
 		tb.text       = tab_names[i]
-		tb.position   = Vector2(i * 124, 0)
-		tb.size       = Vector2(122, 38)
+		tb.position   = Vector2(i * 124, 4)
+		tb.size       = Vector2(118, 30)
 		tb.focus_mode = FOCUS_NONE
 		tb.add_theme_font_override("font",           _font_bold)
-		tb.add_theme_font_size_override("font_size", 14)
+		tb.add_theme_font_size_override("font_size", 12)
 		tb.add_theme_color_override("font_color",    C_WHITE)
 		tb.add_theme_stylebox_override("normal",  _btn_style(C_TAB_ACT if i == 0 else C_TAB_IDLE))
 		tb.add_theme_stylebox_override("hover",   _btn_style(C_TAB_ACT.lightened(0.10)))
@@ -948,16 +978,10 @@ func _fill_turrets_tab(page: Control) -> void:
 	common_hdr.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	page.add_child(common_hdr)
 
-	var common_odds_lbl := _label("75% Common · 22% Rare · 3% Epic", _font_reg, 11, C_DIM)
-	common_odds_lbl.position             = Vector2(0, 66)
-	common_odds_lbl.size                 = Vector2(w, 16)
-	common_odds_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	page.add_child(common_odds_lbl)
-
 	var C_COMMON_BTN := Color(0.30, 0.30, 0.26)
 	var common_btn := Button.new()
 	common_btn.text         = "🎲  Common Summon  (40g)"
-	common_btn.position     = Vector2(8, 84)
+	common_btn.position     = Vector2(8, 66)
 	common_btn.size         = Vector2(w - 16, 46)
 	common_btn.pivot_offset = Vector2((w - 16) * 0.5, 23)
 	common_btn.focus_mode   = FOCUS_NONE
@@ -978,21 +1002,15 @@ func _fill_turrets_tab(page: Control) -> void:
 	# ── Rare Summon ────────────────────────────────────────────────────────────
 	const C_RARE_CLR := Color(0.25, 0.55, 1.00)   # blue
 	var rare_hdr := _label("🔵  Rare Summon", _font_bold, 14, C_RARE_CLR)
-	rare_hdr.position             = Vector2(0, 146)
+	rare_hdr.position             = Vector2(0, 128)
 	rare_hdr.size                 = Vector2(w, 20)
 	rare_hdr.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	page.add_child(rare_hdr)
 
-	var rare_odds_lbl := _label("75% Rare · 22% Epic · 3% Legendary", _font_reg, 11, C_DIM)
-	rare_odds_lbl.position             = Vector2(0, 168)
-	rare_odds_lbl.size                 = Vector2(w, 16)
-	rare_odds_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	page.add_child(rare_odds_lbl)
-
 	var C_RARE_BTN := Color(0.12, 0.28, 0.58)
 	var rare_btn := Button.new()
 	rare_btn.text         = "🎲  Rare Summon  (100g)"
-	rare_btn.position     = Vector2(8, 186)
+	rare_btn.position     = Vector2(8, 150)
 	rare_btn.size         = Vector2(w - 16, 46)
 	rare_btn.pivot_offset = Vector2((w - 16) * 0.5, 23)
 	rare_btn.focus_mode   = FOCUS_NONE
@@ -1013,21 +1031,15 @@ func _fill_turrets_tab(page: Control) -> void:
 	# ── Epic Summon ────────────────────────────────────────────────────────────
 	const C_EPIC_CLR := Color(0.80, 0.35, 1.00)   # purple
 	var epic_hdr := _label("🟣  Epic Summon", _font_bold, 14, C_EPIC_CLR)
-	epic_hdr.position             = Vector2(0, 248)
+	epic_hdr.position             = Vector2(0, 212)
 	epic_hdr.size                 = Vector2(w, 20)
 	epic_hdr.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	page.add_child(epic_hdr)
 
-	var epic_odds_lbl := _label("15% Rare · 75% Epic · 10% Legendary", _font_reg, 11, C_DIM)
-	epic_odds_lbl.position             = Vector2(0, 270)
-	epic_odds_lbl.size                 = Vector2(w, 16)
-	epic_odds_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	page.add_child(epic_odds_lbl)
-
 	var C_EPIC_BTN := Color(0.35, 0.12, 0.55)
 	var epic_btn := Button.new()
 	epic_btn.text         = "🎲  Epic Summon  (250g)"
-	epic_btn.position     = Vector2(8, 288)
+	epic_btn.position     = Vector2(8, 234)
 	epic_btn.size         = Vector2(w - 16, 46)
 	epic_btn.pivot_offset = Vector2((w - 16) * 0.5, 23)
 	epic_btn.focus_mode   = FOCUS_NONE
@@ -1079,11 +1091,170 @@ func _fill_turrets_tab(page: Control) -> void:
 
 func _fill_upgrades_tab(page: Control) -> void:
 	var w := 248
-	var lbl := _label("Coming soon…", _font_bold, 16, C_DIM)
-	lbl.position             = Vector2(0, 220)
-	lbl.size                 = Vector2(w, 30)
-	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	page.add_child(lbl)
+	var title := _label("✨  Boss Rewards", _font_bold, 16, C_GOLD)
+	title.position             = Vector2(0, 6)
+	title.size                 = Vector2(w, 26)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	page.add_child(title)
+
+	var div := ColorRect.new()
+	div.color = Color(1,1,1,0.08); div.position = Vector2(4, 34); div.size = Vector2(w - 8, 2)
+	page.add_child(div)
+
+	var empty_lbl := _label("No rewards yet.\nDefeat a boss to earn buffs.", _font_reg, 13, C_DIM)
+	empty_lbl.position      = Vector2(0, 44)
+	empty_lbl.size          = Vector2(w, 50)
+	empty_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	empty_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	page.add_child(empty_lbl)
+	_buff_empty_lbl = empty_lbl
+
+	var scroll := ScrollContainer.new()
+	scroll.position               = Vector2(0, 46)
+	scroll.size                   = Vector2(w, 502)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.vertical_scroll_mode   = ScrollContainer.SCROLL_MODE_AUTO
+	page.add_child(scroll)
+	_buff_history_scroll = scroll
+
+	var flow := HFlowContainer.new()
+	flow.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	flow.add_theme_constant_override("h_separation", 6)
+	flow.add_theme_constant_override("v_separation", 6)
+	scroll.add_child(flow)
+	_buff_history_flow = flow
+
+	# Shared hover tooltip (added to root HUD so it floats above everything)
+	if not is_instance_valid(_buff_tooltip):
+		_build_buff_tooltip()
+
+
+func _build_buff_tooltip() -> void:
+	var tip := Panel.new()
+	tip.z_index   = 200
+	tip.visible   = false
+	tip.size      = Vector2(200, 70)
+	tip.mouse_filter = MOUSE_FILTER_IGNORE
+	tip.add_theme_stylebox_override("panel", _rounded(Color(0.10, 0.08, 0.06, 0.97)))
+	add_child(tip)
+	_buff_tooltip = tip
+
+	_buff_tooltip_name = _label("", _font_bold, 13, C_WHITE)
+	_buff_tooltip_name.position      = Vector2(8, 6)
+	_buff_tooltip_name.size          = Vector2(184, 22)
+	_buff_tooltip_name.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	tip.add_child(_buff_tooltip_name)
+
+	_buff_tooltip_desc = _label("", _font_reg, 12, C_DIM)
+	_buff_tooltip_desc.position      = Vector2(8, 28)
+	_buff_tooltip_desc.size          = Vector2(184, 60)
+	_buff_tooltip_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	tip.add_child(_buff_tooltip_desc)
+
+
+func refresh_buff_history() -> void:
+	if not is_instance_valid(_buff_history_flow):
+		return
+	for child in _buff_history_flow.get_children():
+		child.queue_free()
+
+	var has_buffs : bool = not GameData.chosen_buffs.is_empty()
+	if is_instance_valid(_buff_empty_lbl):
+		_buff_empty_lbl.visible = not has_buffs
+	if not has_buffs:
+		return
+
+	var rarity_colors := {
+		"common": Color(0.80, 0.80, 0.80),
+		"rare":   Color(0.25, 0.55, 1.00),
+		"epic":   Color(0.72, 0.25, 0.90),
+	}
+	const ICON_MAP : Dictionary = {
+		"dmg_2":"⚔", "dmg_5":"⚔", "dmg_8":"⚔",
+		"fire_rate_5":"⚡", "fire_rate_15":"⚡", "fire_rate_30":"⚡",
+		"gold_10":"🪙", "summon_cost_10g":"💰", "lives_5":"❤️",
+		"boss_dmg_25":"💀", "boss_dmg_50":"💀",
+		"enemy_slow_10":"❄️", "enemy_slow_25":"❄️",
+		"dot_1":"🧪", "dot_3":"🧪",
+	}
+	const SZ := 56
+
+	# Group buffs by id+rarity key, count duplicates
+	var groups : Dictionary = {}
+	for buff in GameData.chosen_buffs:
+		var key : String = buff.get("id", "") + "|" + buff.get("rarity", "common")
+		if groups.has(key):
+			groups[key]["count"] += 1
+		else:
+			groups[key] = {"buff": buff, "count": 1}
+
+	for key in groups:
+		var entry  = groups[key]
+		var buff   = entry["buff"]
+		var count  : int    = entry["count"]
+		var bid    : String = buff.get("id", "")
+		var rc     : Color  = rarity_colors.get(buff.get("rarity", "common"), C_WHITE)
+		var icon   : String = ICON_MAP.get(bid, "✨")
+
+		var cell_style := _rounded(Color(0.14, 0.12, 0.10, 1.0))
+		cell_style.border_width_left   = 3
+		cell_style.border_width_right  = 3
+		cell_style.border_width_top    = 3
+		cell_style.border_width_bottom = 3
+		cell_style.border_color        = rc
+
+		var cell := Panel.new()
+		cell.custom_minimum_size = Vector2(SZ, SZ)
+		cell.mouse_filter        = MOUSE_FILTER_STOP
+		cell.add_theme_stylebox_override("panel", cell_style)
+		_buff_history_flow.add_child(cell)
+
+		# Emoji icon centred in the square
+		var icon_lbl := _label(icon, _font_bold, 26, C_WHITE)
+		icon_lbl.position             = Vector2(0, 4)
+		icon_lbl.size                 = Vector2(SZ, SZ - 8)
+		icon_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		icon_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+		icon_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+		cell.add_child(icon_lbl)
+
+		# Counter badge bottom-right when picked more than once
+		if count > 1:
+			var badge_style := _rounded(Color(0.05, 0.05, 0.05, 0.88))
+			badge_style.border_width_left   = 1
+			badge_style.border_width_right  = 1
+			badge_style.border_width_top    = 1
+			badge_style.border_width_bottom = 1
+			badge_style.border_color        = rc
+			var badge := Panel.new()
+			badge.size         = Vector2(24, 18)
+			badge.position     = Vector2(SZ - 24, SZ - 18)
+			badge.mouse_filter = MOUSE_FILTER_IGNORE
+			badge.add_theme_stylebox_override("panel", badge_style)
+			cell.add_child(badge)
+			var cnt_lbl := _label("%dx" % count, _font_bold, 11, C_WHITE)
+			cnt_lbl.position             = Vector2(0, -1)
+			cnt_lbl.size                 = Vector2(24, 18)
+			cnt_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			cnt_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+			cnt_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+			badge.add_child(cnt_lbl)
+
+		# Hover tooltip
+		var bname : String = buff.get("name", "")
+		var bdesc : String = buff.get("desc", "")
+		cell.mouse_entered.connect(func():
+			if not is_instance_valid(_buff_tooltip):
+				return
+			_buff_tooltip_name.text = bname
+			_buff_tooltip_desc.text = bdesc
+			_buff_tooltip.size      = Vector2(200, 90)
+			_buff_tooltip.visible   = true
+		)
+		cell.mouse_exited.connect(func():
+			if is_instance_valid(_buff_tooltip):
+				_buff_tooltip.visible = false
+		)
 
 
 # ── Tower info panel ──────────────────────────────────────────────────────────
@@ -1274,7 +1445,7 @@ func show_tower_info(tower, merge_count: int = 0) -> void:
 	var tid         : String = d.get("id", "")
 	var dmg_mult    : float  = GameData.turret_damage_mult(tid)
 	var spd_mult    : float  = GameData.turret_fire_rate_mult(tid)
-	var eff_dmg     : float  = tower.damage * dmg_mult
+	var eff_dmg     : float  = (tower.damage + GameData.buff_damage_flat) * dmg_mult
 	var base_rate   : float  = d.get("fire_rate", tower.fire_rate)
 	var eff_rate    : float  = base_rate * spd_mult
 	_info_dmg_lbl.text   = "%.0f" % eff_dmg + (" (+%.0f%%)" % [(dmg_mult - 1.0) * 100] if dmg_mult > 1.0 else "")
@@ -1598,6 +1769,7 @@ func _build_game_over_screen() -> void:
 	start_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.55, 0.22, 0.05)))
 	start_btn.pressed.connect(func(): Engine.time_scale = 1.0; get_tree().reload_current_scene())
 	overlay.add_child(start_btn)
+	call_deferred("_wire_hover_recursive", overlay)
 
 
 func show_game_over(stage: int) -> void:
@@ -2786,7 +2958,7 @@ func _tw_show_detail(def: Dictionary, eff_map: Dictionary,
 		_tw_preview_node.queue_redraw()
 
 	# Left column stats
-	_tw_dmg_lbl.text    = "%.0f" % def.get("damage", 0.0)
+	_tw_dmg_lbl.text    = "%.0f" % (def.get("damage", 0.0) + GameData.buff_damage_flat)
 	_tw_rng_lbl.text    = "%.0f px" % def.get("range", 0.0)
 	_tw_rate_lbl.text   = "%.1f / s" % def.get("fire_rate", 0.0)
 	# Effect short name (title-case the key)
@@ -3622,11 +3794,42 @@ func _refresh_recipe_modal() -> void:
 
 # ── Button helpers ────────────────────────────────────────────────────────────
 
+func _wire_all_button_hovers() -> void:
+	_wire_hover_recursive(self)
+
+func _wire_hover_recursive(node: Node) -> void:
+	for child in node.get_children():
+		if child is Button:
+			_add_btn_hover(child)
+		_wire_hover_recursive(child)
+
+func _add_btn_hover(btn: Button) -> void:
+	# Set pivot to center so scale animates from the middle
+	btn.pivot_offset = btn.size / 2.0
+	btn.mouse_entered.connect(func():
+		if _btn_tweens.has(btn) and is_instance_valid(_btn_tweens[btn]):
+			_btn_tweens[btn].kill()
+		var tw := create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		tw.tween_property(btn, "scale", Vector2(1.06, 1.06), 0.12)
+		_btn_tweens[btn] = tw
+	)
+	btn.mouse_exited.connect(func():
+		if _btn_tweens.has(btn) and is_instance_valid(_btn_tweens[btn]):
+			_btn_tweens[btn].kill()
+		var tw := create_tween().set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		tw.tween_property(btn, "scale", Vector2(1.0, 1.0), 0.10)
+		_btn_tweens[btn] = tw
+	)
+
+
 func _tween_scale(node: Control, target: Vector2, dur: float) -> void:
 	if _btn_tweens.has(node) and is_instance_valid(_btn_tweens[node]):
 		_btn_tweens[node].kill()
-	var tw := create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	tw.tween_property(node, "scale", target, dur)
+	var tw := create_tween()
+	tw.tween_property(node, "scale", target, dur) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tw.tween_property(node, "scale", Vector2(1.0, 1.0), dur * 1.4) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	_btn_tweens[node] = tw
 
 
@@ -3804,6 +4007,286 @@ func _label(text: String, font: Font, size: int, color: Color) -> Label:
 	l.add_theme_font_size_override("font_size", size)
 	l.add_theme_color_override("font_color",    color)
 	return l
+
+
+func show_boss_buff_cards(buffs: Array, stage: int) -> void:
+	if is_instance_valid(_boss_buff_overlay):
+		_boss_buff_overlay.queue_free()
+
+	var rarity_colors := {
+		"common": Color(0.80, 0.80, 0.80),
+		"rare":   Color(0.25, 0.55, 1.00),
+		"epic":   Color(0.72, 0.25, 0.90),
+	}
+	var rarity_labels := {
+		"common": "COMMON",
+		"rare":   "RARE",
+		"epic":   "EPIC",
+	}
+	# Emoji icons per buff id
+	var buff_icons := {
+		"dmg_2":           "⚔",  "dmg_5":       "⚔",  "dmg_8":       "⚔",
+		"fire_rate_5":     "⚡",  "fire_rate_15": "⚡",  "fire_rate_30": "⚡",
+		"gold_10":         "🪙",
+		"summon_cost_10g": "💰",
+		"lives_5":         "❤️",
+		"boss_dmg_25":     "💀",  "boss_dmg_50":  "💀",
+		"enemy_slow_10":   "❄️",  "enemy_slow_25": "❄️",
+		"dot_1":           "🧪",  "dot_3":         "🧪",
+	}
+
+	# Overlay fades in
+	var overlay := ColorRect.new()
+	overlay.color        = Color(0, 0, 0, 0.0)
+	overlay.position     = Vector2.ZERO
+	overlay.size         = Vector2(1280, 720)
+	overlay.mouse_filter = MOUSE_FILTER_STOP
+	add_child(overlay)
+	_boss_buff_overlay = overlay
+
+	var fade_tw := create_tween()
+	fade_tw.tween_property(overlay, "color", Color(0, 0, 0, 0.82), 0.25) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+
+	# Title
+	var title := _label("⚔  Boss Defeated! Choose a Reward  ⚔", _font_bold, 26, C_GOLD)
+	title.position             = Vector2(0, 48)
+	title.size                 = Vector2(1280, 48)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	title.modulate             = Color(1, 1, 1, 0)
+	overlay.add_child(title)
+	fade_tw.parallel().tween_property(title, "modulate:a", 1.0, 0.35) \
+		.set_delay(0.1).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+
+	var rarity_str : String = buffs[0].get("rarity", "common") if buffs.size() > 0 else "common"
+	var rc         : Color  = rarity_colors.get(rarity_str, C_WHITE)
+	var rl         : String = rarity_labels.get(rarity_str, "COMMON")
+	var sub := _label("Stage %d  —  %s Rewards" % [stage, rl], _font_bold, 18, rc)
+	sub.position             = Vector2(0, 96)
+	sub.size                 = Vector2(1280, 26)
+	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sub.modulate             = Color(1, 1, 1, 0)
+	overlay.add_child(sub)
+	fade_tw.parallel().tween_property(sub, "modulate:a", 1.0, 0.35) \
+		.set_delay(0.15).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+
+	# Layout constants
+	const CARD_W  : int = 260
+	const CARD_H  : int = 380
+	const CARD_Y  : int = 135
+	const SPACING : int = 50
+	var total_w   : int = buffs.size() * CARD_W + (buffs.size() - 1) * SPACING
+	var start_x   : int = (1280 - total_w) / 2
+
+	# Track all card refs so hover/click can lock all of them
+	var all_cards : Array = []
+
+	for i in buffs.size():
+		var buff       : Dictionary = buffs[i]
+		var bx         : int        = start_x + i * (CARD_W + SPACING)
+		var flip_delay : float      = 0.28 + i * 0.18
+		var icon_str   : String     = buff_icons.get(buff.get("id", ""), "✨")
+
+		# Card container — starts invisible, input disabled until flip done
+		var card := Panel.new()
+		card.position     = Vector2(bx, CARD_Y)
+		card.size         = Vector2(CARD_W, CARD_H)
+		card.pivot_offset = Vector2(CARD_W / 2.0, CARD_H / 2.0)
+		card.modulate     = Color(1, 1, 1, 0)
+		card.mouse_filter = MOUSE_FILTER_IGNORE
+		card.add_theme_stylebox_override("panel", _rounded(Color(0, 0, 0, 0)))
+		overlay.add_child(card)
+		all_cards.append(card)
+
+		# ── Back face ────────────────────────────────────────────────────────────
+		var back_style := _rounded(Color(0.10, 0.08, 0.14, 1.0))
+		back_style.border_width_left   = 3; back_style.border_width_right  = 3
+		back_style.border_width_top    = 3; back_style.border_width_bottom = 3
+		back_style.border_color        = rc.darkened(0.4)
+		var back := Panel.new()
+		back.size         = Vector2(CARD_W, CARD_H)
+		back.mouse_filter = MOUSE_FILTER_IGNORE
+		back.add_theme_stylebox_override("panel", back_style)
+		card.add_child(back)
+
+		var q_lbl := _label("?", _font_bold, 80, rc.darkened(0.25))
+		q_lbl.position             = Vector2(0, CARD_H / 2 - 56)
+		q_lbl.size                 = Vector2(CARD_W, 88)
+		q_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		q_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+		back.add_child(q_lbl)
+
+		var back_rl := _label(rl, _font_bold, 13, rc.darkened(0.3))
+		back_rl.position             = Vector2(0, CARD_H - 52)
+		back_rl.size                 = Vector2(CARD_W, 22)
+		back_rl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		back_rl.mouse_filter         = MOUSE_FILTER_IGNORE
+		back.add_child(back_rl)
+
+		# ── Front face (hidden until flip) ───────────────────────────────────────
+		var front_style := _rounded(Color(0.14, 0.12, 0.10, 1.0))
+		front_style.border_width_left   = 3; front_style.border_width_right  = 3
+		front_style.border_width_top    = 3; front_style.border_width_bottom = 3
+		front_style.border_color        = rc
+		var front := Panel.new()
+		front.size          = Vector2(CARD_W, CARD_H)
+		front.visible       = false
+		front.clip_contents = true
+		front.mouse_filter  = MOUSE_FILTER_IGNORE
+		front.add_theme_stylebox_override("panel", front_style)
+		card.add_child(front)
+
+		# Colored top bar
+		var top_bar := ColorRect.new()
+		top_bar.color = rc.darkened(0.3); top_bar.position = Vector2(0, 0)
+		top_bar.size  = Vector2(CARD_W, 8); top_bar.mouse_filter = MOUSE_FILTER_IGNORE
+		front.add_child(top_bar)
+
+		# Rarity label
+		var rar_lbl := _label(rl, _font_bold, 12, rc)
+		rar_lbl.position             = Vector2(0, 12)
+		rar_lbl.size                 = Vector2(CARD_W, 20)
+		rar_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		rar_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+		front.add_child(rar_lbl)
+
+		# Divider under rarity
+		var div1 := ColorRect.new()
+		div1.color = rc.darkened(0.5); div1.position = Vector2(16, 35)
+		div1.size  = Vector2(CARD_W - 32, 2); div1.mouse_filter = MOUSE_FILTER_IGNORE
+		front.add_child(div1)
+
+		# Icon (emoji, large)
+		var icon_lbl := _label(icon_str, _font_bold, 52, C_WHITE)
+		icon_lbl.position             = Vector2(0, 44)
+		icon_lbl.size                 = Vector2(CARD_W, 68)
+		icon_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		icon_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+		icon_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+		front.add_child(icon_lbl)
+
+		# Divider under icon
+		var div2 := ColorRect.new()
+		div2.color = rc.darkened(0.5); div2.position = Vector2(16, 118)
+		div2.size  = Vector2(CARD_W - 32, 2); div2.mouse_filter = MOUSE_FILTER_IGNORE
+		front.add_child(div2)
+
+		# Buff name
+		var name_lbl := _label(buff.get("name", ""), _font_bold, 19, C_WHITE)
+		name_lbl.position             = Vector2(10, 126)
+		name_lbl.size                 = Vector2(CARD_W - 20, 54)
+		name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		name_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+		name_lbl.autowrap_mode        = TextServer.AUTOWRAP_WORD_SMART
+		name_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+		front.add_child(name_lbl)
+
+		# Description — wrapped in a ScrollContainer so autowrap is constrained correctly
+		var desc_lbl := _label(buff.get("desc", ""), _font_bold, 16, C_DIM)
+		desc_lbl.custom_minimum_size       = Vector2(CARD_W - 32, 0)
+		desc_lbl.autowrap_mode             = TextServer.AUTOWRAP_WORD
+		desc_lbl.horizontal_alignment      = HORIZONTAL_ALIGNMENT_CENTER
+		desc_lbl.size_flags_horizontal     = Control.SIZE_EXPAND_FILL
+		desc_lbl.size_flags_vertical       = Control.SIZE_SHRINK_BEGIN
+		desc_lbl.mouse_filter              = MOUSE_FILTER_IGNORE
+		var desc_scroll := ScrollContainer.new()
+		desc_scroll.position               = Vector2(16, 186)
+		desc_scroll.size                   = Vector2(CARD_W - 32, 148)
+		desc_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		desc_scroll.vertical_scroll_mode   = ScrollContainer.SCROLL_MODE_DISABLED
+		desc_scroll.mouse_filter           = MOUSE_FILTER_IGNORE
+		desc_scroll.add_child(desc_lbl)
+		front.add_child(desc_scroll)
+
+
+		# Golden selection glow — invisible until card is clicked
+		var glow_style := _rounded(Color(0, 0, 0, 0))
+		glow_style.border_width_left   = 4; glow_style.border_width_right  = 4
+		glow_style.border_width_top    = 4; glow_style.border_width_bottom = 4
+		glow_style.border_color        = C_GOLD
+		glow_style.shadow_color        = Color(1.0, 0.82, 0.22, 0.6)
+		glow_style.shadow_size         = 8
+		var glow_panel := Panel.new()
+		glow_panel.size         = Vector2(CARD_W, CARD_H)
+		glow_panel.modulate     = Color(1, 1, 1, 0)
+		glow_panel.mouse_filter = MOUSE_FILTER_IGNORE
+		glow_panel.add_theme_stylebox_override("panel", glow_style)
+		front.add_child(glow_panel)
+
+		# ── Flip animation ───────────────────────────────────────────────────────
+		var back_ref  : Panel   = back
+		var front_ref : Panel   = front
+		var card_ref  : Panel   = card
+		var glow_ref  : Panel   = glow_panel
+		var flip_tw := create_tween()
+		flip_tw.tween_property(card, "modulate:a", 1.0, 0.20) \
+			.set_delay(flip_delay).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		flip_tw.tween_property(card, "scale:x", 0.0, 0.18) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+		flip_tw.tween_callback(func():
+			back_ref.visible  = false
+			front_ref.visible = true
+		)
+		flip_tw.tween_property(card, "scale:x", 1.0, 0.22) \
+			.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+		# ── Enable hover + click after flip completes ────────────────────────────
+		var bid         : String  = buff.get("id", "")
+		var overlay_ref : Control = overlay
+		var all_ref     : Array   = all_cards
+		flip_tw.tween_callback(func():
+			card_ref.mouse_filter = MOUSE_FILTER_STOP
+
+			card_ref.mouse_entered.connect(func():
+				if card_ref.mouse_filter == MOUSE_FILTER_IGNORE:
+					return
+				if _btn_tweens.has(card_ref) and is_instance_valid(_btn_tweens[card_ref]):
+					_btn_tweens[card_ref].kill()
+				var hw := create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+				hw.tween_property(card_ref, "scale", Vector2(1.07, 1.07), 0.14)
+				_btn_tweens[card_ref] = hw
+			)
+			card_ref.mouse_exited.connect(func():
+				if _btn_tweens.has(card_ref) and is_instance_valid(_btn_tweens[card_ref]):
+					_btn_tweens[card_ref].kill()
+				var hw := create_tween().set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+				hw.tween_property(card_ref, "scale", Vector2(1.0, 1.0), 0.12)
+				_btn_tweens[card_ref] = hw
+			)
+			card_ref.gui_input.connect(func(event: InputEvent):
+				if not (event is InputEventMouseButton and \
+						event.button_index == MOUSE_BUTTON_LEFT and event.pressed):
+					return
+				# Lock all cards immediately
+				for c in all_ref:
+					if is_instance_valid(c):
+						c.mouse_filter = MOUSE_FILTER_IGNORE
+				# Golden border flash
+				var glow_tw := create_tween().set_parallel(true)
+				glow_tw.tween_property(glow_ref, "modulate:a", 1.0, 0.12) \
+					.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+				glow_tw.chain().tween_property(glow_ref, "modulate:a", 0.0, 0.22) \
+					.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+				# Punch-in on selected card
+				var pick_tw := create_tween()
+				pick_tw.tween_property(card_ref, "scale", Vector2(0.88, 0.88), 0.08) \
+					.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+				pick_tw.tween_property(card_ref, "scale", Vector2(1.15, 1.15), 0.16) \
+					.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+				pick_tw.tween_property(card_ref, "scale", Vector2(1.0, 1.0), 0.10)
+				# Fade overlay out then fire signal
+				var out_tw := create_tween()
+				out_tw.tween_interval(0.36)
+				out_tw.tween_property(overlay_ref, "modulate:a", 0.0, 0.20) \
+					.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+				out_tw.tween_callback(func():
+					overlay_ref.queue_free()
+					_boss_buff_overlay = null
+					buff_chosen.emit(bid)
+				)
+			)
+		)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

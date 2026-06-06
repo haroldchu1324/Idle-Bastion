@@ -1,12 +1,12 @@
 extends Node2D
 
-signal died(reward: int)
+signal died(reward: float)
 signal reached_end()
 
 var hp         : float = 10.0
 var max_hp     : float = 10.0
 var speed      : float = 220.0
-var reward     : int   = 5
+var reward     : float = 5.0
 var is_boss    : bool  = false
 var enemy_type : int   = 0   # 0=slime 1=goblin 2=skeleton 3=orc 4=shadow
 var boss_stage : int   = 1   # 1-10
@@ -23,6 +23,9 @@ var _base_speed    : float   = 0.0
 var _travel_dir    : Vector2 = Vector2.RIGHT
 var _wobble_offset : Vector2 = Vector2.ZERO
 
+var _dot_timer          : float   = 0.0
+var _dead               : bool    = false
+
 var is_bleeding         : bool    = false
 var _bleed_trail        : Array   = []   # Array of {pos: Vector2, age: float}
 var _bleed_trail_timer  : float   = 0.0
@@ -38,7 +41,7 @@ const _KNOCKBACK_HEIGHT : float   = 38.0
 
 
 func setup(path: Array, enemy_hp: float, enemy_speed: float,
-		   enemy_reward: int, boss: bool = false,
+		   enemy_reward: float, boss: bool = false,
 		   e_type: int = 0, b_stage: int = 1) -> void:
 	_path       = path
 	hp          = enemy_hp
@@ -118,9 +121,16 @@ func _process(delta: float) -> void:
 		if poison_timer <= 0.0:
 			is_poisoned       = false
 			damage_taken_mult = 1.0
+	if GameData.buff_dot_dps > 0.0:
+		_dot_timer += delta
+		if _dot_timer >= 1.0:
+			_dot_timer -= 1.0
+			take_damage(GameData.buff_dot_dps)
 	if _current_wp >= _path.size():
-		reached_end.emit()
-		queue_free()
+		if not _dead:
+			_dead = true
+			reached_end.emit()
+			queue_free()
 		return
 	var target    := _path[_current_wp] as Vector2
 	var to_target : Vector2 = target - position
@@ -138,9 +148,12 @@ func _process(delta: float) -> void:
 
 
 func take_damage(amount: float) -> void:
+	if _dead:
+		return
 	hp = max(0.0, hp - amount * damage_taken_mult)
 	queue_redraw()
 	if hp <= 0.0:
+		_dead = true
 		died.emit(reward)
 		queue_free()
 

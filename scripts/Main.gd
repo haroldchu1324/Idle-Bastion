@@ -176,7 +176,7 @@ const STAGES : Array = [
 @onready var _hud                       = $UI/HUD
 @onready var _build_grid                = $BuildGrid
 
-var _gold              : int   = 100
+var _gold              : float = 100.0
 var _lives             : int   = 20
 var _stage             : int   = 1
 var _wave_in_stage     : int   = 0
@@ -188,10 +188,11 @@ var _gems_this_run     : int   = 0
 var _spawn_queue   : Array = []
 var _spawn_timer   : float = 0.0
 
-var _boss_active   : bool  = false
-var _boss_timer    : float = 0.0
-var _boss_ref      : Node2D = null
-var _spawning_done : bool  = false
+var _boss_active          : bool  = false
+var _boss_timer           : float = 0.0
+var _boss_ref             : Node2D = null
+var _spawning_done        : bool  = false
+var _pending_boss_reward  : bool  = false
 var _game_over     : bool  = false
 
 # ── Tower movement & selection ────────────────────────────────────────────────
@@ -216,6 +217,8 @@ func _ready() -> void:
 	_hud.upgrade_merge_requested.connect(_on_upgrade_merge_requested)
 	_hud.debug_gold_requested.connect(func(): _gold += 10000; _refresh_hud())
 	GameData.current_run_highest_stage = 0
+	GameData.reset_run_buffs()
+	_hud.buff_chosen.connect(_on_buff_chosen)
 	_gold  = 100
 	_lives = 20
 	_refresh_hud()
@@ -302,7 +305,7 @@ func _start_boss_wave(boss_def: Array) -> void:
 	var enemy : Node2D = ENEMY_SCENE.instantiate()
 	add_child(enemy)
 	var spd  : float = boss_def[1] * GameData.relic_enemy_slow_mult()
-	var gold : int   = int(ceil(boss_def[2] * GameData.total_gold_drop_mult()))
+	var gold : float = boss_def[2] * GameData.total_gold_drop_mult()
 	enemy.setup(PATH, boss_def[0], spd, gold, true, 0, _stage)
 	enemy.died.connect(_on_boss_died)
 	enemy.reached_end.connect(_on_boss_reached_end)
@@ -318,7 +321,7 @@ func _spawn_next_enemy() -> void:
 	add_child(enemy)
 	var etype : int = (_stage - 1) / 2
 	var spd  : float = def[2] * GameData.relic_enemy_slow_mult()
-	var gold : int   = int(ceil(def[3] * GameData.total_gold_drop_mult()))
+	var gold : float = def[3] * GameData.total_gold_drop_mult()
 	enemy.setup(PATH, def[1], spd, gold, false, etype, _stage)
 	enemy.died.connect(_on_enemy_died)
 	enemy.reached_end.connect(_on_enemy_reached_end)
@@ -328,7 +331,7 @@ func _spawn_next_enemy() -> void:
 		_refresh_hud()
 
 
-func _on_enemy_died(reward: int) -> void:
+func _on_enemy_died(reward: float) -> void:
 	_gold          += reward
 	_enemies_alive -= 1
 	_enemies_killed += 1
@@ -337,6 +340,7 @@ func _on_enemy_died(reward: int) -> void:
 	_hud.refresh_gems()
 	_check_wave_done()
 	_refresh_hud()
+	_try_show_boss_reward()
 
 
 func _on_enemy_reached_end() -> void:
@@ -345,6 +349,7 @@ func _on_enemy_reached_end() -> void:
 	_check_lives()
 	_check_wave_done()
 	_refresh_hud()
+	_try_show_boss_reward()
 
 
 func _clear_ice_zones() -> void:
@@ -363,7 +368,7 @@ func _check_wave_done() -> void:
 		_refresh_hud()
 
 
-func _on_boss_died(reward: int) -> void:
+func _on_boss_died(reward: float) -> void:
 	if not _boss_active:
 		return
 	_gold          += reward
@@ -372,12 +377,56 @@ func _on_boss_died(reward: int) -> void:
 	GameData.blue_gems += boss_gems
 	_gems_this_run     += boss_gems
 	_hud.refresh_gems()
-	_boss_active    = false
-	_boss_ref       = null
-	_wave_active    = false
-	_spawning_done  = false
+	_boss_active           = false
+	_boss_ref              = null
+	_wave_active           = false
+	_spawning_done         = false
+	_pending_boss_reward   = true
 	_clear_ice_zones()
+	_hud.hide_wave_btn()
+	_refresh_hud()
+	_try_show_boss_reward()
+
+
+var _pre_reward_time_scale : float = 1.0
+
+func _try_show_boss_reward() -> void:
+	if not _pending_boss_reward:
+		return
+	if _enemies_alive > 0:
+		return
+	# Mark consumed immediately so re-entrant calls (e.g. DOT killing another
+	# enemy this same frame) don't double-trigger.
+	_pending_boss_reward = false
+	# Wait one frame so every queue_free() from this frame is flushed and no
+	# dying enemy is still visible on screen when the cards appear.
+	await get_tree().process_frame
+	_pre_reward_time_scale     = Engine.time_scale
+	Engine.time_scale          = 1.0
+	_cancel_hold()
+	_deselect_tower()
+	_hud.hide_wave_btn()
+	var rarity : String = GameData.roll_rarity(_stage)
+	var buffs  : Array  = GameData.pick_buffs(rarity, 3)
+	_hud.show_boss_buff_cards(buffs, _stage)
+
+
+func _on_buff_chosen(buff_id: String) -> void:
+	Engine.time_scale = _pre_reward_time_scale
+	GameData.apply_buff(buff_id)
+	_hud.refresh_buff_history()
+	if GameData.buff_pending_lives > 0:
+		_lives += GameData.buff_pending_lives
+		GameData.buff_pending_lives = 0
+	if buff_id == "summon_cost_10g":
+		_turret_roll_cost = maxi(1, _turret_roll_cost - 10)
+		_rare_roll_cost   = maxi(1, _rare_roll_cost   - 10)
+		_epic_roll_cost   = maxi(1, _epic_roll_cost   - 10)
+		_hud.update_pull_cost(_turret_roll_cost)
+		_hud.update_rare_cost(_rare_roll_cost)
+		_hud.update_epic_cost(_epic_roll_cost)
 	_advance_stage()
+	_hud.show_wave_btn()
 	if not _game_over:
 		_refresh_hud()
 
@@ -425,7 +474,7 @@ func _trigger_game_over() -> void:
 	_game_over = true
 	_lives      = 0
 	Engine.time_scale = 0.0
-	GameData.run_gold = _gold
+	GameData.run_gold = int(_gold)
 	if _stage > GameData.current_run_highest_stage:
 		GameData.current_run_highest_stage = _stage
 	if GameData.current_run_highest_stage > GameData.all_time_highest_stage:
@@ -447,7 +496,7 @@ func _on_start_battle_pressed() -> void:
 func _trigger_victory() -> void:
 	_game_over = true
 	Engine.time_scale = 0.0
-	GameData.run_gold = _gold
+	GameData.run_gold = int(_gold)
 	GameData.current_run_highest_stage = 10
 	if 10 > GameData.all_time_highest_stage:
 		GameData.all_time_highest_stage = 10
@@ -586,7 +635,7 @@ func _refresh_hud() -> void:
 	if _boss_active and is_instance_valid(_boss_ref):
 		boss_hp     = _boss_ref.hp
 		boss_max_hp = _boss_ref.max_hp
-	_hud.refresh(_gold, _lives, _stage, _wave_in_stage, total_waves,
+	_hud.refresh(int(_gold), _lives, _stage, _wave_in_stage, total_waves,
 				 _wave_active, _boss_active, _boss_timer, can_next,
 				 boss_hp, boss_max_hp)
 	_hud.update_recipe_notifications(SummonSystem.get_available_recipe_fusions(_tower_map), _get_all_owned_turret_ids())

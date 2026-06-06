@@ -311,7 +311,7 @@ func _try_shoot() -> void:
 
 func _fire(target: Node2D, dmg: float) -> void:
 	var tid       : String = tower_data.get("id", "")
-	var final_dmg := dmg * GameData.turret_damage_mult(tid) * (GameData.relic_boss_dmg_mult() if target.is_boss else 1.0)
+	var final_dmg := (dmg + GameData.buff_damage_flat) * GameData.turret_damage_mult(tid) * (GameData.relic_boss_dmg_mult() if target.is_boss else 1.0)
 
 	# Melee towers — instant direct damage, no projectile
 	if tower_type in [26, 27, 28, 29]:
