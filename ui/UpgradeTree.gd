@@ -1,6 +1,9 @@
 # ui/UpgradeTree.gd
 extends Control
 
+# ── Debug toggle — set false before exporting ─────────────────────────────────
+const DEBUG : bool = true
+
 const NODE_R     : float = 36.0
 const CENTER_R   : float = 48.0
 const SPECIAL_R  : float = 42.0
@@ -82,6 +85,7 @@ func _build_reset_btn() -> void:
 	btn.add_theme_stylebox_override("pressed", s)
 	btn.add_theme_stylebox_override("focus",   s)
 	btn.pressed.connect(_on_reset_pressed)
+	btn.visible = DEBUG
 	add_child(btn)
 
 	var add_btn := Button.new()
@@ -117,6 +121,7 @@ func _build_reset_btn() -> void:
 			if not nd.is_empty():
 				_open_popup(nd)
 	)
+	add_btn.visible = DEBUG
 	add_child(add_btn)
 
 

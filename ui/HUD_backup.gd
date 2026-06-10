@@ -1,9 +1,13 @@
 extends Control
 
+# ── Debug toggle — set false before exporting ─────────────────────────────────
+const DEBUG : bool = true
+
 # ── Signals ───────────────────────────────────────────────────────────────────
 signal wave_pressed
 signal speed_toggled(factor: float)
 signal start_battle_pressed
+signal buff_chosen(buff_id: String)
 signal upgrade_purchased(idx: int, cost: int)
 signal prestige_confirmed
 signal roll_turret_requested
@@ -13,6 +17,8 @@ signal roll_upgrade_requested
 signal recipe_fusion_requested(result_id: String)
 signal upgrade_merge_requested
 signal debug_gold_requested
+signal sell_tower_requested
+signal debug_summon_requested(tower_id: String)
 
 # ── Palette ───────────────────────────────────────────────────────────────────
 const C_BG       := Color(0.10, 0.07, 0.04, 0.94)
@@ -67,6 +73,17 @@ var _current_gold        : int     = 0
 var _rarity_modal      : Control = null
 var _modal_odds_lbls   : Array   = []   # [pool][rarity] — 3 pools × 4 rarities
 
+# Boss buff card overlay
+var _boss_buff_overlay    : Control = null
+
+# Buff history (upgrades tab)
+var _buff_history_scroll  : ScrollContainer = null
+var _buff_history_flow    : HFlowContainer  = null
+var _buff_empty_lbl       : Label           = null
+var _buff_tooltip         : Panel           = null
+var _buff_tooltip_name    : Label           = null
+var _buff_tooltip_desc    : Label           = null
+
 # Tower info panel
 var _info_panel         : Control
 var _info_panel_style   : StyleBoxFlat
@@ -79,6 +96,8 @@ var _info_rng_lbl       : Label
 var _info_rate_lbl      : Label
 var _info_effect_lbl    : Label
 var _info_upgrade_btn   : Button
+var _info_counter_lbl   : Label
+var _info_counter_bg    : Panel
 
 # Screens
 var _game_over_screen   : Control
@@ -88,6 +107,43 @@ var _shop_screen        : Control
 var _world_map_screen   : Control
 var _heroes_screen      : Control
 var _towers_screen      : Control
+# Heroes page refs
+var _hero_sel_container : Control  = null   # "Hero Selected" inner box
+var _hero_det_panel     : Panel    = null   # detail popup
+var _hero_det_style     : StyleBoxFlat = null
+var _hero_det_preview   : Node2D   = null
+var _hero_det_name      : Label    = null
+var _hero_det_rarity    : Label    = null
+var _hero_det_dmg       : Label    = null
+var _hero_det_rng       : Label    = null
+var _hero_det_rate      : Label    = null
+var _hero_det_eff       : Label    = null
+var _hero_det_desc      : Label    = null
+var _hero_det_ability   : Label    = null
+var _hero_det_select    : Button   = null
+var _hero_sel_preview   : Node2D   = null
+var _hero_sel_name      : Label    = null
+var _hero_sel_stats     : Label    = null
+var _hero_card_refs     : Array    = []   # [{id, style, badge, rcol}]
+# Towers page — detail panel refs
+var _tw_detail_panel    : Control = null
+var _tw_detail_style    : StyleBoxFlat = null
+var _tw_preview_node    : Node2D  = null
+var _tw_name_lbl        : Label   = null
+var _tw_rarity_lbl      : Label   = null
+var _tw_desc_lbl        : Label   = null
+var _tw_dmg_lbl         : Label   = null
+var _tw_rng_lbl         : Label   = null
+var _tw_rate_lbl        : Label   = null
+var _tw_effect_lbl      : Label   = null
+var _tw_level_lbl       : Label   = null
+var _tw_xp_bar_fill     : ColorRect = null
+var _tw_xp_bar_lbl      : Label   = null
+var _tw_copies_lbl      : Label   = null
+var _tw_buy_btn         : Button  = null
+var _tw_buy_cost_lbl    : Label   = null
+var _tw_current_def     : Dictionary = {}
+var _tw_lvl_rows        : Array   = []   # [{lv_lbl, buff_lbl, bg}] x10
 var _victory_screen     : Control
 var _upg_gold_lbl       : Label
 var _upg_rows           : Array = []
@@ -101,6 +157,10 @@ var _font_bold  : FontFile
 
 # Floating in-world upgrade button
 var _upgrade_popup_btn : Button = null
+# Floating in-world sell button (debug)
+var _sell_btn          : Button = null
+# Debug tower-list panel
+var _dbg_tower_panel   : Control = null
 
 # Recipe notification panel (right side of track)
 var _recipe_panel        : Control = null
@@ -117,6 +177,30 @@ var _gear_menu           : Panel   = null
 var _recipe_btn_badge    : Label   = null
 var _recipe_row_refs     : Array   = []   # [{result_id, badge_lbl, craft_btn, mat_refs:[{panel,id}]}]
 
+# ── Tower Gacha Shop ──────────────────────────────────────────────────────────
+const GACHA_SUMMON_COST   : int   = 100
+const GACHA_SPIN_DURATION : float = 2.5
+const GACHA_CARD_W        : int   = 112
+const GACHA_CARD_H        : int   = 160
+const GACHA_CARD_SLOT     : int   = 120   # card width + 8px gap
+const GACHA_STRIP_COUNT   : int   = 60
+const GACHA_WIN_IDX       : int   = 48
+
+var _gacha_spinning      : bool          = false
+var _gacha_strip         : Control       = null
+var _gacha_summon_btn    : Button        = null
+var _gacha_gem_lbl       : Label         = null
+var _gacha_result_panel  : Control       = null   # the dim overlay
+var _gacha_tween         : Tween         = null
+var _gacha_result_prev   : Node          = null
+var _gacha_result_name   : Label         = null
+var _gacha_result_rar    : Label         = null
+var _gacha_result_info   : Label         = null
+var _gacha_result_lvlup  : Label         = null
+var _gacha_result_card_s : StyleBoxFlat  = null   # card-art area border
+
+var _tower_card_refs     : Dictionary   = {}      # tower_id → {lvl_lbl, copies_lbl}
+
 const _UPG_DATA : Array = [
 	["⚔  Tower Damage", "Increase all tower damage by 15%.", 100],
 	["🎯  Tower Range",  "Increase all tower range by 10%.",   80],
@@ -129,6 +213,8 @@ func _ready() -> void:
 	mouse_filter = MOUSE_FILTER_IGNORE
 	_load_fonts()
 	_build_ui()
+	# Wire hover after one frame so all button sizes are finalized
+	call_deferred("_wire_all_button_hovers")
 
 
 func _load_fonts() -> void:
@@ -147,6 +233,14 @@ func setup(_main) -> void:
 func refresh_gems() -> void:
 	if is_instance_valid(_gem_hud_lbl):
 		_gem_hud_lbl.text = "🔷 %d" % GameData.blue_gems
+
+func hide_wave_btn() -> void:
+	if is_instance_valid(wave_btn):
+		wave_btn.visible = false
+
+func show_wave_btn() -> void:
+	if is_instance_valid(wave_btn):
+		wave_btn.visible = true
 
 
 # ── Public refresh ────────────────────────────────────────────────────────────
@@ -350,6 +444,7 @@ func _refresh_upg_row_set(rows: Array, _ingame: bool) -> void:
 
 func _build_ui() -> void:
 	_build_upgrade_popup()
+	_build_sell_btn()
 	_build_rarity_modal()       # build modal before right panel so info_btn can reference it
 	_build_right_panel()
 	_build_wave_label()
@@ -437,7 +532,7 @@ func _build_wave_label() -> void:
 	_boss_bar.visible = false
 	add_child(_boss_bar)
 
-	_boss_lbl = _label("⚔  BOSS", _font_bold, 13, Color(1.0, 0.38, 0.28))
+	_boss_lbl = _label("⚔  BOSS", _font_bold, 14, Color(1.0, 0.38, 0.28))
 	_boss_lbl.position           = Vector2(6, 0)
 	_boss_lbl.size               = Vector2(72, 40)
 	_boss_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -457,7 +552,7 @@ func _build_wave_label() -> void:
 	_boss_hp_fill.mouse_filter = MOUSE_FILTER_IGNORE
 	_boss_bar.add_child(_boss_hp_fill)
 
-	_boss_hp_lbl = _label("", _font_bold, 12, C_WHITE)
+	_boss_hp_lbl = _label("", _font_bold, 14, C_WHITE)
 	_boss_hp_lbl.position             = Vector2(82, 9)
 	_boss_hp_lbl.size                 = Vector2(430, 22)
 	_boss_hp_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -465,7 +560,7 @@ func _build_wave_label() -> void:
 	_boss_hp_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
 	_boss_bar.add_child(_boss_hp_lbl)
 
-	_boss_timer_lbl = _label("60 s", _font_bold, 13, Color(1.0, 0.65, 0.30))
+	_boss_timer_lbl = _label("60 s", _font_bold, 14, Color(1.0, 0.65, 0.30))
 	_boss_timer_lbl.position             = Vector2(518, 0)
 	_boss_timer_lbl.size                 = Vector2(92, 40)
 	_boss_timer_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -517,7 +612,7 @@ func _build_hud_bar() -> void:
 	var C_RECIPE := Color(0.18, 0.42, 0.38)
 	var recipe_btn := Button.new()
 	recipe_btn.text         = "📖  Recipe"
-	recipe_btn.position     = Vector2(493, 10)
+	recipe_btn.position     = Vector2(507, 10)
 	recipe_btn.size         = Vector2(165, 50)
 	recipe_btn.pivot_offset = Vector2(82, 25)
 	recipe_btn.focus_mode   = FOCUS_NONE
@@ -550,7 +645,7 @@ func _build_hud_bar() -> void:
 	badge_panel.visible      = false
 	badge_panel.add_theme_stylebox_override("panel", badge_bg)
 	bar.add_child(badge_panel)
-	_recipe_btn_badge = _label("0", _font_bold, 12, C_WHITE)
+	_recipe_btn_badge = _label("0", _font_bold, 14, C_WHITE)
 	_recipe_btn_badge.position             = Vector2(0, 0)
 	_recipe_btn_badge.size                 = Vector2(22, 22)
 	_recipe_btn_badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -590,7 +685,7 @@ func _build_upgrade_popup() -> void:
 	_upgrade_popup_btn.visible    = false
 	_upgrade_popup_btn.z_index    = 20
 	_upgrade_popup_btn.add_theme_font_override("font",           _font_bold)
-	_upgrade_popup_btn.add_theme_font_size_override("font_size", 12)
+	_upgrade_popup_btn.add_theme_font_size_override("font_size", 14)
 	_upgrade_popup_btn.add_theme_color_override("font_color",    C_WHITE)
 	_upgrade_popup_btn.add_theme_stylebox_override("normal",  _btn_style(C_UPG))
 	_upgrade_popup_btn.add_theme_stylebox_override("hover",   _btn_style(C_UPG.lightened(0.18)))
@@ -616,6 +711,42 @@ func is_upgrade_popup_clicked(click_pos: Vector2) -> bool:
 	if not is_instance_valid(_upgrade_popup_btn) or not _upgrade_popup_btn.visible:
 		return false
 	return Rect2(_upgrade_popup_btn.position, _upgrade_popup_btn.size).has_point(click_pos)
+
+
+func _build_sell_btn() -> void:
+	_sell_btn = Button.new()
+	_sell_btn.text       = "💰 Sell  +25g"
+	_sell_btn.size       = Vector2(120, 26)
+	_sell_btn.focus_mode = FOCUS_NONE
+	_sell_btn.visible    = false
+	_sell_btn.z_index    = 20
+	_sell_btn.add_theme_font_override("font",           _font_bold)
+	_sell_btn.add_theme_font_size_override("font_size", 13)
+	_sell_btn.add_theme_color_override("font_color",    Color(0.20, 0.90, 0.35))
+	_sell_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.08, 0.22, 0.10)))
+	_sell_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.12, 0.32, 0.14)))
+	_sell_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.05, 0.14, 0.07)))
+	_sell_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.08, 0.22, 0.10)))
+	_sell_btn.pressed.connect(func(): sell_tower_requested.emit())
+	add_child(_sell_btn)
+
+
+func show_sell_btn(world_pos: Vector2) -> void:
+	if not is_instance_valid(_sell_btn):
+		return
+	_sell_btn.position = world_pos + Vector2(-_sell_btn.size.x / 2.0, 28)
+	_sell_btn.visible  = true
+
+
+func hide_sell_btn() -> void:
+	if is_instance_valid(_sell_btn):
+		_sell_btn.visible = false
+
+
+func is_sell_btn_clicked(click_pos: Vector2) -> bool:
+	if not is_instance_valid(_sell_btn) or not _sell_btn.visible:
+		return false
+	return Rect2(_sell_btn.position, _sell_btn.size).has_point(click_pos)
 
 
 func _build_rarity_modal() -> void:
@@ -670,21 +801,21 @@ func _build_rarity_modal() -> void:
 	const COL_W : int = 108
 
 	# Column headers — colored to match each summon type
-	var h0 := _label("Rarity", _font_bold, 12, C_DIM)
+	var h0 := _label("Rarity", _font_bold, 14, C_DIM)
 	h0.position = Vector2(col_x[0], 62); h0.size = Vector2(150, 20)
 	card.add_child(h0)
 
-	var h1 := _label("Common Summon", _font_bold, 12, Color(0.78, 0.78, 0.78))
+	var h1 := _label("Common Summon", _font_bold, 14, Color(0.78, 0.78, 0.78))
 	h1.position = Vector2(col_x[1] - 20, 62); h1.size = Vector2(COL_W, 20)
 	h1.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	card.add_child(h1)
 
-	var h2 := _label("Rare Summon", _font_bold, 12, Color(0.25, 0.55, 1.00))
+	var h2 := _label("Rare Summon", _font_bold, 14, Color(0.25, 0.55, 1.00))
 	h2.position = Vector2(col_x[2], 62); h2.size = Vector2(COL_W, 20)
 	h2.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	card.add_child(h2)
 
-	var h3 := _label("Epic Summon", _font_bold, 12, Color(0.80, 0.35, 1.00))
+	var h3 := _label("Epic Summon", _font_bold, 14, Color(0.80, 0.35, 1.00))
 	h3.position = Vector2(col_x[3], 62); h3.size = Vector2(COL_W, 20)
 	h3.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	card.add_child(h3)
@@ -724,7 +855,7 @@ func _build_rarity_modal() -> void:
 
 		for pi in range(3):
 			var val : int = (all_pool_odds[pi] as Array)[ri]
-			var txt : String = "%d%%" % val if val > 0 else "—"
+			var txt : String = "%d%" % val if val > 0 else "—"
 			var pct := _label(txt, _font_bold, 14, C_WHITE)
 			pct.position             = Vector2(col_x[pi + 1], ry)
 			pct.size                 = Vector2(COL_W, 28)
@@ -751,6 +882,14 @@ func _refresh_rarity_modal() -> void:
 			if is_instance_valid(lbl):
 				var val : int = (pools[pi] as Array)[ri]
 				lbl.text = "%d%%" % val if val > 0 else "—"
+
+
+func _process(_delta: float) -> void:
+	if is_instance_valid(_buff_tooltip) and _buff_tooltip.visible:
+		var mp : Vector2 = get_global_mouse_position()
+		var tx : float = clampf(mp.x + 14.0, 0.0, 1280.0 - _buff_tooltip.size.x)
+		var ty : float = clampf(mp.y - _buff_tooltip.size.y - 6.0, 0.0, 720.0 - _buff_tooltip.size.y)
+		_buff_tooltip.position = Vector2(tx, ty)
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -823,11 +962,11 @@ func _build_right_panel() -> void:
 	for i in range(tab_names.size()):
 		var tb := Button.new()
 		tb.text       = tab_names[i]
-		tb.position   = Vector2(i * 124, 0)
-		tb.size       = Vector2(122, 38)
+		tb.position   = Vector2(i * 124, 4)
+		tb.size       = Vector2(118, 30)
 		tb.focus_mode = FOCUS_NONE
 		tb.add_theme_font_override("font",           _font_bold)
-		tb.add_theme_font_size_override("font_size", 13)
+		tb.add_theme_font_size_override("font_size", 12)
 		tb.add_theme_color_override("font_color",    C_WHITE)
 		tb.add_theme_stylebox_override("normal",  _btn_style(C_TAB_ACT if i == 0 else C_TAB_IDLE))
 		tb.add_theme_stylebox_override("hover",   _btn_style(C_TAB_ACT.lightened(0.10)))
@@ -896,7 +1035,7 @@ func _fill_turrets_tab(page: Control) -> void:
 	info_btn.size                = Vector2(22, 22)
 	info_btn.mouse_filter        = MOUSE_FILTER_STOP
 	info_btn.add_theme_stylebox_override("panel", circle_s)
-	var info_lbl := _label("i", _font_bold, 12, Color(0.20, 0.85, 1.00))
+	var info_lbl := _label("i", _font_bold, 14, Color(0.20, 0.85, 1.00))
 	info_lbl.position             = Vector2(0, 0)
 	info_lbl.size                 = Vector2(22, 22)
 	info_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -909,28 +1048,22 @@ func _fill_turrets_tab(page: Control) -> void:
 
 	# ── Common Summon ──────────────────────────────────────────────────────────
 	const C_COMMON_CLR := Color(0.78, 0.78, 0.78)   # gray
-	var common_hdr := _label("⚪  Common Summon", _font_bold, 13, C_COMMON_CLR)
+	var common_hdr := _label("⚪  Common Summon", _font_bold, 14, C_COMMON_CLR)
 	common_hdr.position             = Vector2(0, 44)
 	common_hdr.size                 = Vector2(w, 20)
 	common_hdr.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	page.add_child(common_hdr)
 
-	var common_odds_lbl := _label("75% Common · 22% Rare · 3% Epic", _font_reg, 11, C_DIM)
-	common_odds_lbl.position             = Vector2(0, 66)
-	common_odds_lbl.size                 = Vector2(w, 16)
-	common_odds_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	page.add_child(common_odds_lbl)
-
 	var C_COMMON_BTN := Color(0.30, 0.30, 0.26)
 	var common_btn := Button.new()
 	common_btn.text         = "🎲  Common Summon  (40g)"
-	common_btn.position     = Vector2(8, 84)
+	common_btn.position     = Vector2(8, 66)
 	common_btn.size         = Vector2(w - 16, 46)
 	common_btn.pivot_offset = Vector2((w - 16) * 0.5, 23)
 	common_btn.focus_mode   = FOCUS_NONE
 	common_btn.add_theme_font_override("font",           _font_bold)
-	common_btn.add_theme_font_size_override("font_size", 13)
-	common_btn.add_theme_color_override("font_color",    C_COMMON_CLR)
+	common_btn.add_theme_font_size_override("font_size", 14)
+	common_btn.add_theme_color_override("font_color",    C_WHITE)
 	common_btn.add_theme_stylebox_override("normal",  _btn_style(C_COMMON_BTN))
 	common_btn.add_theme_stylebox_override("hover",   _btn_style(C_COMMON_BTN.lightened(0.12)))
 	common_btn.add_theme_stylebox_override("pressed", _btn_style(C_COMMON_BTN.darkened(0.12)))
@@ -944,28 +1077,22 @@ func _fill_turrets_tab(page: Control) -> void:
 
 	# ── Rare Summon ────────────────────────────────────────────────────────────
 	const C_RARE_CLR := Color(0.25, 0.55, 1.00)   # blue
-	var rare_hdr := _label("🔵  Rare Summon", _font_bold, 13, C_RARE_CLR)
-	rare_hdr.position             = Vector2(0, 146)
+	var rare_hdr := _label("🔵  Rare Summon", _font_bold, 14, C_RARE_CLR)
+	rare_hdr.position             = Vector2(0, 128)
 	rare_hdr.size                 = Vector2(w, 20)
 	rare_hdr.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	page.add_child(rare_hdr)
 
-	var rare_odds_lbl := _label("75% Rare · 22% Epic · 3% Legendary", _font_reg, 11, C_DIM)
-	rare_odds_lbl.position             = Vector2(0, 168)
-	rare_odds_lbl.size                 = Vector2(w, 16)
-	rare_odds_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	page.add_child(rare_odds_lbl)
-
 	var C_RARE_BTN := Color(0.12, 0.28, 0.58)
 	var rare_btn := Button.new()
 	rare_btn.text         = "🎲  Rare Summon  (100g)"
-	rare_btn.position     = Vector2(8, 186)
+	rare_btn.position     = Vector2(8, 150)
 	rare_btn.size         = Vector2(w - 16, 46)
 	rare_btn.pivot_offset = Vector2((w - 16) * 0.5, 23)
 	rare_btn.focus_mode   = FOCUS_NONE
 	rare_btn.add_theme_font_override("font",           _font_bold)
-	rare_btn.add_theme_font_size_override("font_size", 13)
-	rare_btn.add_theme_color_override("font_color",    C_RARE_CLR)
+	rare_btn.add_theme_font_size_override("font_size", 14)
+	rare_btn.add_theme_color_override("font_color",    C_WHITE)
 	rare_btn.add_theme_stylebox_override("normal",  _btn_style(C_RARE_BTN))
 	rare_btn.add_theme_stylebox_override("hover",   _btn_style(C_RARE_BTN.lightened(0.12)))
 	rare_btn.add_theme_stylebox_override("pressed", _btn_style(C_RARE_BTN.darkened(0.12)))
@@ -979,28 +1106,22 @@ func _fill_turrets_tab(page: Control) -> void:
 
 	# ── Epic Summon ────────────────────────────────────────────────────────────
 	const C_EPIC_CLR := Color(0.80, 0.35, 1.00)   # purple
-	var epic_hdr := _label("🟣  Epic Summon", _font_bold, 13, C_EPIC_CLR)
-	epic_hdr.position             = Vector2(0, 248)
+	var epic_hdr := _label("🟣  Epic Summon", _font_bold, 14, C_EPIC_CLR)
+	epic_hdr.position             = Vector2(0, 212)
 	epic_hdr.size                 = Vector2(w, 20)
 	epic_hdr.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	page.add_child(epic_hdr)
 
-	var epic_odds_lbl := _label("15% Rare · 75% Epic · 10% Legendary", _font_reg, 11, C_DIM)
-	epic_odds_lbl.position             = Vector2(0, 270)
-	epic_odds_lbl.size                 = Vector2(w, 16)
-	epic_odds_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	page.add_child(epic_odds_lbl)
-
 	var C_EPIC_BTN := Color(0.35, 0.12, 0.55)
 	var epic_btn := Button.new()
 	epic_btn.text         = "🎲  Epic Summon  (250g)"
-	epic_btn.position     = Vector2(8, 288)
+	epic_btn.position     = Vector2(8, 234)
 	epic_btn.size         = Vector2(w - 16, 46)
 	epic_btn.pivot_offset = Vector2((w - 16) * 0.5, 23)
 	epic_btn.focus_mode   = FOCUS_NONE
 	epic_btn.add_theme_font_override("font",           _font_bold)
-	epic_btn.add_theme_font_size_override("font_size", 13)
-	epic_btn.add_theme_color_override("font_color",    C_EPIC_CLR)
+	epic_btn.add_theme_font_size_override("font_size", 14)
+	epic_btn.add_theme_color_override("font_color",    C_WHITE)
 	epic_btn.add_theme_stylebox_override("normal",  _btn_style(C_EPIC_BTN))
 	epic_btn.add_theme_stylebox_override("hover",   _btn_style(C_EPIC_BTN.lightened(0.12)))
 	epic_btn.add_theme_stylebox_override("pressed", _btn_style(C_EPIC_BTN.darkened(0.12)))
@@ -1020,7 +1141,7 @@ func _fill_turrets_tab(page: Control) -> void:
 	dbg_btn.pivot_offset = Vector2((w - 16) * 0.5, 18)
 	dbg_btn.focus_mode   = FOCUS_NONE
 	dbg_btn.add_theme_font_override("font",           _font_reg)
-	dbg_btn.add_theme_font_size_override("font_size", 12)
+	dbg_btn.add_theme_font_size_override("font_size", 14)
 	dbg_btn.add_theme_color_override("font_color",    Color(0.55, 0.90, 0.55))
 	dbg_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.10, 0.22, 0.10)))
 	dbg_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.14, 0.30, 0.14)))
@@ -1030,7 +1151,25 @@ func _fill_turrets_tab(page: Control) -> void:
 		_tween_scale(dbg_btn, Vector2(0.95, 0.95), 0.06)
 		debug_gold_requested.emit()
 	)
+	dbg_btn.visible = DEBUG
 	page.add_child(dbg_btn)
+
+	# ── Debug: Summon Tower panel toggle ──────────────────────────────────────
+	var summon_btn := Button.new()
+	summon_btn.text         = "🐛  Summon Tower (Debug)"
+	summon_btn.position     = Vector2(8, 392)
+	summon_btn.size         = Vector2(w - 16, 36)
+	summon_btn.focus_mode   = FOCUS_NONE
+	summon_btn.add_theme_font_override("font",           _font_reg)
+	summon_btn.add_theme_font_size_override("font_size", 14)
+	summon_btn.add_theme_color_override("font_color",    Color(0.55, 0.75, 1.00))
+	summon_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.08, 0.12, 0.28)))
+	summon_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.12, 0.18, 0.38)))
+	summon_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.06, 0.08, 0.20)))
+	summon_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.08, 0.12, 0.28)))
+	summon_btn.pressed.connect(func(): _toggle_dbg_tower_panel())
+	summon_btn.visible = DEBUG
+	page.add_child(summon_btn)
 
 	# Connect ℹ to open the centered rarity modal
 	info_btn.gui_input.connect(func(ev: InputEvent):
@@ -1042,15 +1181,294 @@ func _fill_turrets_tab(page: Control) -> void:
 
 
 
+# ── Debug tower-list panel ────────────────────────────────────────────────────
+
+func _toggle_dbg_tower_panel() -> void:
+	if is_instance_valid(_dbg_tower_panel):
+		_dbg_tower_panel.visible = not _dbg_tower_panel.visible
+		return
+	_dbg_tower_panel = _build_dbg_tower_panel()
+	add_child(_dbg_tower_panel)
+
+
+func _build_dbg_tower_panel() -> Control:
+	# Floating panel — positioned to the left of the sidebar
+	var panel := Panel.new()
+	panel.z_index = 50
+	var vp := get_viewport_rect().size
+	panel.position = Vector2(vp.x - 530, 60)
+	panel.size     = Vector2(240, 500)
+	var ps := StyleBoxFlat.new()
+	ps.bg_color          = Color(0.08, 0.06, 0.12, 0.97)
+	ps.border_color      = Color(0.40, 0.55, 1.00, 0.80)
+	ps.border_width_left = 2; ps.border_width_right  = 2
+	ps.border_width_top  = 2; ps.border_width_bottom = 2
+	ps.corner_radius_top_left     = 6; ps.corner_radius_top_right    = 6
+	ps.corner_radius_bottom_left  = 6; ps.corner_radius_bottom_right = 6
+	panel.add_theme_stylebox_override("panel", ps)
+
+	# Title bar
+	var title_lbl := Label.new()
+	title_lbl.text      = "🐛 Summon Tower"
+	title_lbl.position  = Vector2(8, 8)
+	title_lbl.size      = Vector2(180, 22)
+	title_lbl.add_theme_font_override("font",           _font_bold)
+	title_lbl.add_theme_font_size_override("font_size", 14)
+	title_lbl.add_theme_color_override("font_color",    Color(0.60, 0.80, 1.00))
+	panel.add_child(title_lbl)
+
+	# Close button
+	var close_btn := Button.new()
+	close_btn.text       = "✕"
+	close_btn.position   = Vector2(204, 4)
+	close_btn.size       = Vector2(30, 28)
+	close_btn.focus_mode = FOCUS_NONE
+	close_btn.add_theme_font_override("font",           _font_bold)
+	close_btn.add_theme_font_size_override("font_size", 14)
+	close_btn.add_theme_color_override("font_color",    Color(1.0, 0.4, 0.4))
+	var cs := StyleBoxFlat.new()
+	cs.bg_color = Color(0.22, 0.08, 0.08, 0.80)
+	cs.corner_radius_top_left = 4; cs.corner_radius_top_right    = 4
+	cs.corner_radius_bottom_left = 4; cs.corner_radius_bottom_right = 4
+	close_btn.add_theme_stylebox_override("normal",  cs)
+	close_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.40, 0.10, 0.10)))
+	close_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.20, 0.05, 0.05)))
+	close_btn.add_theme_stylebox_override("focus",   cs)
+	close_btn.pressed.connect(func():
+		if is_instance_valid(_dbg_tower_panel):
+			_dbg_tower_panel.visible = false
+	)
+	panel.add_child(close_btn)
+
+	# Separator
+	var sep := HSeparator.new()
+	sep.position = Vector2(4, 36)
+	sep.size     = Vector2(232, 4)
+	panel.add_child(sep)
+
+	# Scroll container for tower list
+	var scroll := ScrollContainer.new()
+	scroll.position                    = Vector2(4, 44)
+	scroll.size                        = Vector2(232, 448)
+	scroll.horizontal_scroll_mode      = ScrollContainer.SCROLL_MODE_DISABLED
+	panel.add_child(scroll)
+
+	var vbox := VBoxContainer.new()
+	vbox.custom_minimum_size = Vector2(220, 0)
+	vbox.add_theme_constant_override("separation", 3)
+	scroll.add_child(vbox)
+
+	# Rarity order for display grouping
+	var rarity_order := ["common", "rare", "epic", "legendary", "fusion"]
+	var rarity_colors := {
+		"common":    Color(0.75, 0.75, 0.75),
+		"rare":      Color(0.30, 0.65, 1.00),
+		"epic":      Color(0.75, 0.35, 1.00),
+		"legendary": Color(1.00, 0.78, 0.10),
+		"fusion":    Color(0.20, 1.00, 0.85),
+	}
+
+	for rar in rarity_order:
+		# Rarity header
+		var hdr := Label.new()
+		hdr.text = rar.to_upper()
+		hdr.add_theme_font_override("font",           _font_bold)
+		hdr.add_theme_font_size_override("font_size", 11)
+		hdr.add_theme_color_override("font_color",    rarity_colors.get(rar, C_WHITE))
+		hdr.custom_minimum_size = Vector2(220, 18)
+		vbox.add_child(hdr)
+
+		# One button per tower in this rarity
+		for id in SummonSystem.TURRET_DEFS:
+			var td : Dictionary = SummonSystem.TURRET_DEFS[id]
+			if td.get("rarity", "") != rar:
+				continue
+			var btn := Button.new()
+			btn.text            = td.get("name", id)
+			btn.custom_minimum_size = Vector2(220, 28)
+			btn.focus_mode      = FOCUS_NONE
+			btn.add_theme_font_override("font",           _font_reg)
+			btn.add_theme_font_size_override("font_size", 13)
+			btn.add_theme_color_override("font_color",    C_WHITE)
+			btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.12, 0.10, 0.18)))
+			btn.add_theme_stylebox_override("hover",   _btn_style(rarity_colors.get(rar, C_WHITE).darkened(0.55)))
+			btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.06, 0.05, 0.10)))
+			btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.12, 0.10, 0.18)))
+			var captured_id : String = id
+			btn.pressed.connect(func(): debug_summon_requested.emit(captured_id))
+			vbox.add_child(btn)
+
+	return panel
+
+
 # ── Upgrades Tab (Gacha) ──────────────────────────────────────────────────────
 
 func _fill_upgrades_tab(page: Control) -> void:
 	var w := 248
-	var lbl := _label("Coming soon…", _font_bold, 16, C_DIM)
-	lbl.position             = Vector2(0, 220)
-	lbl.size                 = Vector2(w, 30)
-	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	page.add_child(lbl)
+	var title := _label("✨  Boss Rewards", _font_bold, 16, C_GOLD)
+	title.position             = Vector2(0, 6)
+	title.size                 = Vector2(w, 26)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	page.add_child(title)
+
+	var div := ColorRect.new()
+	div.color = Color(1,1,1,0.08); div.position = Vector2(4, 34); div.size = Vector2(w - 8, 2)
+	page.add_child(div)
+
+	var empty_lbl := _label("No rewards yet.\nDefeat a boss to earn buffs.", _font_reg, 13, C_DIM)
+	empty_lbl.position      = Vector2(0, 44)
+	empty_lbl.size          = Vector2(w, 50)
+	empty_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	empty_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	page.add_child(empty_lbl)
+	_buff_empty_lbl = empty_lbl
+
+	var scroll := ScrollContainer.new()
+	scroll.position               = Vector2(0, 46)
+	scroll.size                   = Vector2(w, 502)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.vertical_scroll_mode   = ScrollContainer.SCROLL_MODE_AUTO
+	page.add_child(scroll)
+	_buff_history_scroll = scroll
+
+	var flow := HFlowContainer.new()
+	flow.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	flow.add_theme_constant_override("h_separation", 6)
+	flow.add_theme_constant_override("v_separation", 6)
+	scroll.add_child(flow)
+	_buff_history_flow = flow
+
+	# Shared hover tooltip (added to root HUD so it floats above everything)
+	if not is_instance_valid(_buff_tooltip):
+		_build_buff_tooltip()
+
+
+func _build_buff_tooltip() -> void:
+	var tip := Panel.new()
+	tip.z_index   = 200
+	tip.visible   = false
+	tip.size      = Vector2(200, 70)
+	tip.mouse_filter = MOUSE_FILTER_IGNORE
+	tip.add_theme_stylebox_override("panel", _rounded(Color(0.10, 0.08, 0.06, 0.97)))
+	add_child(tip)
+	_buff_tooltip = tip
+
+	_buff_tooltip_name = _label("", _font_bold, 13, C_WHITE)
+	_buff_tooltip_name.position      = Vector2(8, 6)
+	_buff_tooltip_name.size          = Vector2(184, 22)
+	_buff_tooltip_name.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	tip.add_child(_buff_tooltip_name)
+
+	_buff_tooltip_desc = _label("", _font_reg, 12, C_DIM)
+	_buff_tooltip_desc.position      = Vector2(8, 28)
+	_buff_tooltip_desc.size          = Vector2(184, 60)
+	_buff_tooltip_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	tip.add_child(_buff_tooltip_desc)
+
+
+func refresh_buff_history() -> void:
+	if not is_instance_valid(_buff_history_flow):
+		return
+	for child in _buff_history_flow.get_children():
+		child.queue_free()
+
+	var has_buffs : bool = not GameData.chosen_buffs.is_empty()
+	if is_instance_valid(_buff_empty_lbl):
+		_buff_empty_lbl.visible = not has_buffs
+	if not has_buffs:
+		return
+
+	var rarity_colors := {
+		"common": Color(0.80, 0.80, 0.80),
+		"rare":   Color(0.25, 0.55, 1.00),
+		"epic":   Color(0.72, 0.25, 0.90),
+	}
+	const ICON_MAP : Dictionary = {
+		"dmg_2":"⚔", "dmg_5":"⚔", "dmg_8":"⚔",
+		"fire_rate_5":"⚡", "fire_rate_15":"⚡", "fire_rate_30":"⚡",
+		"gold_10":"🪙", "summon_cost_10g":"💰", "lives_5":"❤️",
+		"boss_dmg_25":"💀", "boss_dmg_50":"💀",
+		"enemy_slow_10":"❄️", "enemy_slow_25":"❄️",
+		"dot_1":"🧪", "dot_3":"🧪",
+	}
+	const SZ := 56
+
+	# Group buffs by id+rarity key, count duplicates
+	var groups : Dictionary = {}
+	for buff in GameData.chosen_buffs:
+		var key : String = buff.get("id", "") + "|" + buff.get("rarity", "common")
+		if groups.has(key):
+			groups[key]["count"] += 1
+		else:
+			groups[key] = {"buff": buff, "count": 1}
+
+	for key in groups:
+		var entry  = groups[key]
+		var buff   = entry["buff"]
+		var count  : int    = entry["count"]
+		var bid    : String = buff.get("id", "")
+		var rc     : Color  = rarity_colors.get(buff.get("rarity", "common"), C_WHITE)
+		var icon   : String = ICON_MAP.get(bid, "✨")
+
+		var cell_style := _rounded(Color(0.14, 0.12, 0.10, 1.0))
+		cell_style.border_width_left   = 3
+		cell_style.border_width_right  = 3
+		cell_style.border_width_top    = 3
+		cell_style.border_width_bottom = 3
+		cell_style.border_color        = rc
+
+		var cell := Panel.new()
+		cell.custom_minimum_size = Vector2(SZ, SZ)
+		cell.mouse_filter        = MOUSE_FILTER_STOP
+		cell.add_theme_stylebox_override("panel", cell_style)
+		_buff_history_flow.add_child(cell)
+
+		# Emoji icon centred in the square
+		var icon_lbl := _label(icon, _font_bold, 26, C_WHITE)
+		icon_lbl.position             = Vector2(0, 4)
+		icon_lbl.size                 = Vector2(SZ, SZ - 8)
+		icon_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		icon_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+		icon_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+		cell.add_child(icon_lbl)
+
+		# Counter badge bottom-right when picked more than once
+		if count > 1:
+			var badge_style := _rounded(Color(0.05, 0.05, 0.05, 0.88))
+			badge_style.border_width_left   = 1
+			badge_style.border_width_right  = 1
+			badge_style.border_width_top    = 1
+			badge_style.border_width_bottom = 1
+			badge_style.border_color        = rc
+			var badge := Panel.new()
+			badge.size         = Vector2(24, 18)
+			badge.position     = Vector2(SZ - 24, SZ - 18)
+			badge.mouse_filter = MOUSE_FILTER_IGNORE
+			badge.add_theme_stylebox_override("panel", badge_style)
+			cell.add_child(badge)
+			var cnt_lbl := _label("%dx" % count, _font_bold, 11, C_WHITE)
+			cnt_lbl.position             = Vector2(0, -1)
+			cnt_lbl.size                 = Vector2(24, 18)
+			cnt_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			cnt_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+			cnt_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+			badge.add_child(cnt_lbl)
+
+		# Hover tooltip
+		var bname : String = buff.get("name", "")
+		var bdesc : String = buff.get("desc", "")
+		cell.mouse_entered.connect(func():
+			if not is_instance_valid(_buff_tooltip):
+				return
+			_buff_tooltip_name.text = bname
+			_buff_tooltip_desc.text = bdesc
+			_buff_tooltip.size      = Vector2(200, 90)
+			_buff_tooltip.visible   = true
+		)
+		cell.mouse_exited.connect(func():
+			if is_instance_valid(_buff_tooltip):
+				_buff_tooltip.visible = false
+		)
 
 
 # ── Tower info panel ──────────────────────────────────────────────────────────
@@ -1076,7 +1494,7 @@ func _build_tower_info_panel() -> void:
 	add_child(panel)
 	_info_panel = panel
 
-	var title := _label("Selected Tower", _font_bold, 11, C_DIM)
+	var title := _label("Selected Tower", _font_bold, 14, C_DIM)
 	title.position             = Vector2(0, 6)
 	title.size                 = Vector2(PW, 20)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -1101,8 +1519,29 @@ func _build_tower_info_panel() -> void:
 	panel.add_child(preview)
 	_info_preview = preview
 
+	# Counter badge — top-right corner, hidden when not applicable
+	var counter_bg_style := _rounded(Color(0.10, 0.10, 0.14, 0.90))
+	counter_bg_style.border_width_left   = 1
+	counter_bg_style.border_width_right  = 1
+	counter_bg_style.border_width_top    = 1
+	counter_bg_style.border_width_bottom = 1
+	counter_bg_style.border_color        = Color(1.0, 0.75, 0.20, 0.80)
+	_info_counter_bg = Panel.new()
+	_info_counter_bg.position     = Vector2(PW - 74, 34)
+	_info_counter_bg.size         = Vector2(68, 22)
+	_info_counter_bg.mouse_filter = MOUSE_FILTER_IGNORE
+	_info_counter_bg.visible      = false
+	_info_counter_bg.add_theme_stylebox_override("panel", counter_bg_style)
+	panel.add_child(_info_counter_bg)
+	_info_counter_lbl = _label("", _font_bold, 12, Color(1.0, 0.85, 0.30))
+	_info_counter_lbl.position             = Vector2(0, 4)
+	_info_counter_lbl.size                 = Vector2(68, 14)
+	_info_counter_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_info_counter_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	_info_counter_bg.add_child(_info_counter_lbl)
+
 	# Rarity badge (colored, updated in show_tower_info)
-	_info_rarity_lbl = _label("", _font_bold, 11, C_DIM)
+	_info_rarity_lbl = _label("", _font_bold, 14, C_DIM)
 	_info_rarity_lbl.position             = Vector2(0, 94)
 	_info_rarity_lbl.size                 = Vector2(PW, 18)
 	_info_rarity_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -1116,75 +1555,77 @@ func _build_tower_info_panel() -> void:
 	_info_name_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
 	panel.add_child(_info_name_lbl)
 
-	_info_desc_lbl = _label("", _font_reg, 13, C_DIM)
-	_info_desc_lbl.position      = Vector2(8, 142)
-	_info_desc_lbl.size          = Vector2(PW - 16, 40)
-	_info_desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD
-	_info_desc_lbl.mouse_filter  = MOUSE_FILTER_IGNORE
-	panel.add_child(_info_desc_lbl)
+	# _info_desc_lbl kept as a variable but not shown in the panel
+	_info_desc_lbl = _label("", _font_reg, 14, C_DIM)
 
 	var div2 := ColorRect.new()
-	div2.color = Color(1,1,1,0.08); div2.position = Vector2(8,184); div2.size = Vector2(PW-16,2)
+	div2.color = Color(1,1,1,0.08); div2.position = Vector2(8,142); div2.size = Vector2(PW-16,2)
 	div2.mouse_filter = MOUSE_FILTER_IGNORE
 	panel.add_child(div2)
 
 	# Stat rows — label left, value right
 	var stat_defs := [
-		["Damage",    188],
-		["Range",     210],
-		["Fire Rate", 232],
+		["⚔ Damage",    146],
+		["🎯 Range",     168],
+		["🏹 Fire Rate", 190],
 	]
 	for s in stat_defs:
-		var lbl := _label(s[0], _font_reg, 12, C_DIM)
+		var lbl := _label(s[0], _font_reg, 14, C_DIM)
 		lbl.position     = Vector2(8, s[1])
-		lbl.size         = Vector2(105, 20)
+		lbl.size         = Vector2(110, 20)
 		lbl.mouse_filter = MOUSE_FILTER_IGNORE
 		panel.add_child(lbl)
 
-	_info_dmg_lbl = _label("", _font_bold, 12, C_WHITE)
-	_info_dmg_lbl.position             = Vector2(110, 188)
-	_info_dmg_lbl.size                 = Vector2(PW - 118, 20)
+	_info_dmg_lbl = _label("", _font_bold, 14, C_WHITE)
+	_info_dmg_lbl.position             = Vector2(100, 146)
+	_info_dmg_lbl.size                 = Vector2(PW - 108, 20)
 	_info_dmg_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_info_dmg_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
 	panel.add_child(_info_dmg_lbl)
 
-	_info_rng_lbl = _label("", _font_bold, 12, C_WHITE)
-	_info_rng_lbl.position             = Vector2(110, 210)
-	_info_rng_lbl.size                 = Vector2(PW - 118, 20)
+	_info_rng_lbl = _label("", _font_bold, 14, C_WHITE)
+	_info_rng_lbl.position             = Vector2(100, 168)
+	_info_rng_lbl.size                 = Vector2(PW - 108, 20)
 	_info_rng_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_info_rng_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
 	panel.add_child(_info_rng_lbl)
 
-	_info_rate_lbl = _label("", _font_bold, 12, C_WHITE)
-	_info_rate_lbl.position             = Vector2(110, 232)
-	_info_rate_lbl.size                 = Vector2(PW - 118, 20)
+	_info_rate_lbl = _label("", _font_bold, 14, C_WHITE)
+	_info_rate_lbl.position             = Vector2(100, 190)
+	_info_rate_lbl.size                 = Vector2(PW - 108, 20)
 	_info_rate_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_info_rate_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
 	panel.add_child(_info_rate_lbl)
 
 	var div_eff := ColorRect.new()
 	div_eff.color        = Color(1, 1, 1, 0.08)
-	div_eff.position     = Vector2(8, 258)
+	div_eff.position     = Vector2(8, 216)
 	div_eff.size         = Vector2(PW - 16, 2)
 	div_eff.mouse_filter = MOUSE_FILTER_IGNORE
 	panel.add_child(div_eff)
 
-	var eff_header := _label("Special Effect", _font_bold, 11, C_GOLD)
-	eff_header.position     = Vector2(8, 264)
+	var eff_header := _label("Special Effect", _font_bold, 14, C_GOLD)
+	eff_header.position     = Vector2(8, 222)
 	eff_header.size         = Vector2(PW - 16, 18)
 	eff_header.mouse_filter = MOUSE_FILTER_IGNORE
 	panel.add_child(eff_header)
 
-	# Multi-line effect description
-	_info_effect_lbl = _label("", _font_reg, 12, Color(0.92, 0.88, 0.72))
-	_info_effect_lbl.position      = Vector2(8, 284)
-	_info_effect_lbl.size          = Vector2(PW - 16, 90)
-	_info_effect_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD
-	_info_effect_lbl.mouse_filter  = MOUSE_FILTER_IGNORE
-	panel.add_child(_info_effect_lbl)
-
+	# Multi-line effect description — scrollable so it never bleeds past the panel
+	_info_effect_lbl = _label("", _font_reg, 14, Color(0.92, 0.88, 0.72))
+	_info_effect_lbl.custom_minimum_size = Vector2(PW - 16, 0)
+	_info_effect_lbl.autowrap_mode       = TextServer.AUTOWRAP_WORD
+	_info_effect_lbl.mouse_filter        = MOUSE_FILTER_PASS
+	_info_effect_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_info_effect_lbl.size_flags_vertical   = Control.SIZE_SHRINK_BEGIN
+	var eff_scroll := ScrollContainer.new()
+	eff_scroll.position               = Vector2(8, 242)
+	eff_scroll.size                   = Vector2(PW - 16, 130)
+	eff_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	eff_scroll.vertical_scroll_mode   = ScrollContainer.SCROLL_MODE_AUTO
+	panel.add_child(eff_scroll)
+	eff_scroll.add_child(_info_effect_lbl)
 	var div3 := ColorRect.new()
-	div3.color = Color(1,1,1,0.08); div3.position = Vector2(8,380); div3.size = Vector2(PW-16,2)
+	div3.color = Color(1,1,1,0.08); div3.position = Vector2(8,378); div3.size = Vector2(PW-16,2)
 	div3.mouse_filter = MOUSE_FILTER_IGNORE
 	panel.add_child(div3)
 
@@ -1196,7 +1637,7 @@ func _build_tower_info_panel() -> void:
 	_info_upgrade_btn.focus_mode   = FOCUS_NONE
 	_info_upgrade_btn.visible      = false
 	_info_upgrade_btn.add_theme_font_override("font",           _font_bold)
-	_info_upgrade_btn.add_theme_font_size_override("font_size", 13)
+	_info_upgrade_btn.add_theme_font_size_override("font_size", 14)
 	_info_upgrade_btn.add_theme_color_override("font_color",    C_WHITE)
 	_info_upgrade_btn.add_theme_stylebox_override("normal",  _btn_style(C_UPG))
 	_info_upgrade_btn.add_theme_stylebox_override("hover",   _btn_style(C_UPG.lightened(0.15)))
@@ -1239,12 +1680,29 @@ func show_tower_info(tower, merge_count: int = 0) -> void:
 	var tid         : String = d.get("id", "")
 	var dmg_mult    : float  = GameData.turret_damage_mult(tid)
 	var spd_mult    : float  = GameData.turret_fire_rate_mult(tid)
-	var eff_dmg     : float  = tower.damage * dmg_mult
+	var wt_dmg      : float  = tower._wt_dmg_bonus
+	var wt_rate     : float  = tower._wt_rate_bonus
+	var herc_bonus  : float  = tower._hercules_wave_bonus
+	var eff_dmg     : float  = (tower.damage + GameData.buff_damage_flat + wt_dmg + herc_bonus) * dmg_mult
 	var base_rate   : float  = d.get("fire_rate", tower.fire_rate)
-	var eff_rate    : float  = base_rate * spd_mult
-	_info_dmg_lbl.text   = "%.0f" % eff_dmg + (" (+%.0f%%)" % [(dmg_mult - 1.0) * 100] if dmg_mult > 1.0 else "")
+	var eff_rate    : float  = base_rate * spd_mult * (1.0 + wt_rate + tower._ranger_rate_bonus + tower._frost_speed_bonus)
+	var dmg_suffix  : String = ""
+	if dmg_mult > 1.0 and wt_dmg > 0.0:
+		dmg_suffix = " (+%.0f%%, 🌳)" % [(dmg_mult - 1.0) * 100]
+	elif dmg_mult > 1.0:
+		dmg_suffix = " (+%.0f%%)" % [(dmg_mult - 1.0) * 100]
+	elif wt_dmg > 0.0:
+		dmg_suffix = " (🌳)"
+	var rate_suffix : String = ""
+	if spd_mult > 1.0 and wt_rate > 0.0:
+		rate_suffix = " (+%.0f%%, 🌳)" % [(spd_mult - 1.0) * 100]
+	elif spd_mult > 1.0:
+		rate_suffix = " (+%.0f%%)" % [(spd_mult - 1.0) * 100]
+	elif wt_rate > 0.0:
+		rate_suffix = " (🌳)"
+	_info_dmg_lbl.text   = "%.0f" % eff_dmg + dmg_suffix
 	_info_rng_lbl.text   = "%.0f px" % tower.attack_range
-	_info_rate_lbl.text  = "%.1f / s" % eff_rate + (" (+%.0f%%)" % [(spd_mult - 1.0) * 100] if spd_mult > 1.0 else "")
+	_info_rate_lbl.text  = "%.1f / s" % eff_rate + rate_suffix
 	var eff_map : Dictionary = {
 		"none":          "Standard single-target shot. No bonus effect.",
 		"focused_shot":  "Consecutive hits on the same target deal +50% damage. Resets when switching targets.",
@@ -1254,16 +1712,34 @@ func show_tower_info(tower, merge_count: int = 0) -> void:
 		"aoe_burst":     "Explosive shot hits up to 5 enemies in range.",
 		"melee_cleave":  "Every 3rd hit strikes all enemies in range instead of just the primary target.",
 		"bleed_aoe":     "Every hit damages all enemies in range and applies a bleed stack (max 3 stacks). Each stack deals base damage per second.",
-		"slow_zone":     "Normal shots deal damage. Every 5th shot drops an ice zone that slows enemies by 55% for 3 seconds.",
+		"slow_zone":     "Normal shots deal damage. Every 4th shot drops an ice zone that slows enemies by 55% for 3 seconds.",
 		"poison_debuff": "Poisons the target — poisoned enemies take 10% more damage from all sources for 5s. Refreshes on re-hit. Prioritizes un-poisoned enemies.",
 		"execute_shot":  "Damage scales with enemy's current HP. Full HP = 2× base damage. Scales down linearly to 1× at 0 HP.",
-		"knight_slam":   "Every 3rd hit is AoE (up to 5 enemies) and knocks them back along the path. Knockback has no effect on bosses.",
+		"knight_slam":   "Every 3rd hit throws 2 swords at nearby enemies and knocks them back. Knockback has no effect on bosses.",
+		"ranger_fire_aura": "Every 5th hit grants towers 1 tile away +10% fire rate for 3 seconds.",
 		"hp_strike":     "Deals base damage plus 1% of the target's current HP as bonus damage. Bonus does not apply to boss enemies.",
-		"arcane_charge": "Persistent charge counter — every 20th hit fires a blue ray hitting all enemies in range. Counter never resets.",
+		"poison_cloud":  "Hits all enemies in range each shot. Spawns a persistent poison cloud that slowly expands along the path, dealing 2 damage/s to any enemy inside it.",
+		"frost_cannon_tri": "Fires at up to 3 separate targets per shot. Boss targets take +50% damage and receive a 10% slow that refreshes on repeat hits.",
+		"arcane_overload": "Every 5th attack triggers Arcane Overload — instant lasers hit ALL enemies in range (minimum 5 lasers). Counter never resets.",
+		"arcane_charge": "Persistent charge counter — every 15th hit fires a blue ray hitting all enemies in range. Counter never resets.",
 		"lock_beam":     "Locks onto one target until it dies or leaves range. Beam damage ramps from 1× to 1.5× over 5 seconds of continuous fire.",
+		"tempest_strike":         "Every 10th hit deals bonus damage equal to 5% of the target's total max HP.",
+		"infernal_serpent_summon":"Each hit has a 10% chance to summon a living fire serpent (100 damage per bite) that races around the battlefield once.",
 		"lightning":     "Chains to the primary target and up to 3 additional enemies at 80% damage.",
-		"storm_chain":   "Chains to the primary target and up to 4 additional enemies at 85% damage.",
+		"storm_chain":   "Strikes the primary target for full damage, then chains to the 4 nearest enemies globally for 150% damage. Chain targets can be outside the tower's range.",
+		"chrono_aoe":    "Hits all enemies in range each shot. Each hit applies a 15% slow for 2s that stacks with other slows (e.g. Frost Spire).",
+		"world_tree_buff": "Passively buffs all towers one tile away with +10 flat damage and +50% attack speed.",
+		"natures_wrath_buff": "Passively buffs all towers one tile away with +15 flat damage and +75% attack speed. Each hit has a 5% chance to generate 2 gold.",
+		"taunt_slam":     "Strikes up to 5 enemies simultaneously. Every 5th hit taunts all enemies in range — stunning them for 2s and causing them to take +20% damage from all sources.",
+		"hercules_cleave": "Strikes the primary target and one additional enemy simultaneously. Gains +5 permanent damage after every wave cleared. Boss waves do not count.",
 		"pierce":        "Bolt pierces through up to 3 enemies in a line, hitting each for full damage.",
+		"shadow_weaver_phase": "Shadow phase: single-target attack. After 10 hits transforms for 5s — white laser fires every 0.5s hitting 5 enemies for 50% tower damage + 1% max HP (0.5% on bosses).",
+		"axe_warrior":   "Each swing hits up to 2 enemies in melee range, applying 1 Bleed stack and 1 Poison stack. Poisoned enemies take +10% damage from all sources for 5s.",
+		"blade_spin":    "Dual melee strike hits 2 targets. Each attack has a 10% chance to summon 2 razor blades that orbit the tower for 3s, shredding any enemy they contact.",
+		"rock_drop":          "Fires at target. Every 3rd hit drops a brittle zone at the target's location for 2s. Enemies entering the zone take +20 bonus damage on their very next hit from any source.",
+		"dual_debuff":        "Hits 2 enemies per attack. Every other attack inflicts a random debuff on each target for 1 second. (Bleed, 10% Slow, or +10% damage taken — 5s cooldown per debuff per target.)",
+		"shadow_blade_combo": "Every 3rd hit strikes with both blades at 2× damage and applies a bleed dealing 2× damage/s for 3s. Max 1 bleed stack per target.",
+		"frost_shatter":      "Fires 2 projectiles per attack. Every hit slows the target by 5% for 2s. Gains +3% attack speed per slowed enemy on the map (max +30%). Resets after 3s without attacking.",
 	}
 	var base_effect_desc : String = eff_map.get(d.get("effect", "none"), "No special effect.")
 	var special_map : Dictionary = {
@@ -1277,6 +1753,53 @@ func show_tower_info(tower, merge_count: int = 0) -> void:
 	if GameData.turret_has_special(tid) and special_map.has(tid):
 		base_effect_desc += "\n" + special_map[tid]
 	_info_effect_lbl.text = base_effect_desc
+
+	# Counter badge — show for towers/heroes with hit counters or stack systems
+	var counter_text : String = ""
+	var eff : String = d.get("effect", "")
+	match eff:
+		"slow_zone":
+			counter_text = "%d / 4" % (tower._hit_counter % 4)
+		"melee_cleave", "knight_slam":
+			counter_text = "%d / 3" % tower._hit_counter
+		"taunt_slam":
+			counter_text = "%d / 5" % tower._hit_counter
+		"arcane_charge":
+			counter_text = "%d / 15" % (tower._arcane_charge % 15)
+		"arcane_overload":
+			counter_text = "%d / 5" % (tower._arcane_charge % 5)
+		"hercules_cleave":
+			counter_text = "+%d dmg" % int(tower._hercules_wave_bonus)
+		"frost_shatter":
+			counter_text = "+%d%% spd" % int(tower._frost_speed_bonus * 100)
+		"shadow_blade_combo":
+			counter_text = "%d / 3" % tower._hit_counter
+		"tempest_strike":
+			counter_text = "%d / 10" % tower._hit_counter
+		"dual_debuff":
+			counter_text = "%d / 2" % (tower._hit_counter % 2)
+		"ranger_fire_aura":
+			counter_text = "%d / 5" % tower._hit_counter
+		"rock_drop":
+			counter_text = "%d / 3" % (tower._hit_counter % 3)
+		"shadow_weaver_phase":
+			if tower._sw_light_timer > 0.0:
+				counter_text = "LIGHT %.1fs" % tower._sw_light_timer
+			else:
+				counter_text = "%d / 10" % tower._sw_stacks
+		"blade_spin":
+			if tower._blade_timer > 0.0:
+				counter_text = "SPIN %.1fs" % tower._blade_timer
+			else:
+				counter_text = "10% proc"
+		"dual_shot", "focused_shot":
+			pass   # no meaningful counter
+	if counter_text != "":
+		_info_counter_lbl.text   = counter_text
+		_info_counter_bg.visible = true
+	else:
+		_info_counter_bg.visible = false
+
 	var can_upgrade : bool = merge_count >= 3 and \
 		rarity != "legendary" and rarity != "fusion" and rarity != ""
 	if is_instance_valid(_info_upgrade_btn):
@@ -1561,8 +2084,9 @@ func _build_game_over_screen() -> void:
 	start_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.72, 0.30, 0.07)))
 	start_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.40, 0.16, 0.03)))
 	start_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.55, 0.22, 0.05)))
-	start_btn.pressed.connect(func(): get_tree().reload_current_scene())
+	start_btn.pressed.connect(func(): Engine.time_scale = 1.0; get_tree().reload_current_scene())
 	overlay.add_child(start_btn)
+	call_deferred("_wire_hover_recursive", overlay)
 
 
 func show_game_over(stage: int) -> void:
@@ -1691,7 +2215,478 @@ func _build_placeholder_screen(var_ref: String, title_text: String) -> Control:
 
 
 func _build_shop_screen() -> void:
-	_shop_screen = _build_placeholder_screen("_shop_screen", "🛒  Shop")
+	const CLIP_X : int = 220
+	const CLIP_W : int = 840
+	const CLIP_Y : int = 148
+	const CLIP_H : int = 180
+
+	# ── Outer overlay ────────────────────────────────────────────────────────────
+	var overlay := Panel.new()
+	var bg_s := StyleBoxFlat.new()
+	bg_s.bg_color = Color(0.04, 0.04, 0.10)
+	overlay.add_theme_stylebox_override("panel", bg_s)
+	overlay.position     = Vector2.ZERO
+	overlay.size         = Vector2(1280, 720)
+	overlay.mouse_filter = MOUSE_FILTER_STOP
+	overlay.visible      = false
+	add_child(overlay)
+	_shop_screen = overlay
+
+	# ── Title ────────────────────────────────────────────────────────────────────
+	var title := _label("🎰  Tower Gacha", _font_bold, 30, C_WHITE)
+	title.position             = Vector2(0, 16)
+	title.size                 = Vector2(1280, 44)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	overlay.add_child(title)
+
+	# ── Gem display ──────────────────────────────────────────────────────────────
+	_gacha_gem_lbl = _label("🔷 0 Gems", _font_bold, 19, Color(0.45, 0.75, 1.0))
+	_gacha_gem_lbl.position             = Vector2(0, 64)
+	_gacha_gem_lbl.size                 = Vector2(1280, 28)
+	_gacha_gem_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	overlay.add_child(_gacha_gem_lbl)
+
+	# ── Odds line ────────────────────────────────────────────────────────────────
+	var odds_lbl := _label(
+		"⬜ Common 75%   🔵 Rare 20%   🟣 Epic 4%   🟡 Legendary 1%",
+		_font_reg, 14, C_DIM)
+	odds_lbl.position             = Vector2(0, 96)
+	odds_lbl.size                 = Vector2(1280, 20)
+	odds_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	overlay.add_child(odds_lbl)
+
+	# ── Red center arrow ──────────────────────────────────────────────────────────
+	var arrow := _label("▼", _font_bold, 26, Color(0.95, 0.18, 0.18))
+	arrow.position             = Vector2(CLIP_X, CLIP_Y - 34)
+	arrow.size                 = Vector2(CLIP_W, 30)
+	arrow.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	overlay.add_child(arrow)
+
+	# ── Wheel clip container ──────────────────────────────────────────────────────
+	var clip := Panel.new()
+	var clip_s := StyleBoxFlat.new()
+	clip_s.bg_color                   = Color(0.07, 0.07, 0.13)
+	clip_s.corner_radius_top_left     = 10; clip_s.corner_radius_top_right    = 10
+	clip_s.corner_radius_bottom_left  = 10; clip_s.corner_radius_bottom_right = 10
+	clip_s.border_width_left  = 2; clip_s.border_width_right  = 2
+	clip_s.border_width_top   = 2; clip_s.border_width_bottom = 2
+	clip_s.border_color = Color(0.30, 0.30, 0.50, 0.8)
+	clip.add_theme_stylebox_override("panel", clip_s)
+	clip.position      = Vector2(CLIP_X, CLIP_Y)
+	clip.size          = Vector2(CLIP_W, CLIP_H)
+	clip.clip_contents = true
+	clip.mouse_filter  = MOUSE_FILTER_IGNORE
+	overlay.add_child(clip)
+
+	# Center indicator line drawn over the clip
+	var cline := ColorRect.new()
+	cline.color        = Color(0.95, 0.18, 0.18, 0.50)
+	cline.position     = Vector2(CLIP_X + CLIP_W / 2 - 1, CLIP_Y)
+	cline.size         = Vector2(2, CLIP_H)
+	cline.mouse_filter = MOUSE_FILTER_IGNORE
+	cline.z_index      = 5
+	overlay.add_child(cline)
+
+	# ── Card strip (children rebuilt each spin) ───────────────────────────────────
+	var strip := Control.new()
+	strip.position     = Vector2(4, (CLIP_H - GACHA_CARD_H) / 2)
+	strip.mouse_filter = MOUSE_FILTER_IGNORE
+	clip.add_child(strip)
+	_gacha_strip = strip
+
+	_gacha_rebuild_strip("")   # idle placeholder cards
+
+	# ── Summon button ─────────────────────────────────────────────────────────────
+	_gacha_summon_btn = Button.new()
+	_gacha_summon_btn.text       = "Summon Tower  —  💎 %d Gems" % GACHA_SUMMON_COST
+	_gacha_summon_btn.position   = Vector2((1280 - 380) / 2, 350)
+	_gacha_summon_btn.size       = Vector2(380, 56)
+	_gacha_summon_btn.focus_mode = FOCUS_NONE
+	_gacha_summon_btn.add_theme_font_override("font",           _font_bold)
+	_gacha_summon_btn.add_theme_font_size_override("font_size", 20)
+	_gacha_summon_btn.add_theme_color_override("font_color",    C_WHITE)
+	_gacha_summon_btn.add_theme_stylebox_override("normal",   _btn_style(Color(0.55, 0.15, 0.06)))
+	_gacha_summon_btn.add_theme_stylebox_override("hover",    _btn_style(Color(0.70, 0.22, 0.10)))
+	_gacha_summon_btn.add_theme_stylebox_override("pressed",  _btn_style(Color(0.38, 0.10, 0.04)))
+	_gacha_summon_btn.add_theme_stylebox_override("focus",    _btn_style(Color(0.55, 0.15, 0.06)))
+	_gacha_summon_btn.add_theme_stylebox_override("disabled", _btn_style(Color(0.25, 0.25, 0.30)))
+	_gacha_summon_btn.pressed.connect(_gacha_on_summon_pressed)
+	overlay.add_child(_gacha_summon_btn)
+
+	# ── Result popup (hidden at start) ────────────────────────────────────────────
+	_gacha_build_result_popup(overlay)
+
+	# ── Back button ───────────────────────────────────────────────────────────────
+	var back_btn := Button.new()
+	back_btn.text       = "<  Back"
+	back_btn.position   = Vector2(30, 662)
+	back_btn.size       = Vector2(140, 44)
+	back_btn.focus_mode = FOCUS_NONE
+	back_btn.add_theme_font_override("font",           _font_bold)
+	back_btn.add_theme_font_size_override("font_size", 16)
+	back_btn.add_theme_color_override("font_color",    C_WHITE)
+	back_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.22, 0.22, 0.28)))
+	back_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.30, 0.30, 0.38)))
+	back_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.16, 0.16, 0.20)))
+	back_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.22, 0.22, 0.28)))
+	back_btn.pressed.connect(func():
+		overlay.visible = false
+		_game_over_screen.visible = true
+	)
+	overlay.add_child(back_btn)
+
+	# Refresh gem count each time shop is shown
+	overlay.visibility_changed.connect(func():
+		if overlay.visible and is_instance_valid(_gacha_gem_lbl):
+			_gacha_gem_lbl.text = "🔷 %d Gems" % GameData.blue_gems
+	)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GACHA HELPERS
+# ─────────────────────────────────────────────────────────────────────────────
+
+func _gacha_rebuild_strip(winning_id: String) -> void:
+	if not is_instance_valid(_gacha_strip):
+		return
+	for child in _gacha_strip.get_children():
+		child.queue_free()
+	for i in range(GACHA_STRIP_COUNT):
+		var tid : String
+		if i == GACHA_WIN_IDX and winning_id != "":
+			tid = winning_id
+		else:
+			tid = _gacha_random_dummy()
+		var card := _gacha_make_wheel_card(tid)
+		card.position = Vector2(i * GACHA_CARD_SLOT, 0)
+		_gacha_strip.add_child(card)
+
+
+func _gacha_random_dummy() -> String:
+	# Weighted random pick matching rarity odds
+	var r : int = randi() % 100
+	var pool : Array
+	if r < 1:
+		pool = SummonSystem.LEGENDARY_IDS
+	elif r < 5:
+		pool = SummonSystem.EPIC_IDS
+	elif r < 25:
+		pool = SummonSystem.RARE_IDS
+	else:
+		pool = SummonSystem.COMMON_IDS
+	return pool[randi() % pool.size()]
+
+
+func _gacha_roll_tower() -> String:
+	var r : int = randi() % 100
+	var pool : Array
+	if r < 1:
+		pool = SummonSystem.LEGENDARY_IDS
+	elif r < 5:
+		pool = SummonSystem.EPIC_IDS
+	elif r < 25:
+		pool = SummonSystem.RARE_IDS
+	else:
+		pool = SummonSystem.COMMON_IDS
+	return pool[randi() % pool.size()]
+
+
+func _gacha_make_wheel_card(tower_id: String) -> Control:
+	var def    : Dictionary = SummonSystem.TURRET_DEFS.get(tower_id, {})
+	var rarity : String     = def.get("rarity", "common")
+	var rcol   : Color      = SummonSystem.RARITY_COLORS.get(rarity, C_WHITE)
+
+	var card := Panel.new()
+	var cs := StyleBoxFlat.new()
+	cs.bg_color                   = Color(0.10, 0.10, 0.17)
+	cs.corner_radius_top_left     = 8; cs.corner_radius_top_right    = 8
+	cs.corner_radius_bottom_left  = 8; cs.corner_radius_bottom_right = 8
+	cs.border_width_left  = 2; cs.border_width_right  = 2
+	cs.border_width_top   = 2; cs.border_width_bottom = 2
+	cs.border_color       = Color(rcol.r, rcol.g, rcol.b, 0.60)
+	card.add_theme_stylebox_override("panel", cs)
+	card.custom_minimum_size = Vector2(GACHA_CARD_W, GACHA_CARD_H)
+	card.mouse_filter        = MOUSE_FILTER_IGNORE
+
+	# Preview background (80×80, centred)
+	var pbg := Panel.new()
+	var pbs := StyleBoxFlat.new()
+	pbs.bg_color                  = Color(0.06, 0.06, 0.12)
+	pbs.corner_radius_top_left    = 6; pbs.corner_radius_top_right    = 6
+	pbs.corner_radius_bottom_left = 6; pbs.corner_radius_bottom_right = 6
+	pbg.add_theme_stylebox_override("panel", pbs)
+	pbg.position     = Vector2((GACHA_CARD_W - 80) / 2, 8)   # (16, 8)
+	pbg.size         = Vector2(80, 80)
+	pbg.mouse_filter = MOUSE_FILTER_IGNORE
+	card.add_child(pbg)
+
+	# Tower preview: _TurretPreview draws centred at (28, 32) from node origin.
+	# To centre in 80×80 box at (16, 8): node = (16+40-28, 8+40-32) = (28, 16)
+	var prev := _TurretPreview.new()
+	prev.turret_data = def
+	prev.position    = Vector2(28, 16)
+	card.add_child(prev)
+
+	# Tower name
+	var name_lbl := _label(def.get("name", tower_id), _font_bold, 12, C_WHITE)
+	name_lbl.position             = Vector2(2, 93)
+	name_lbl.size                 = Vector2(GACHA_CARD_W - 4, 18)
+	name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	name_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	card.add_child(name_lbl)
+
+	# Rarity label
+	var rar_lbl := _label(rarity.capitalize(), _font_reg, 11, rcol)
+	rar_lbl.position             = Vector2(2, 113)
+	rar_lbl.size                 = Vector2(GACHA_CARD_W - 4, 16)
+	rar_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	rar_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	card.add_child(rar_lbl)
+
+	# Rarity-coloured bottom stripe
+	var stripe := ColorRect.new()
+	stripe.color        = Color(rcol.r, rcol.g, rcol.b, 0.28)
+	stripe.position     = Vector2(2, GACHA_CARD_H - 12)
+	stripe.size         = Vector2(GACHA_CARD_W - 4, 10)
+	stripe.mouse_filter = MOUSE_FILTER_IGNORE
+	card.add_child(stripe)
+
+	return card
+
+
+func _gacha_build_result_popup(parent: Control) -> void:
+	const PW : int = 480
+	const PH : int = 360
+
+	# Full-screen dim backdrop
+	var dim := ColorRect.new()
+	dim.color        = Color(0, 0, 0, 0.72)
+	dim.position     = Vector2.ZERO
+	dim.size         = Vector2(1280, 720)
+	dim.mouse_filter = MOUSE_FILTER_STOP
+	dim.z_index      = 50
+	dim.visible      = false
+	parent.add_child(dim)
+	_gacha_result_panel = dim
+
+	# Inner popup panel
+	var panel := Panel.new()
+	var ps := StyleBoxFlat.new()
+	ps.bg_color                   = Color(0.07, 0.06, 0.14, 0.98)
+	ps.corner_radius_top_left     = 14; ps.corner_radius_top_right    = 14
+	ps.corner_radius_bottom_left  = 14; ps.corner_radius_bottom_right = 14
+	ps.border_width_left  = 3; ps.border_width_right  = 3
+	ps.border_width_top   = 3; ps.border_width_bottom = 3
+	ps.border_color       = Color(0.5, 0.5, 0.6, 0.5)
+	ps.shadow_color       = Color(0, 0, 0, 0.8)
+	ps.shadow_size        = 20
+	panel.add_theme_stylebox_override("panel", ps)
+	panel.position     = Vector2((1280 - PW) / 2, (720 - PH) / 2)
+	panel.size         = Vector2(PW, PH)
+	panel.mouse_filter = MOUSE_FILTER_STOP
+	panel.z_index      = 51
+	dim.add_child(panel)
+
+	# Header bar
+	var hdr_s := StyleBoxFlat.new()
+	hdr_s.bg_color                   = Color(0.12, 0.06, 0.24)
+	hdr_s.corner_radius_top_left     = 12; hdr_s.corner_radius_top_right   = 12
+	hdr_s.corner_radius_bottom_left  = 0;  hdr_s.corner_radius_bottom_right = 0
+	var hdr := Panel.new()
+	hdr.add_theme_stylebox_override("panel", hdr_s)
+	hdr.position     = Vector2(3, 3)
+	hdr.size         = Vector2(PW - 6, 52)
+	hdr.mouse_filter = MOUSE_FILTER_IGNORE
+	panel.add_child(hdr)
+
+	var title_lbl := _label("✨  Tower Received!", _font_bold, 22, C_WHITE)
+	title_lbl.position             = Vector2(0, 12)
+	title_lbl.size                 = Vector2(PW, 32)
+	title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	panel.add_child(title_lbl)
+
+	# Large card-art area (130×130)
+	var card_bg := Panel.new()
+	var cbs := StyleBoxFlat.new()
+	cbs.bg_color                  = Color(0.09, 0.09, 0.18)
+	cbs.corner_radius_top_left    = 10; cbs.corner_radius_top_right    = 10
+	cbs.corner_radius_bottom_left = 10; cbs.corner_radius_bottom_right = 10
+	cbs.border_width_left  = 3; cbs.border_width_right  = 3
+	cbs.border_width_top   = 3; cbs.border_width_bottom = 3
+	cbs.border_color       = Color(0.5, 0.5, 0.6, 0.5)
+	card_bg.add_theme_stylebox_override("panel", cbs)
+	card_bg.position     = Vector2((PW - 130) / 2, 64)   # (175, 64)
+	card_bg.size         = Vector2(130, 130)
+	card_bg.mouse_filter = MOUSE_FILTER_IGNORE
+	panel.add_child(card_bg)
+	_gacha_result_card_s = cbs
+
+	# Large preview at scale 2.0
+	# Centre of 130×130 box relative to parent panel = (175+65, 64+65) = (240, 129)
+	# Node must place draw origin so (28*2, 32*2) = (56, 64) lands there
+	# => node pos = (240-56, 129-64) = (184, 65)
+	var prev := _TurretPreview.new()
+	prev.turret_data = {}
+	prev.scale       = Vector2(2.0, 2.0)
+	prev.position    = Vector2(184, 65)
+	panel.add_child(prev)
+	_gacha_result_prev = prev
+
+	# Tower name
+	_gacha_result_name = _label("", _font_bold, 22, C_WHITE)
+	_gacha_result_name.position             = Vector2(0, 202)
+	_gacha_result_name.size                 = Vector2(PW, 28)
+	_gacha_result_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_gacha_result_name.mouse_filter         = MOUSE_FILTER_IGNORE
+	panel.add_child(_gacha_result_name)
+
+	# Rarity label
+	_gacha_result_rar = _label("", _font_reg, 16, C_DIM)
+	_gacha_result_rar.position             = Vector2(0, 232)
+	_gacha_result_rar.size                 = Vector2(PW, 20)
+	_gacha_result_rar.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_gacha_result_rar.mouse_filter         = MOUSE_FILTER_IGNORE
+	panel.add_child(_gacha_result_rar)
+
+	# Copy / level info
+	_gacha_result_info = _label("", _font_bold, 15, Color(0.45, 0.75, 1.0))
+	_gacha_result_info.position             = Vector2(0, 254)
+	_gacha_result_info.size                 = Vector2(PW, 20)
+	_gacha_result_info.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_gacha_result_info.mouse_filter         = MOUSE_FILTER_IGNORE
+	panel.add_child(_gacha_result_info)
+
+	# Level-up notice
+	_gacha_result_lvlup = _label("", _font_bold, 18, C_GOLD)
+	_gacha_result_lvlup.position             = Vector2(0, 276)
+	_gacha_result_lvlup.size                 = Vector2(PW, 22)
+	_gacha_result_lvlup.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_gacha_result_lvlup.mouse_filter         = MOUSE_FILTER_IGNORE
+	panel.add_child(_gacha_result_lvlup)
+
+	# Collect button
+	var ok_btn := Button.new()
+	ok_btn.text       = "Collect"
+	ok_btn.position   = Vector2((PW - 180) / 2, 312)
+	ok_btn.size       = Vector2(180, 36)
+	ok_btn.focus_mode = FOCUS_NONE
+	ok_btn.add_theme_font_override("font",           _font_bold)
+	ok_btn.add_theme_font_size_override("font_size", 17)
+	ok_btn.add_theme_color_override("font_color",    C_WHITE)
+	ok_btn.add_theme_stylebox_override("normal",  _btn_style(C_BTN))
+	ok_btn.add_theme_stylebox_override("hover",   _btn_style(C_BTN_HOV))
+	ok_btn.add_theme_stylebox_override("pressed", _btn_style(C_BTN.darkened(0.2)))
+	ok_btn.add_theme_stylebox_override("focus",   _btn_style(C_BTN))
+	ok_btn.pressed.connect(func():
+		if is_instance_valid(_gacha_result_panel):
+			_gacha_result_panel.visible = false
+		_gacha_spinning = false
+		if is_instance_valid(_gacha_summon_btn):
+			_gacha_summon_btn.disabled = false
+		_refresh_tower_cards()
+	)
+	panel.add_child(ok_btn)
+
+
+func _gacha_on_summon_pressed() -> void:
+	if _gacha_spinning:
+		return
+	if GameData.blue_gems < GACHA_SUMMON_COST:
+		# Flash gem label red to signal insufficient funds
+		if is_instance_valid(_gacha_gem_lbl):
+			_gacha_gem_lbl.add_theme_color_override("font_color", C_RED)
+			var tw := create_tween()
+			tw.tween_interval(0.6)
+			tw.tween_callback(func():
+				if is_instance_valid(_gacha_gem_lbl):
+					_gacha_gem_lbl.add_theme_color_override("font_color",
+						Color(0.45, 0.75, 1.0))
+			)
+		return
+	# Deduct cost and save
+	GameData.blue_gems -= GACHA_SUMMON_COST
+	GameData.save_game()
+	_gacha_refresh_gems()
+
+	var result_id : String = _gacha_roll_tower()
+
+	_gacha_spinning = true
+	if is_instance_valid(_gacha_summon_btn):
+		_gacha_summon_btn.disabled = true
+
+	_gacha_rebuild_strip(result_id)
+	_gacha_spin(result_id)
+
+
+func _gacha_refresh_gems() -> void:
+	if is_instance_valid(_gacha_gem_lbl):
+		_gacha_gem_lbl.text = "🔷 %d Gems" % GameData.blue_gems
+
+
+func _gacha_spin(result_id: String) -> void:
+	if not is_instance_valid(_gacha_strip):
+		return
+	# Strip starts at x=4 (card ~0 at left edge of clip).
+	# We want card GACHA_WIN_IDX to land at the clip's horizontal centre (420px).
+	# Card centre at index i = strip.x + i * SLOT + CARD_W/2
+	# strip.x_end = 420 - WIN_IDX * SLOT - CARD_W/2
+	#             = 420 - 48 * 120 - 56 = -5396
+	const START_X : float = 4.0
+	const END_X   : float = 420.0 - GACHA_WIN_IDX * GACHA_CARD_SLOT - GACHA_CARD_W / 2.0
+
+	_gacha_strip.position.x = START_X
+
+	if is_instance_valid(_gacha_tween):
+		_gacha_tween.kill()
+	_gacha_tween = create_tween()
+	_gacha_tween.set_trans(Tween.TRANS_EXPO)
+	_gacha_tween.set_ease(Tween.EASE_OUT)
+	_gacha_tween.tween_property(_gacha_strip, "position:x", END_X, GACHA_SPIN_DURATION)
+	_gacha_tween.tween_callback(func():
+		_gacha_on_spin_complete(result_id)
+	)
+
+
+func _gacha_on_spin_complete(tower_id: String) -> void:
+	var old_level : int = GameData.get_tower_level(tower_id)
+	GameData.add_tower_copy(tower_id)
+	var new_level : int = GameData.get_tower_level(tower_id)
+	_gacha_show_result(tower_id, old_level, new_level)
+
+
+func _gacha_show_result(tower_id: String, old_level: int, new_level: int) -> void:
+	var def    : Dictionary = SummonSystem.TURRET_DEFS.get(tower_id, {})
+	var rarity : String     = def.get("rarity", "common")
+	var rcol   : Color      = SummonSystem.RARITY_COLORS.get(rarity, C_WHITE)
+
+	if is_instance_valid(_gacha_result_prev):
+		_gacha_result_prev.turret_data = def
+		_gacha_result_prev.queue_redraw()
+	if is_instance_valid(_gacha_result_name):
+		_gacha_result_name.text = def.get("name", tower_id)
+	if is_instance_valid(_gacha_result_rar):
+		_gacha_result_rar.text = rarity.capitalize()
+		_gacha_result_rar.add_theme_color_override("font_color", rcol)
+	if _gacha_result_card_s != null:
+		_gacha_result_card_s.border_color = Color(rcol.r, rcol.g, rcol.b, 0.75)
+
+	var copies : int = GameData.get_tower_xp(tower_id)
+	if is_instance_valid(_gacha_result_info):
+		if new_level >= GameData.TOWER_MAX_LEVEL:
+			_gacha_result_info.text = "+1 Copy  (Lv.%d MAX)" % new_level
+		else:
+			var needed : int = GameData.copies_needed_for_level(new_level)
+			_gacha_result_info.text = "+1 Copy  ·  Lv.%d  (%d / %d)" % [new_level, copies, needed]
+
+	if is_instance_valid(_gacha_result_lvlup):
+		if new_level > old_level:
+			_gacha_result_lvlup.text = "🎉 Level Up!  Lv.%d → Lv.%d" % [old_level, new_level]
+		else:
+			_gacha_result_lvlup.text = ""
+
+	if is_instance_valid(_gacha_result_panel):
+		_gacha_result_panel.visible = true
 
 
 func _build_world_map_screen() -> void:
@@ -1699,15 +2694,1166 @@ func _build_world_map_screen() -> void:
 
 
 func _build_heroes_screen() -> void:
-	_heroes_screen = _build_placeholder_screen("_heroes_screen", "🦸  Heroes")
+	# ── Outer overlay ──────────────────────────────────────────────────────────
+	var overlay := Panel.new()
+	var bg_s := StyleBoxFlat.new()
+	bg_s.bg_color = Color(0.04, 0.04, 0.10)
+	overlay.add_theme_stylebox_override("panel", bg_s)
+	overlay.position     = Vector2.ZERO
+	overlay.size         = Vector2(1280, 720)
+	overlay.mouse_filter = MOUSE_FILTER_STOP
+	overlay.visible      = false
+	add_child(overlay)
+	_heroes_screen = overlay
+
+	_hero_card_refs.clear()
+
+	# ── Title ──────────────────────────────────────────────────────────────────
+	var title := _label("🦸  Heroes", _font_bold, 30, C_WHITE)
+	title.position             = Vector2(0, 18)
+	title.size                 = Vector2(1280, 48)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	overlay.add_child(title)
+
+	# ── "Hero Selected" banner ─────────────────────────────────────────────────
+	var sel_panel := Panel.new()
+	var sel_style := StyleBoxFlat.new()
+	sel_style.bg_color                  = Color(0.08, 0.08, 0.18, 1.0)
+	sel_style.corner_radius_top_left    = 10; sel_style.corner_radius_top_right    = 10
+	sel_style.corner_radius_bottom_left = 10; sel_style.corner_radius_bottom_right = 10
+	sel_style.border_width_left = 2; sel_style.border_width_right  = 2
+	sel_style.border_width_top  = 2; sel_style.border_width_bottom = 2
+	sel_style.border_color = Color(0.40, 0.40, 0.55, 0.6)
+	sel_panel.add_theme_stylebox_override("panel", sel_style)
+	sel_panel.position     = Vector2(20, 70)
+	sel_panel.size         = Vector2(1240, 110)
+	sel_panel.mouse_filter = MOUSE_FILTER_IGNORE
+	overlay.add_child(sel_panel)
+
+	var sel_hdr := _label("Hero Selected", _font_bold, 14, C_DIM)
+	sel_hdr.position = Vector2(16, 8); sel_hdr.size = Vector2(200, 20)
+	sel_hdr.mouse_filter = MOUSE_FILTER_IGNORE
+	sel_panel.add_child(sel_hdr)
+
+	# Inner container that gets rebuilt on selection change
+	var sel_box := Control.new()
+	sel_box.position     = Vector2(0, 28)
+	sel_box.size         = Vector2(1240, 80)
+	sel_box.mouse_filter = MOUSE_FILTER_IGNORE
+	sel_panel.add_child(sel_box)
+	_hero_sel_container = sel_box
+
+	# Preview placeholder (replaced in _hero_refresh_selected)
+	_hero_sel_preview = _TurretPreview.new()
+	_hero_sel_preview.position = Vector2(16, 4)
+	sel_box.add_child(_hero_sel_preview)
+
+	_hero_sel_name = _label("", _font_bold, 18, C_WHITE)
+	_hero_sel_name.position = Vector2(80, 6); _hero_sel_name.size = Vector2(350, 26)
+	_hero_sel_name.mouse_filter = MOUSE_FILTER_IGNORE
+	sel_box.add_child(_hero_sel_name)
+
+	_hero_sel_stats = _label("", _font_reg, 14, C_DIM)
+	_hero_sel_stats.position = Vector2(80, 36); _hero_sel_stats.size = Vector2(700, 20)
+	_hero_sel_stats.mouse_filter = MOUSE_FILTER_IGNORE
+	sel_box.add_child(_hero_sel_stats)
+
+	var active_badge := _label("✓  Active", _font_bold, 14, Color(0.30, 0.90, 0.45))
+	active_badge.position = Vector2(1140, 26); active_badge.size = Vector2(90, 20)
+	active_badge.mouse_filter = MOUSE_FILTER_IGNORE
+	sel_box.add_child(active_badge)
+
+	_hero_refresh_selected()
+
+	# ── Scroll area ────────────────────────────────────────────────────────────
+	var scroll := ScrollContainer.new()
+	scroll.position               = Vector2(20, 192)
+	scroll.size                   = Vector2(1240, 470)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.vertical_scroll_mode   = ScrollContainer.SCROLL_MODE_AUTO
+	overlay.add_child(scroll)
+
+	var vbox := VBoxContainer.new()
+	vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vbox.add_theme_constant_override("separation", 6)
+	scroll.add_child(vbox)
+
+	const H_RARITY_ORDER  : Array = ["common", "rare", "epic", "legendary"]
+	const H_RARITY_LABELS : Dictionary = {
+		"common":    "⬜  Common",
+		"rare":      "🔵  Rare",
+		"epic":      "🟣  Epic",
+		"legendary": "🟡  Legendary",
+	}
+	const H_RARITY_COLS : Dictionary = {
+		"common":    Color(0.75, 0.75, 0.75),
+		"rare":      Color(0.25, 0.55, 1.00),
+		"epic":      Color(0.72, 0.25, 0.90),
+		"legendary": Color(1.00, 0.72, 0.10),
+	}
+
+	var by_rarity : Dictionary = {}
+	for r in H_RARITY_ORDER:
+		by_rarity[r] = []
+	for hid in GameData.HERO_DEFS:
+		var hd : Dictionary = GameData.HERO_DEFS[hid]
+		var r  : String     = hd.get("rarity", "common")
+		if by_rarity.has(r):
+			by_rarity[r].append(hd)
+
+	const H_CARDS_PER_ROW : int = 4
+	const H_CARD_W        : int = 294
+	const H_CARD_H        : int = 86
+
+	for rarity in H_RARITY_ORDER:
+		var defs : Array = by_rarity[rarity]
+		if defs.is_empty():
+			continue
+
+		var hdr := _label(H_RARITY_LABELS.get(rarity, rarity), _font_bold, 16,
+						  H_RARITY_COLS.get(rarity, C_WHITE))
+		hdr.size = Vector2(1240, 26)
+		var hdr_c := Control.new()
+		hdr_c.custom_minimum_size = Vector2(1240, 32)
+		hdr.position = Vector2(8, 4)
+		hdr_c.add_child(hdr)
+		vbox.add_child(hdr_c)
+
+		var col : int = 0
+		var row_box : HBoxContainer = null
+		for def in defs:
+			if col == 0:
+				row_box = HBoxContainer.new()
+				row_box.add_theme_constant_override("separation", 6)
+				row_box.custom_minimum_size = Vector2(1240, H_CARD_H)
+				vbox.add_child(row_box)
+			_hero_make_card(row_box, def, H_CARD_W, H_CARD_H,
+							H_RARITY_COLS.get(rarity, C_WHITE))
+			col += 1
+			if col >= H_CARDS_PER_ROW:
+				col = 0
+
+		var spacer := Control.new()
+		spacer.custom_minimum_size = Vector2(0, 10)
+		vbox.add_child(spacer)
+
+	# ── Back button ────────────────────────────────────────────────────────────
+	var back_btn := Button.new()
+	back_btn.text         = "<  Back"
+	back_btn.position     = Vector2(30, 666)
+	back_btn.size         = Vector2(150, 46)
+	back_btn.focus_mode   = FOCUS_NONE
+	back_btn.add_theme_font_override("font",           _font_bold)
+	back_btn.add_theme_font_size_override("font_size", 16)
+	back_btn.add_theme_color_override("font_color",    C_WHITE)
+	back_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.14, 0.14, 0.24)))
+	back_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.22, 0.22, 0.36)))
+	back_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.10, 0.10, 0.18)))
+	back_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.14, 0.14, 0.24)))
+	back_btn.pressed.connect(func():
+		overlay.visible = false
+		_game_over_screen.visible = true
+	)
+	overlay.add_child(back_btn)
+
+	# ── Hero detail panel ──────────────────────────────────────────────────────
+	_hero_build_detail_panel(overlay)
+
+
+func _hero_refresh_selected() -> void:
+	if not is_instance_valid(_hero_sel_preview):
+		return
+	var def : Dictionary = GameData.HERO_DEFS.get(GameData.selected_hero_id, {})
+	if def.is_empty():
+		return
+	_hero_sel_preview.turret_data = def
+	_hero_sel_preview.queue_redraw()
+	_hero_sel_name.text  = def.get("name", "")
+	var rcol : Color = _hero_rarity_color(def.get("rarity", "common"))
+	_hero_sel_name.add_theme_color_override("font_color", rcol)
+	_hero_sel_stats.text = "⚔ %.0f  ·  🎯 %.0f px  ·  🏹 %.1f/s  ·  %s" % [
+		def.get("damage", 0.0), def.get("range", 0.0), def.get("fire_rate", 0.0),
+		def.get("effect", "none").replace("_", " ").capitalize()
+	]
+
+
+func _hero_rarity_color(rarity: String) -> Color:
+	match rarity:
+		"rare":      return Color(0.25, 0.55, 1.00)
+		"epic":      return Color(0.72, 0.25, 0.90)
+		"legendary": return Color(1.00, 0.72, 0.10)
+		_:           return Color(0.75, 0.75, 0.75)
+
+
+func _hero_make_card(parent: Control, def: Dictionary,
+					  cw: int, ch: int, rcol: Color) -> void:
+	var hero_id     : String = def.get("id", "")
+	var is_selected : bool   = (hero_id == GameData.selected_hero_id)
+	var card := Panel.new()
+	var cs := StyleBoxFlat.new()
+	cs.bg_color                   = Color(0.10, 0.18, 0.10) if is_selected else Color(0.10, 0.10, 0.18)
+	cs.corner_radius_top_left     = 8; cs.corner_radius_top_right    = 8
+	cs.corner_radius_bottom_left  = 8; cs.corner_radius_bottom_right = 8
+	cs.border_width_left = 2; cs.border_width_right  = 2
+	cs.border_width_top  = 2; cs.border_width_bottom = 2
+	cs.border_color = Color(0.30, 0.90, 0.45) if is_selected else rcol
+	card.add_theme_stylebox_override("panel", cs)
+	card.custom_minimum_size = Vector2(cw, ch)
+	card.mouse_filter        = MOUSE_FILTER_STOP
+	parent.add_child(card)
+
+	# Preview
+	var prev := _TurretPreview.new()
+	prev.turret_data = def
+	prev.position    = Vector2(6, (ch - 56) / 2)
+	card.add_child(prev)
+
+	# Name
+	var name_lbl := _label(def.get("name", ""), _font_bold, 15, C_WHITE)
+	name_lbl.position     = Vector2(66, 10)
+	name_lbl.size         = Vector2(cw - 120, 22)
+	name_lbl.mouse_filter = MOUSE_FILTER_IGNORE
+	card.add_child(name_lbl)
+
+	# Rarity
+	var rar_lbl := _label(def.get("rarity", "").capitalize(), _font_reg, 14, rcol)
+	rar_lbl.position     = Vector2(66, 32)
+	rar_lbl.size         = Vector2(cw - 84, 16)
+	rar_lbl.mouse_filter = MOUSE_FILTER_IGNORE
+	card.add_child(rar_lbl)
+
+	# Stat line
+	var stat_str := "⚔ %.0f  ·  🎯 %.0f  ·  🏹 %.1f/s" % [
+		def.get("damage", 0.0), def.get("range", 0.0), def.get("fire_rate", 0.0)]
+	var stat_lbl := _label(stat_str, _font_reg, 13, C_DIM)
+	stat_lbl.position     = Vector2(66, 52)
+	stat_lbl.size         = Vector2(cw - 84, 18)
+	stat_lbl.mouse_filter = MOUSE_FILTER_IGNORE
+	card.add_child(stat_lbl)
+
+	# ✓ badge (always present, visibility toggled on select)
+	var badge := _label("✓", _font_bold, 16, Color(0.30, 0.90, 0.45))
+	badge.position             = Vector2(cw - 28, 8)
+	badge.size                 = Vector2(22, 22)
+	badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	badge.mouse_filter         = MOUSE_FILTER_IGNORE
+	badge.visible              = is_selected
+	card.add_child(badge)
+
+	# Store ref for live highlight updates
+	_hero_card_refs.append({"id": hero_id, "style": cs, "badge": badge, "rcol": rcol})
+
+	# Click → open detail
+	var cap_def := def
+	card.gui_input.connect(func(ev: InputEvent):
+		if ev is InputEventMouseButton and ev.button_index == MOUSE_BUTTON_LEFT and ev.pressed:
+			_hero_show_detail(cap_def)
+	)
+
+
+func _hero_build_detail_panel(parent: Control) -> void:
+	const PW : int = 580
+	const PH : int = 430
+
+	var panel := Panel.new()
+	var ps := StyleBoxFlat.new()
+	ps.bg_color                   = Color(0.07, 0.06, 0.13, 0.98)
+	ps.corner_radius_top_left     = 12; ps.corner_radius_top_right    = 12
+	ps.corner_radius_bottom_left  = 12; ps.corner_radius_bottom_right = 12
+	ps.border_width_left = 2; ps.border_width_right  = 2
+	ps.border_width_top  = 2; ps.border_width_bottom = 2
+	ps.border_color = Color(0.5, 0.5, 0.6, 0.5)
+	ps.shadow_color = Color(0, 0, 0, 0.65); ps.shadow_size = 14
+	panel.add_theme_stylebox_override("panel", ps)
+	panel.position     = Vector2((1280 - PW) / 2, (720 - PH) / 2)
+	panel.size         = Vector2(PW, PH)
+	panel.mouse_filter = MOUSE_FILTER_STOP
+	panel.visible      = false
+	panel.z_index      = 20
+	parent.add_child(panel)
+	_hero_det_panel  = panel
+	_hero_det_style  = ps
+
+	# Dim backdrop
+	var dim := ColorRect.new()
+	dim.color        = Color(0, 0, 0, 0.55)
+	dim.position     = Vector2(-(1280 - PW) / 2, -(720 - PH) / 2)
+	dim.size         = Vector2(1280, 720)
+	dim.mouse_filter = MOUSE_FILTER_STOP
+	dim.z_index      = -1
+	dim.gui_input.connect(func(ev: InputEvent):
+		if ev is InputEventMouseButton and ev.pressed \
+				and ev.button_index not in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN, MOUSE_BUTTON_WHEEL_LEFT, MOUSE_BUTTON_WHEEL_RIGHT]:
+			panel.visible = false
+	)
+	panel.add_child(dim)
+
+	# Header
+	var hdr_bg := Panel.new()
+	var hdr_sty := StyleBoxFlat.new()
+	hdr_sty.bg_color                   = Color(0.05, 0.16, 0.28, 1.0)
+	hdr_sty.corner_radius_top_left     = 12; hdr_sty.corner_radius_top_right  = 12
+	hdr_sty.corner_radius_bottom_left  = 0;  hdr_sty.corner_radius_bottom_right = 0
+	hdr_bg.add_theme_stylebox_override("panel", hdr_sty)
+	hdr_bg.position = Vector2(2, 2); hdr_bg.size = Vector2(PW - 4, 50)
+	hdr_bg.mouse_filter = MOUSE_FILTER_IGNORE
+	panel.add_child(hdr_bg)
+
+	_hero_det_name = _label("", _font_bold, 20, C_WHITE)
+	_hero_det_name.position             = Vector2(0, 12)
+	_hero_det_name.size                 = Vector2(PW - 60, 28)
+	_hero_det_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_hero_det_name.mouse_filter         = MOUSE_FILTER_IGNORE
+	panel.add_child(_hero_det_name)
+
+	var close_btn := Button.new()
+	close_btn.text       = "X"
+	close_btn.position   = Vector2(PW - 46, 8)
+	close_btn.size       = Vector2(36, 36)
+	close_btn.focus_mode = FOCUS_NONE
+	close_btn.add_theme_font_override("font",           _font_bold)
+	close_btn.add_theme_font_size_override("font_size", 14)
+	close_btn.add_theme_color_override("font_color",    C_WHITE)
+	close_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.55, 0.12, 0.12)))
+	close_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.72, 0.18, 0.18)))
+	close_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.40, 0.08, 0.08)))
+	close_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.55, 0.12, 0.12)))
+	close_btn.pressed.connect(func(): panel.visible = false)
+	panel.add_child(close_btn)
+
+	# Vertical divider
+	const LW : int = 268
+	const RX : int = 280
+	const RW : int = PW - RX - 12
+	var vdiv := ColorRect.new()
+	vdiv.color = Color(1,1,1,0.10); vdiv.position = Vector2(LW, 56); vdiv.size = Vector2(2, PH - 64)
+	vdiv.mouse_filter = MOUSE_FILTER_IGNORE
+	panel.add_child(vdiv)
+
+	# ── LEFT COLUMN ────────────────────────────────────────────────────────────
+	# Preview
+	_hero_det_preview = _TurretPreview.new()
+	_hero_det_preview.position = Vector2((LW - 56) / 2, 62)
+	panel.add_child(_hero_det_preview)
+
+	# Rarity
+	_hero_det_rarity = _label("", _font_bold, 14, C_DIM)
+	_hero_det_rarity.position             = Vector2(0, 156)
+	_hero_det_rarity.size                 = Vector2(LW, 20)
+	_hero_det_rarity.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_hero_det_rarity.mouse_filter         = MOUSE_FILTER_IGNORE
+	panel.add_child(_hero_det_rarity)
+
+	var div1 := ColorRect.new()
+	div1.color = Color(1,1,1,0.08); div1.position = Vector2(12,180); div1.size = Vector2(LW-20,1)
+	div1.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(div1)
+
+	# Stat rows
+	for sr in [["⚔ Damage", 188, "_hero_det_dmg"], ["🎯 Range", 212, "_hero_det_rng"],
+			   ["🏹 Fire Rate", 236, "_hero_det_rate"], ["Effect", 260, "_hero_det_eff"]]:
+		var kl := _label(sr[0], _font_reg, 14, C_DIM)
+		kl.position = Vector2(12, sr[1]); kl.size = Vector2(112, 20)
+		kl.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(kl)
+
+	_hero_det_dmg = _label("", _font_bold, 14, C_WHITE)
+	_hero_det_dmg.position = Vector2(128, 188); _hero_det_dmg.size = Vector2(LW - 136, 20)
+	_hero_det_dmg.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(_hero_det_dmg)
+
+	_hero_det_rng = _label("", _font_bold, 14, C_WHITE)
+	_hero_det_rng.position = Vector2(128, 212); _hero_det_rng.size = Vector2(LW - 136, 20)
+	_hero_det_rng.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(_hero_det_rng)
+
+	_hero_det_rate = _label("", _font_bold, 14, C_WHITE)
+	_hero_det_rate.position = Vector2(128, 236); _hero_det_rate.size = Vector2(LW - 136, 20)
+	_hero_det_rate.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(_hero_det_rate)
+
+	_hero_det_eff = _label("", _font_bold, 14, C_WHITE)
+	_hero_det_eff.position = Vector2(128, 260); _hero_det_eff.size = Vector2(LW - 136, 20)
+	_hero_det_eff.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(_hero_det_eff)
+
+	_hero_det_desc = _label("", _font_reg, 14, C_DIM)  # kept for data flow, not displayed
+
+	# ── RIGHT COLUMN ───────────────────────────────────────────────────────────
+	var eff_hdr := _label("Special Ability", _font_bold, 14, C_GOLD)
+	eff_hdr.position = Vector2(RX, 62); eff_hdr.size = Vector2(RW, 18)
+	eff_hdr.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(eff_hdr)
+
+	var abil_scroll := ScrollContainer.new()
+	abil_scroll.position               = Vector2(RX, 84)
+	abil_scroll.size                   = Vector2(RW, 220)
+	abil_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	abil_scroll.vertical_scroll_mode   = ScrollContainer.SCROLL_MODE_AUTO
+	panel.add_child(abil_scroll)
+	_hero_det_ability = _label("", _font_reg, 14, Color(0.92, 0.88, 0.72))
+	_hero_det_ability.custom_minimum_size   = Vector2(RW, 0)
+	_hero_det_ability.autowrap_mode         = TextServer.AUTOWRAP_WORD
+	_hero_det_ability.mouse_filter          = MOUSE_FILTER_PASS
+	_hero_det_ability.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_hero_det_ability.size_flags_vertical   = Control.SIZE_SHRINK_BEGIN
+	abil_scroll.add_child(_hero_det_ability)
+
+	# Select Hero button
+	_hero_det_select = Button.new()
+	_hero_det_select.position   = Vector2(RX, 324)
+	_hero_det_select.size       = Vector2(RW, 52)
+	_hero_det_select.focus_mode = FOCUS_NONE
+	_hero_det_select.add_theme_font_override("font",           _font_bold)
+	_hero_det_select.add_theme_font_size_override("font_size", 16)
+	_hero_det_select.add_theme_color_override("font_color",    C_WHITE)
+	_hero_det_select.add_theme_stylebox_override("normal",  _btn_style(Color(0.12, 0.42, 0.18)))
+	_hero_det_select.add_theme_stylebox_override("hover",   _btn_style(Color(0.18, 0.58, 0.25)))
+	_hero_det_select.add_theme_stylebox_override("pressed", _btn_style(Color(0.08, 0.30, 0.12)))
+	_hero_det_select.add_theme_stylebox_override("focus",   _btn_style(Color(0.12, 0.42, 0.18)))
+	panel.add_child(_hero_det_select)
+
+	var note_lbl := _label("Takes effect on next game start", _font_reg, 12, C_DIM)
+	note_lbl.position             = Vector2(RX, 382)
+	note_lbl.size                 = Vector2(RW, 18)
+	note_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	note_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	panel.add_child(note_lbl)
+
+
+func _hero_show_detail(def: Dictionary) -> void:
+	if not is_instance_valid(_hero_det_panel):
+		return
+	var eff_map : Dictionary = {
+		"none":          "Standard single-target shot. No bonus effect.",
+		"focused_shot":  "Consecutive hits on the same target deal +50% damage.",
+		"dual_shot":     "Fires at 2 separate enemies simultaneously.",
+		"chain":         "Hits primary at full damage, then chains to 2 nearby enemies at 50% damage.",
+		"aoe":           "Hits all enemies currently in range.",
+		"aoe_burst":     "Explosive shot hits up to 5 enemies in range.",
+		"melee_cleave":  "Every 3rd hit strikes all enemies in range.",
+		"bleed_aoe":     "Hits all in range; applies bleed (max 3 stacks, 1 dmg/s each).",
+		"slow_zone":     "Every 4th shot drops an ice zone slowing enemies 55% for 3s.",
+		"poison_debuff": "Poisons targets — +10% damage taken for 5s.",
+		"execute_shot":  "Up to 2× damage based on enemy current HP%.",
+		"knight_slam":   "Every 3rd hit throws 2 swords and knocks enemies back.",
+		"ranger_fire_aura": "Every 5th hit: towers 1 tile away get +10% fire rate for 3s.",
+		"rock_drop":           "Every 3rd hit drops a brittle zone (2s). Enemies entering take +20 bonus damage on their next hit from any source (once per enemy per zone).",
+		"dual_debuff":         "Hits 2 enemies per attack. Every other attack inflicts a random debuff on each target for 1 second. (Bleed, 10% Slow, or +10% damage taken — 5s cooldown per debuff per target.)",
+		"shadow_blade_combo":  "Every 3rd hit strikes with both blades at 2× damage + bleed (2× dmg/s, 3s, max 1 stack).",
+		"frost_shatter":       "2 shots per attack. Every hit slows by 5% for 2s. Gains +3% attack speed per slowed enemy on map (max +30%). Resets after 3s without attacking.",
+		"hp_strike":     "Deals base dmg + 1% of target's current HP.",
+		"arcane_charge": "Every 15th hit fires a blue laser for 2× damage to all in range.",
+		"lightning":     "Chains to primary + 3 more at 80% damage.",
+		"pierce":        "Bolt pierces up to 3 enemies in a line.",
+		"shadow_weaver_phase": "Shadow phase: single-target attack. After 10 hits transforms for 5s — white laser fires every 0.5s hitting 5 enemies for 50% tower damage + 1% max HP (0.5% on bosses).",
+	}
+
+	var hero_id : String = def.get("id", "")
+	var rarity  : String = def.get("rarity", "common")
+	var rcol    : Color  = _hero_rarity_color(rarity)
+
+	_hero_det_name.text = def.get("name", "")
+	_hero_det_rarity.text = rarity.capitalize()
+	_hero_det_rarity.add_theme_color_override("font_color", rcol)
+	_hero_det_style.border_color = rcol.lerp(Color(0.5, 0.5, 0.6, 0.5), 0.5)
+
+	_hero_det_preview.turret_data = def
+	_hero_det_preview.queue_redraw()
+
+	_hero_det_dmg.text  = "%.0f" % def.get("damage", 0.0)
+	_hero_det_rng.text  = "%d px" % int(def.get("range", 0.0))
+	_hero_det_rate.text = "%.1f / s" % def.get("fire_rate", 0.0)
+	var eff_key : String = def.get("effect", "none")
+	_hero_det_eff.text  = eff_key.replace("_", " ").capitalize()
+	_hero_det_desc.text    = def.get("desc", "")
+	_hero_det_ability.text = eff_map.get(eff_key, "No special effect.")
+
+	var is_selected : bool = (hero_id == GameData.selected_hero_id)
+	if is_selected:
+		_hero_det_select.text = "✓  Already Selected"
+		_hero_det_select.add_theme_stylebox_override("normal",  _btn_style(Color(0.12, 0.26, 0.14)))
+		_hero_det_select.add_theme_stylebox_override("hover",   _btn_style(Color(0.12, 0.26, 0.14)))
+	else:
+		_hero_det_select.text = "⚔  Select Hero"
+		_hero_det_select.add_theme_stylebox_override("normal",  _btn_style(Color(0.12, 0.42, 0.18)))
+		_hero_det_select.add_theme_stylebox_override("hover",   _btn_style(Color(0.18, 0.58, 0.25)))
+
+	# Disconnect all previous connections then reconnect
+	for conn in _hero_det_select.pressed.get_connections():
+		_hero_det_select.pressed.disconnect(conn["callable"])
+	var cap_id := hero_id
+	_hero_det_select.pressed.connect(_hero_on_select.bind(cap_id))
+
+	_hero_det_panel.visible = true
+
+
+func _hero_on_select(hero_id: String) -> void:
+	GameData.set_selected_hero(hero_id)
+	_hero_det_panel.visible = false
+	_hero_refresh_selected()
+	# Update all card highlights without rebuilding the screen
+	for ref in _hero_card_refs:
+		var sel : bool = (ref["id"] == hero_id)
+		var cs  : StyleBoxFlat = ref["style"]
+		cs.bg_color    = Color(0.10, 0.18, 0.10) if sel else Color(0.10, 0.10, 0.18)
+		cs.border_color = Color(0.30, 0.90, 0.45) if sel else ref["rcol"]
+		(ref["badge"] as Label).visible = sel
+	# Re-open detail with updated button state
+	var def : Dictionary = GameData.HERO_DEFS.get(hero_id, {})
+	if not def.is_empty():
+		_hero_show_detail(def)
 
 
 func _build_towers_screen() -> void:
-	_towers_screen = _build_placeholder_screen("_towers_screen", "🗼  Towers")
+	# ── Outer overlay ──────────────────────────────────────────────────────────
+	var overlay := Panel.new()
+	var bg_s := StyleBoxFlat.new()
+	bg_s.bg_color = Color(0.04, 0.04, 0.10)
+	overlay.add_theme_stylebox_override("panel", bg_s)
+	overlay.position     = Vector2.ZERO
+	overlay.size         = Vector2(1280, 720)
+	overlay.mouse_filter = MOUSE_FILTER_STOP
+	overlay.visible      = false
+	add_child(overlay)
+	_towers_screen = overlay
+
+	# ── Title ──────────────────────────────────────────────────────────────────
+	var title := _label("🗼  Towers", _font_bold, 30, C_WHITE)
+	title.position             = Vector2(0, 18)
+	title.size                 = Vector2(1280, 48)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	overlay.add_child(title)
+
+	# ── Scroll area (card list) ────────────────────────────────────────────────
+	var scroll := ScrollContainer.new()
+	scroll.position                = Vector2(20, 72)
+	scroll.size                    = Vector2(1240, 568)
+	scroll.horizontal_scroll_mode  = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.vertical_scroll_mode    = ScrollContainer.SCROLL_MODE_AUTO
+	overlay.add_child(scroll)
+
+	var vbox := VBoxContainer.new()
+	vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vbox.add_theme_constant_override("separation", 6)
+	scroll.add_child(vbox)
+
+	# Rarity order
+	const RARITY_ORDER : Array = ["common", "rare", "epic", "legendary", "fusion"]
+	const RARITY_LABELS : Dictionary = {
+		"common":    "⬜  Common",
+		"rare":      "🔵  Rare",
+		"epic":      "🟣  Epic",
+		"legendary": "🟡  Legendary",
+		"fusion":    "🟢  Fusion",
+	}
+	const RARITY_COLS : Dictionary = {
+		"common":    Color(0.75, 0.75, 0.75),
+		"rare":      Color(0.25, 0.55, 1.00),
+		"epic":      Color(0.72, 0.25, 0.90),
+		"legendary": Color(1.00, 0.72, 0.10),
+		"fusion":    Color(0.20, 1.00, 0.85),
+	}
+
+	# Full effect description map (same as in show_tower_info)
+	var eff_map : Dictionary = {
+		"none":          "Standard single-target shot.",
+		"focused_shot":  "Consecutive hits on the same target deal +50% damage.",
+		"dual_shot":     "Fires at 2 separate enemies simultaneously.",
+		"chain":         "Hits primary at full damage, then chains to 2 nearby enemies at 50% damage.",
+		"aoe":           "Hits all enemies currently in range.",
+		"aoe_burst":     "Explosive shot hits up to 5 enemies in range.",
+		"melee_cleave":  "Every 3rd hit strikes all enemies in range.",
+		"bleed_aoe":     "Hits all in range; applies bleed (max 3 stacks, 1 dmg/s each).",
+		"slow_zone":     "Every 4th shot drops an ice zone slowing enemies 55% for 3s.",
+		"poison_debuff": "Poisons targets — +10% damage taken for 5s.",
+		"execute_shot":  "Up to 2× damage based on enemy current HP%.",
+		"knight_slam":   "Every 3rd hit throws 2 swords and knocks enemies back.",
+		"ranger_fire_aura": "Every 5th hit: towers 1 tile away get +10% fire rate for 3s.",
+		"rock_drop":           "Every 3rd hit drops a brittle zone (2s). Enemies entering take +20 bonus damage on their next hit from any source (once per enemy per zone).",
+		"dual_debuff":         "Hits 2 enemies per attack. Every other attack inflicts a random debuff on each target for 1 second. (Bleed, 10% Slow, or +10% damage taken — 5s cooldown per debuff per target.)",
+		"shadow_blade_combo":  "Every 3rd hit strikes with both blades at 2× damage + bleed (2× dmg/s, 3s, max 1 stack).",
+		"frost_shatter":       "2 shots per attack. Every hit slows by 5% for 2s. Gains +3% attack speed per slowed enemy on map (max +30%). Resets after 3s without attacking.",
+		"hp_strike":     "Deals base dmg + 1% of target's current HP.",
+		"poison_cloud":     "Hits all enemies in range each shot. Spawns a persistent poison cloud that slowly expands along the path, dealing 2 damage/s to any enemy inside it.",
+		"frost_cannon_tri": "Fires at up to 3 separate targets per shot. Boss targets take +50% damage and receive a 10% slow that refreshes on repeat hits.",
+		"arcane_overload":  "Every 5th attack triggers Arcane Overload — instant lasers hit ALL enemies in range (minimum 5 lasers). Counter never resets.",
+		"arcane_charge": "Every 15th hit fires a blue laser for 2× damage to all in range.",
+		"lock_beam":     "Locks beam on one target; damage ramps to 1.5× over 5s.",
+		"tempest_strike":          "Every 10th hit deals bonus damage equal to 5% of the target's total max HP.",
+		"infernal_serpent_summon": "Each hit has a 10% chance to summon a fire serpent (100 damage per bite) that laps the battlefield once.",
+		"lightning":     "Chains to primary + 3 more at 80% damage.",
+		"storm_chain":   "Strikes primary for full damage, then chains to 4 nearest enemies globally for 150% damage.",
+		"chrono_aoe":    "Hits all enemies in range each shot. Applies a 15% slow for 2s that stacks with other slows (e.g. Frost Spire).",
+		"world_tree_buff": "Passively buffs towers one tile away with +10 flat damage and +50% attack speed.",
+		"natures_wrath_buff": "Buffs towers one tile away with +15 flat damage and +75% attack speed. 5% chance per hit to earn 2 gold.",
+		"taunt_slam":     "Hits up to 5 enemies at once. Every 5th hit stuns all in range for 2s and causes them to take +20% damage from all sources.",
+		"hercules_cleave": "Strikes 2 enemies at once. Gains +5 permanent damage per wave cleared. Boss waves excluded.",
+		"pierce":        "Bolt pierces up to 3 enemies in a line.",
+		"axe_warrior":   "Each swing hits up to 2 enemies in melee range, applying 1 Bleed stack and 1 Poison stack.",
+		"blade_spin":    "Dual melee strike hits 2 targets. 10% chance to summon 2 razor blades orbiting for 3s.",
+	}
+
+	# Group defs by rarity in order
+	var by_rarity : Dictionary = {}
+	for r in RARITY_ORDER:
+		by_rarity[r] = []
+	for tid in SummonSystem.TURRET_DEFS:
+		var d : Dictionary = SummonSystem.TURRET_DEFS[tid]
+		var r : String = d.get("rarity", "common")
+		if by_rarity.has(r):
+			by_rarity[r].append(d)
+
+	const CARDS_PER_ROW : int = 4
+	const CARD_W        : int = 294
+	const CARD_H        : int = 86
+
+	for rarity in RARITY_ORDER:
+		var defs : Array = by_rarity[rarity]
+		if defs.is_empty():
+			continue
+
+		# Section header
+		var hdr := _label(RARITY_LABELS.get(rarity, rarity), _font_bold, 16,
+						  RARITY_COLS.get(rarity, C_WHITE))
+		hdr.size = Vector2(1240, 26)
+		var hdr_container := Control.new()
+		hdr_container.custom_minimum_size = Vector2(1240, 32)
+		hdr.position = Vector2(8, 4)
+		hdr_container.add_child(hdr)
+		vbox.add_child(hdr_container)
+
+		# Row flow — 4 cards per row
+		var col : int = 0
+		var row_box : HBoxContainer = null
+		for def in defs:
+			if col == 0:
+				row_box = HBoxContainer.new()
+				row_box.add_theme_constant_override("separation", 6)
+				row_box.custom_minimum_size = Vector2(1240, CARD_H)
+				vbox.add_child(row_box)
+			_tw_make_card(row_box, def, CARD_W, CARD_H, RARITY_COLS.get(rarity, C_WHITE),
+						  eff_map, RARITY_COLS)
+			col += 1
+			if col >= CARDS_PER_ROW:
+				col = 0
+
+		# Spacing after each section
+		var spacer := Control.new()
+		spacer.custom_minimum_size = Vector2(0, 10)
+		vbox.add_child(spacer)
+
+	# ── Back button ────────────────────────────────────────────────────────────
+	var back_btn := Button.new()
+	back_btn.text         = "<  Back"
+	back_btn.position     = Vector2(30, 666)
+	back_btn.size         = Vector2(150, 46)
+	back_btn.focus_mode   = FOCUS_NONE
+	back_btn.add_theme_font_override("font",           _font_bold)
+	back_btn.add_theme_font_size_override("font_size", 16)
+	back_btn.add_theme_color_override("font_color",    C_WHITE)
+	back_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.22, 0.22, 0.28)))
+	back_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.30, 0.30, 0.38)))
+	back_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.16, 0.16, 0.20)))
+	back_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.22, 0.22, 0.28)))
+	back_btn.pressed.connect(func():
+		overlay.visible = false
+		_game_over_screen.visible = true
+	)
+	overlay.add_child(back_btn)
+
+	# ── Detail panel (right-side slide-in) ────────────────────────────────────
+	_tw_build_detail_panel(overlay)
+
+
+func _tw_make_card(parent: Control, def: Dictionary, cw: int, ch: int,
+				   rarity_col: Color, eff_map: Dictionary,
+				   rarity_cols: Dictionary) -> void:
+	var card := Panel.new()
+	var cs := StyleBoxFlat.new()
+	cs.bg_color              = Color(0.10, 0.10, 0.16)
+	cs.corner_radius_top_left     = 8
+	cs.corner_radius_top_right    = 8
+	cs.corner_radius_bottom_left  = 8
+	cs.corner_radius_bottom_right = 8
+	cs.border_width_left   = 2
+	cs.border_width_right  = 2
+	cs.border_width_top    = 2
+	cs.border_width_bottom = 2
+	cs.border_color = Color(rarity_col.r, rarity_col.g, rarity_col.b, 0.45)
+	card.add_theme_stylebox_override("panel", cs)
+	card.custom_minimum_size = Vector2(cw, ch)
+	card.mouse_filter        = MOUSE_FILTER_STOP
+	parent.add_child(card)
+
+	# Hover highlight
+	var hs := cs.duplicate() as StyleBoxFlat
+	hs.bg_color     = Color(0.16, 0.16, 0.24)
+	hs.border_color = rarity_col
+	var is_hover := false
+	card.mouse_entered.connect(func():
+		card.add_theme_stylebox_override("panel", hs)
+	)
+	card.mouse_exited.connect(func():
+		card.add_theme_stylebox_override("panel", cs)
+	)
+
+	# Tower preview (56×56 centered vertically)
+	var preview_bg := Panel.new()
+	var pbs := StyleBoxFlat.new()
+	pbs.bg_color                  = Color(0.06, 0.06, 0.12)
+	pbs.corner_radius_top_left    = 6
+	pbs.corner_radius_top_right   = 6
+	pbs.corner_radius_bottom_left = 6
+	pbs.corner_radius_bottom_right= 6
+	preview_bg.add_theme_stylebox_override("panel", pbs)
+	preview_bg.position     = Vector2(8, (ch - 60) / 2)
+	preview_bg.size         = Vector2(60, 60)
+	preview_bg.mouse_filter = MOUSE_FILTER_IGNORE
+	card.add_child(preview_bg)
+
+	var prev := _TurretPreview.new()
+	prev.turret_data = def
+	prev.position    = Vector2(8 + 2, (ch - 60) / 2 + 2)
+	card.add_child(prev)
+
+	# Tower name
+	var name_lbl := _label(def.get("name", ""), _font_bold, 15, C_WHITE)
+	name_lbl.position     = Vector2(76, 10)
+	name_lbl.size         = Vector2(cw - 84, 22)
+	name_lbl.mouse_filter = MOUSE_FILTER_IGNORE
+	card.add_child(name_lbl)
+
+	# Rarity tag
+	var r     : String = def.get("rarity", "common")
+	var rcol  : Color  = rarity_cols.get(r, C_WHITE)
+	var rar_lbl := _label(r.capitalize(), _font_reg, 14, rcol)
+	rar_lbl.position     = Vector2(76, 32)
+	rar_lbl.size         = Vector2(cw - 84, 16)
+	rar_lbl.mouse_filter = MOUSE_FILTER_IGNORE
+	card.add_child(rar_lbl)
+
+	# Short stat line
+	var stat_str := "⚔ %.0f  ·  🎯 %.0f  ·  🏹 %.1f/s" % [
+		def.get("damage", 0.0), def.get("range", 0.0), def.get("fire_rate", 0.0)]
+	var stat_lbl := _label(stat_str, _font_reg, 13, C_DIM)
+	stat_lbl.position     = Vector2(76, 48)
+	stat_lbl.size         = Vector2(cw - 84, 18)
+	stat_lbl.mouse_filter = MOUSE_FILTER_IGNORE
+	card.add_child(stat_lbl)
+
+	# Level badge (top-right corner)
+	var tower_id  : String = def.get("id", "")
+	var lvl       : int    = GameData.get_tower_level(tower_id)
+	var lvl_lbl   := _label("Lv.%d" % lvl, _font_bold, 14, C_GOLD)
+	lvl_lbl.position             = Vector2(cw - 52, 8)
+	lvl_lbl.size                 = Vector2(46, 18)
+	lvl_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	lvl_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	card.add_child(lvl_lbl)
+
+	# Copies badge (below level badge, top-right)
+	var copies_str : String
+	if lvl >= GameData.TOWER_MAX_LEVEL:
+		copies_str = "MAX"
+	else:
+		var needed_c : int = GameData.copies_needed_for_level(lvl)
+		copies_str = "%d/%d" % [GameData.get_tower_xp(tower_id), needed_c]
+	var copies_lbl := _label(copies_str, _font_reg, 12, C_DIM)
+	copies_lbl.position             = Vector2(cw - 52, 28)
+	copies_lbl.size                 = Vector2(46, 16)
+	copies_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	copies_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	card.add_child(copies_lbl)
+
+	# Store live-refresh refs
+	if tower_id != "":
+		_tower_card_refs[tower_id] = {"lvl_lbl": lvl_lbl, "copies_lbl": copies_lbl}
+
+	# Click → open detail
+	card.gui_input.connect(func(ev: InputEvent):
+		if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT:
+			_tw_show_detail(def, eff_map, rarity_cols)
+	)
+
+
+func _tw_build_detail_panel(parent: Control) -> void:
+	const PW : int = 660   # wide two-column panel
+	const PH : int = 520
+
+	# ── Panel ─────────────────────────────────────────────────────────────────
+	var panel := Panel.new()
+	var ps := StyleBoxFlat.new()
+	ps.bg_color                   = Color(0.07, 0.06, 0.13, 0.98)
+	ps.corner_radius_top_left     = 12; ps.corner_radius_top_right    = 12
+	ps.corner_radius_bottom_left  = 12; ps.corner_radius_bottom_right = 12
+	ps.border_width_left = 2; ps.border_width_right  = 2
+	ps.border_width_top  = 2; ps.border_width_bottom = 2
+	ps.border_color = Color(0.5, 0.5, 0.6, 0.5)
+	ps.shadow_color = Color(0, 0, 0, 0.65); ps.shadow_size = 14
+	panel.add_theme_stylebox_override("panel", ps)
+	panel.position     = Vector2((1280 - PW) / 2, (720 - PH) / 2)
+	panel.size         = Vector2(PW, PH)
+	panel.mouse_filter = MOUSE_FILTER_STOP
+	panel.visible      = false
+	panel.z_index      = 20
+	parent.add_child(panel)
+	_tw_detail_panel = panel
+	_tw_detail_style = ps
+
+	# Dim backdrop (click outside to close)
+	var dim := ColorRect.new()
+	dim.color        = Color(0, 0, 0, 0.55)
+	dim.position     = Vector2(-(1280 - PW) / 2, -(720 - PH) / 2)
+	dim.size         = Vector2(1280, 720)
+	dim.mouse_filter = MOUSE_FILTER_STOP
+	dim.z_index      = -1
+	dim.gui_input.connect(func(ev: InputEvent):
+		if ev is InputEventMouseButton and ev.pressed \
+				and ev.button_index not in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN, MOUSE_BUTTON_WHEEL_LEFT, MOUSE_BUTTON_WHEEL_RIGHT]:
+			panel.visible = false
+	)
+	panel.add_child(dim)
+
+	# ── Header bar ─────────────────────────────────────────────────────────────
+	var hdr_bg := Panel.new()
+	var hdr_style := StyleBoxFlat.new()
+	hdr_style.bg_color                 = Color(0.05, 0.16, 0.28, 1.0)
+	hdr_style.corner_radius_top_left   = 12; hdr_style.corner_radius_top_right  = 12
+	hdr_style.corner_radius_bottom_left = 0; hdr_style.corner_radius_bottom_right = 0
+	hdr_bg.add_theme_stylebox_override("panel", hdr_style)
+	hdr_bg.position     = Vector2(2, 2); hdr_bg.size = Vector2(PW - 4, 50)
+	hdr_bg.mouse_filter = MOUSE_FILTER_IGNORE
+	panel.add_child(hdr_bg)
+
+	_tw_name_lbl = _label("", _font_bold, 20, C_WHITE)
+	_tw_name_lbl.position             = Vector2(0, 12)
+	_tw_name_lbl.size                 = Vector2(PW - 60, 28)
+	_tw_name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_tw_name_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	panel.add_child(_tw_name_lbl)
+
+	# [X] close button in header
+	var close_btn := Button.new()
+	close_btn.text         = "X"
+	close_btn.position     = Vector2(PW - 46, 8)
+	close_btn.size         = Vector2(36, 36)
+	close_btn.focus_mode   = FOCUS_NONE
+	close_btn.add_theme_font_override("font",           _font_bold)
+	close_btn.add_theme_font_size_override("font_size", 14)
+	close_btn.add_theme_color_override("font_color",    C_WHITE)
+	close_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.55, 0.12, 0.12)))
+	close_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.72, 0.18, 0.18)))
+	close_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.40, 0.08, 0.08)))
+	close_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.55, 0.12, 0.12)))
+	close_btn.pressed.connect(func(): panel.visible = false)
+	panel.add_child(close_btn)
+
+	# ── Vertical divider between columns ───────────────────────────────────────
+	const LW : int = 310   # left column width
+	const RX : int = 320   # right column start x
+	const RW : int = PW - RX - 10  # right column width = 330
+	var col_div := ColorRect.new()
+	col_div.color        = Color(1, 1, 1, 0.10)
+	col_div.position     = Vector2(LW, 52); col_div.size = Vector2(2, PH - 60)
+	col_div.mouse_filter = MOUSE_FILTER_IGNORE
+	panel.add_child(col_div)
+
+	# ── LEFT COLUMN ────────────────────────────────────────────────────────────
+	# Preview box (centered in left column, below header)
+	const PREV_SZ : int = 96
+	var prev_bx : int = (LW - PREV_SZ) / 2   # = 107
+	var prev_bg := Panel.new()
+	var pbs := StyleBoxFlat.new()
+	pbs.bg_color = Color(0.04, 0.04, 0.10)
+	pbs.corner_radius_top_left = 8; pbs.corner_radius_top_right = 8
+	pbs.corner_radius_bottom_left = 8; pbs.corner_radius_bottom_right = 8
+	prev_bg.add_theme_stylebox_override("panel", pbs)
+	prev_bg.position     = Vector2(prev_bx, 62); prev_bg.size = Vector2(PREV_SZ, PREV_SZ)
+	prev_bg.mouse_filter = MOUSE_FILTER_IGNORE
+	panel.add_child(prev_bg)
+
+	# _TurretPreview internal center: draw_set_transform(Vector2(28,32),...)
+	# To center in box: node.pos = (box_center_x - 28, box_center_y - 32) scaled by node scale
+	# Using scale 1.5: effective center offset = (28*1.5, 32*1.5) = (42, 48)
+	# node.pos = (prev_bx + PREV_SZ/2 - 42, 62 + PREV_SZ/2 - 48) = (prev_bx+6, 62)
+	var prev := _TurretPreview.new()
+	prev.scale    = Vector2(1.5, 1.5)
+	prev.position = Vector2(prev_bx + PREV_SZ / 2 - 42, 62 + PREV_SZ / 2 - 48)
+	panel.add_child(prev)
+	_tw_preview_node = prev
+
+	# Rarity label (below preview)
+	_tw_rarity_lbl = _label("", _font_bold, 14, C_DIM)
+	_tw_rarity_lbl.position             = Vector2(0, 166)
+	_tw_rarity_lbl.size                 = Vector2(LW, 20)
+	_tw_rarity_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_tw_rarity_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	panel.add_child(_tw_rarity_lbl)
+
+	# Thin divider
+	var div1 := ColorRect.new()
+	div1.color = Color(1,1,1,0.08); div1.position = Vector2(14,192); div1.size = Vector2(LW-24,1)
+	div1.mouse_filter = MOUSE_FILTER_IGNORE
+	panel.add_child(div1)
+
+	# Stat rows  [label  |  value]
+	const STAT_ROWS : Array = [
+		["⚔ Damage",    200, "_tw_dmg_lbl"],
+		["🎯 Range",     224, "_tw_rng_lbl"],
+		["🏹 Fire Rate", 248, "_tw_rate_lbl"],
+		["Effect",    272, "_tw_eff_key_lbl"],
+	]
+	for sr in STAT_ROWS:
+		var kl := _label(sr[0], _font_reg, 14, C_DIM)
+		kl.position     = Vector2(16, sr[1])
+		kl.size         = Vector2(90, 20)
+		kl.mouse_filter = MOUSE_FILTER_IGNORE
+		panel.add_child(kl)
+
+	_tw_dmg_lbl = _label("", _font_bold, 14, C_WHITE)
+	_tw_dmg_lbl.position = Vector2(110, 200); _tw_dmg_lbl.size = Vector2(LW - 124, 20)
+	_tw_dmg_lbl.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(_tw_dmg_lbl)
+
+	_tw_rng_lbl = _label("", _font_bold, 14, C_WHITE)
+	_tw_rng_lbl.position = Vector2(110, 224); _tw_rng_lbl.size = Vector2(LW - 124, 20)
+	_tw_rng_lbl.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(_tw_rng_lbl)
+
+	_tw_rate_lbl = _label("", _font_bold, 14, C_WHITE)
+	_tw_rate_lbl.position = Vector2(110, 248); _tw_rate_lbl.size = Vector2(LW - 124, 20)
+	_tw_rate_lbl.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(_tw_rate_lbl)
+
+	# effect key — re-use _tw_effect_lbl for the value (short name)
+	_tw_effect_lbl = _label("", _font_bold, 14, C_WHITE)
+	_tw_effect_lbl.position = Vector2(110, 272); _tw_effect_lbl.size = Vector2(LW - 124, 20)
+	_tw_effect_lbl.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(_tw_effect_lbl)
+
+	var div2 := ColorRect.new()
+	div2.color = Color(1,1,1,0.08); div2.position = Vector2(14,298); div2.size = Vector2(LW-24,1)
+	div2.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(div2)
+
+	_tw_desc_lbl = _label("", _font_reg, 14, C_DIM)  # kept for data flow, not displayed
+
+	# Special effect description
+	var eff_hdr := _label("Special Effect", _font_bold, 14, C_GOLD)
+	eff_hdr.position = Vector2(16, 306); eff_hdr.size = Vector2(LW - 24, 18)
+	eff_hdr.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(eff_hdr)
+
+	# reuse _tw_xp_bar_lbl as the special-effect detail text (inside a scroll container)
+	var eff_scroll := ScrollContainer.new()
+	eff_scroll.position                                    = Vector2(16, 326)
+	eff_scroll.size                                        = Vector2(LW - 24, 176)
+	eff_scroll.horizontal_scroll_mode                      = ScrollContainer.SCROLL_MODE_DISABLED
+	eff_scroll.vertical_scroll_mode                        = ScrollContainer.SCROLL_MODE_AUTO
+	panel.add_child(eff_scroll)
+	_tw_xp_bar_lbl = _label("", _font_reg, 14, Color(0.92, 0.88, 0.72))
+	_tw_xp_bar_lbl.custom_minimum_size = Vector2(LW - 24, 0)
+	_tw_xp_bar_lbl.autowrap_mode       = TextServer.AUTOWRAP_WORD
+	_tw_xp_bar_lbl.mouse_filter        = MOUSE_FILTER_PASS
+	_tw_xp_bar_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_tw_xp_bar_lbl.size_flags_vertical   = Control.SIZE_SHRINK_BEGIN
+	eff_scroll.add_child(_tw_xp_bar_lbl)
+
+	# ── RIGHT COLUMN ───────────────────────────────────────────────────────────
+	# "Turret Level" header
+	var lvl_hdr := _label("Turret Level", _font_reg, 14, C_DIM)
+	lvl_hdr.position = Vector2(RX, 62); lvl_hdr.size = Vector2(RW, 20)
+	lvl_hdr.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(lvl_hdr)
+
+	# Big "Lv. X"
+	_tw_level_lbl = _label("Lv. 1", _font_bold, 32, C_GOLD)
+	_tw_level_lbl.position     = Vector2(RX, 82); _tw_level_lbl.size = Vector2(RW, 44)
+	_tw_level_lbl.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(_tw_level_lbl)
+
+	# XP bar bg + fill
+	var xp_bg := ColorRect.new()
+	xp_bg.color    = Color(0.12, 0.12, 0.20)
+	xp_bg.position = Vector2(RX, 130); xp_bg.size = Vector2(RW, 10)
+	xp_bg.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(xp_bg)
+
+	_tw_xp_bar_fill = ColorRect.new()
+	_tw_xp_bar_fill.color    = Color(0.30, 0.70, 1.00)
+	_tw_xp_bar_fill.position = Vector2(RX, 130); _tw_xp_bar_fill.size = Vector2(0, 10)
+	_tw_xp_bar_fill.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(_tw_xp_bar_fill)
+
+	# Copies counter label above the bar (right-aligned)
+	_tw_copies_lbl = _label("0 / 2", _font_bold, 12, Color(0.70, 0.85, 1.00))
+	_tw_copies_lbl.position             = Vector2(RX, 116)
+	_tw_copies_lbl.size                 = Vector2(RW, 14)
+	_tw_copies_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_tw_copies_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	panel.add_child(_tw_copies_lbl)
+
+	# (buy button removed — copies earned through gameplay only)
+	_tw_buy_btn      = Button.new()   # kept as variable to avoid null refs
+	_tw_buy_cost_lbl = _label("", _font_reg, 12, C_DIM)
+
+	var div3 := ColorRect.new()
+	div3.color = Color(1,1,1,0.08); div3.position = Vector2(RX,148); div3.size = Vector2(RW,1)
+	div3.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(div3)
+
+	# "Level Buffs" header
+	var buff_hdr := _label("Level Buffs", _font_bold, 14, C_WHITE)
+	buff_hdr.position = Vector2(RX, 156); buff_hdr.size = Vector2(RW, 22)
+	buff_hdr.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(buff_hdr)
+
+	# Scrollable level buff list
+	var scroll := ScrollContainer.new()
+	scroll.position               = Vector2(RX, 182)
+	scroll.size                   = Vector2(RW, PH - 192)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.vertical_scroll_mode   = ScrollContainer.SCROLL_MODE_AUTO
+	panel.add_child(scroll)
+
+	var vbox := VBoxContainer.new()
+	vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vbox.add_theme_constant_override("separation", 2)
+	scroll.add_child(vbox)
+
+	# Level buff text for each level 1-10
+	const BUFF_TEXT : Array = [
+		"Unlocked",
+		"+15% Damage",
+		"+10% Attack Range",
+		"+15% Fire Rate",
+		"+20% Damage",
+		"+10% Range  ·  +10% Fire Rate",
+		"+25% Damage",
+		"+15% Attack Range",
+		"+20% Fire Rate",
+		"+30% Damage  (MAX)",
+	]
+
+	_tw_lvl_rows.clear()
+	for i in range(10):
+		var row := Panel.new()
+		var row_s := StyleBoxFlat.new()
+		row_s.bg_color = Color(0.10, 0.10, 0.18)
+		row_s.corner_radius_top_left = 5; row_s.corner_radius_top_right = 5
+		row_s.corner_radius_bottom_left = 5; row_s.corner_radius_bottom_right = 5
+		row.add_theme_stylebox_override("panel", row_s)
+		row.custom_minimum_size = Vector2(RW - 8, 44)
+		row.mouse_filter        = MOUSE_FILTER_IGNORE
+		vbox.add_child(row)
+
+		var lv_lbl := _label("Lv. %d" % (i + 1), _font_bold, 14, C_DIM)
+		lv_lbl.position = Vector2(8, 4); lv_lbl.size = Vector2(52, 36)
+		lv_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		lv_lbl.mouse_filter = MOUSE_FILTER_IGNORE; row.add_child(lv_lbl)
+
+		var buff_lbl := _label(BUFF_TEXT[i], _font_reg, 14, C_DIM)
+		buff_lbl.position      = Vector2(64, 4); buff_lbl.size = Vector2(RW - 80, 36)
+		buff_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		buff_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD
+		buff_lbl.mouse_filter  = MOUSE_FILTER_IGNORE; row.add_child(buff_lbl)
+
+		_tw_lvl_rows.append({"row": row, "row_s": row_s, "lv_lbl": lv_lbl, "buff_lbl": buff_lbl})
+
+
+func _tw_show_detail(def: Dictionary, eff_map: Dictionary,
+					 rarity_cols: Dictionary) -> void:
+	if not is_instance_valid(_tw_detail_panel):
+		return
+
+	var tower_id : String = def.get("id", "")
+	var rarity   : String = def.get("rarity", "common")
+	var rcol     : Color  = rarity_cols.get(rarity, C_WHITE)
+
+	# Update panel border colour to match rarity
+	if _tw_detail_style != null:
+		_tw_detail_style.border_color = rcol
+
+	# Header name + rarity suffix
+	var rar_icons : Dictionary = {
+		"common": "⬜", "rare": "🔵", "epic": "🟣", "legendary": "🟡", "fusion": "✨"
+	}
+	_tw_name_lbl.text = def.get("name", "")
+
+	# Rarity sub-label
+	_tw_rarity_lbl.text = rarity.capitalize()
+	_tw_rarity_lbl.add_theme_color_override("font_color", rcol)
+
+	# Preview
+	if is_instance_valid(_tw_preview_node):
+		_tw_preview_node.turret_data = def
+		_tw_preview_node.queue_redraw()
+
+	# Left column stats
+	_tw_dmg_lbl.text    = "%.0f" % (def.get("damage", 0.0) + GameData.buff_damage_flat)
+	_tw_rng_lbl.text    = "%.0f px" % def.get("range", 0.0)
+	_tw_rate_lbl.text   = "%.1f / s" % def.get("fire_rate", 0.0)
+	# Effect short name (title-case the key)
+	var eff_key : String = def.get("effect", "none")
+	_tw_effect_lbl.text = eff_key.replace("_", " ").capitalize()
+
+	# Description + Special Effect detail (including upgrade bonus if unlocked)
+	_tw_desc_lbl.text = def.get("desc", "")
+	var special_map : Dictionary = {
+		"archer":   "★ Focused Shot+: Every hit permanently stacks +8% damage (max 10×).",
+		"crossbow": "★ Triple Bolt: Fires 3 bolts instead of 2.",
+		"mage":     "★ Arcane Chain: Chain now hits 5 enemies.",
+		"catapult": "★ Barrage: Fires 2 shots per attack.",
+		"spearman": "★ War Cry: Every 5th hit stuns enemies for 0.5s.",
+		"rogue":    "★ Hemorrhage: Bleed cap raised to 6; each stack deals +12% damage.",
+	}
+	var eff_text : String = eff_map.get(eff_key, "No special effect.")
+	if GameData.turret_has_special(tower_id) and special_map.has(tower_id):
+		eff_text += "\n" + special_map[tower_id]
+	_tw_xp_bar_lbl.text = eff_text
+
+	# Right column — level & copies bar
+	_tw_current_def = def
+	var lvl     : int   = GameData.get_tower_level(tower_id)
+	var copies  : int   = GameData.get_tower_xp(tower_id)
+	var needed  : int   = GameData.copies_needed_for_level(lvl)
+	var max_lvl : int   = GameData.TOWER_MAX_LEVEL
+	const RW    : int   = 320   # must match RW in build function
+
+	_tw_level_lbl.text = "Lv. %d" % lvl
+	if lvl >= max_lvl:
+		_tw_xp_bar_fill.size  = Vector2(RW, 10)
+		_tw_xp_bar_fill.color = C_GOLD
+		_tw_copies_lbl.text   = "MAX"
+	else:
+		var frac : float      = clampf(float(copies) / needed, 0.0, 1.0)
+		_tw_xp_bar_fill.size  = Vector2(int(RW * frac), 10)
+		_tw_xp_bar_fill.color = Color(0.30, 0.70, 1.00)
+		_tw_copies_lbl.text   = "%d / %d copies" % [copies, needed]
+
+	# Highlight unlocked level rows
+	for i in range(_tw_lvl_rows.size()):
+		var row_data  : Dictionary = _tw_lvl_rows[i]
+		var unlocked  : bool       = (i + 1) <= lvl
+		var is_cur    : bool       = (i + 1) == lvl
+		var row_s     : StyleBoxFlat = row_data["row_s"]
+		var lv_lbl    : Label        = row_data["lv_lbl"]
+		var buff_lbl  : Label        = row_data["buff_lbl"]
+		if is_cur:
+			row_s.bg_color = Color(0.12, 0.22, 0.38)
+			lv_lbl.add_theme_color_override("font_color",   C_GOLD)
+			buff_lbl.add_theme_color_override("font_color", C_WHITE)
+		elif unlocked:
+			row_s.bg_color = Color(0.10, 0.14, 0.22)
+			lv_lbl.add_theme_color_override("font_color",   Color(0.60, 0.75, 1.00))
+			buff_lbl.add_theme_color_override("font_color", Color(0.75, 0.75, 0.75))
+		else:
+			row_s.bg_color = Color(0.08, 0.08, 0.14)
+			lv_lbl.add_theme_color_override("font_color",   Color(0.35, 0.35, 0.42))
+			buff_lbl.add_theme_color_override("font_color", Color(0.35, 0.35, 0.42))
+
+	_tw_detail_panel.visible = true
 
 
 func _refresh_all_upg_rows_postbattle() -> void:
 	pass
+
+
+func _refresh_tower_cards() -> void:
+	for tower_id in _tower_card_refs:
+		var refs  : Dictionary = _tower_card_refs[tower_id]
+		var lvl   : int        = GameData.get_tower_level(tower_id)
+		var copies: int        = GameData.get_tower_xp(tower_id)
+		if is_instance_valid(refs.get("lvl_lbl")):
+			refs["lvl_lbl"].text = "Lv.%d" % lvl
+		if is_instance_valid(refs.get("copies_lbl")):
+			if lvl >= GameData.TOWER_MAX_LEVEL:
+				refs["copies_lbl"].text = "MAX"
+			else:
+				var needed : int = GameData.copies_needed_for_level(lvl)
+				refs["copies_lbl"].text = "%d/%d" % [copies, needed]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1818,7 +3964,7 @@ func _build_recipe_panel() -> void:
 	_recipe_scroll_up.focus_mode   = FOCUS_NONE
 	_recipe_scroll_up.visible      = false
 	_recipe_scroll_up.add_theme_font_override("font",           _font_bold)
-	_recipe_scroll_up.add_theme_font_size_override("font_size", 12)
+	_recipe_scroll_up.add_theme_font_size_override("font_size", 14)
 	_recipe_scroll_up.add_theme_color_override("font_color",    C_WHITE)
 	_recipe_scroll_up.add_theme_stylebox_override("normal",  _btn_style(Color(0.18, 0.28, 0.38, 0.9)))
 	_recipe_scroll_up.add_theme_stylebox_override("hover",   _btn_style(Color(0.25, 0.38, 0.50, 0.9)))
@@ -1838,7 +3984,7 @@ func _build_recipe_panel() -> void:
 	_recipe_scroll_dn.focus_mode   = FOCUS_NONE
 	_recipe_scroll_dn.visible      = false
 	_recipe_scroll_dn.add_theme_font_override("font",           _font_bold)
-	_recipe_scroll_dn.add_theme_font_size_override("font_size", 12)
+	_recipe_scroll_dn.add_theme_font_size_override("font_size", 14)
 	_recipe_scroll_dn.add_theme_color_override("font_color",    C_WHITE)
 	_recipe_scroll_dn.add_theme_stylebox_override("normal",  _btn_style(Color(0.18, 0.28, 0.38, 0.9)))
 	_recipe_scroll_dn.add_theme_stylebox_override("hover",   _btn_style(Color(0.25, 0.38, 0.50, 0.9)))
@@ -1947,7 +4093,7 @@ func _rebuild_recipe_cards() -> void:
 		badge.add_child(badge_lbl)
 
 		# Name label
-		var name_lbl := _label(result_def.get("name", "?"), _font_bold, 11, Color(0.20, 1.00, 0.85))
+		var name_lbl := _label(result_def.get("name", "?"), _font_bold, 14, Color(0.20, 1.00, 0.85))
 		name_lbl.position      = Vector2(4, 78)
 		name_lbl.size          = Vector2(144, 20)
 		name_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD
@@ -1963,7 +4109,7 @@ func _rebuild_recipe_cards() -> void:
 		craft_btn.size         = Vector2(140, 28)
 		craft_btn.focus_mode   = FOCUS_NONE
 		craft_btn.add_theme_font_override("font",           _font_bold)
-		craft_btn.add_theme_font_size_override("font_size", 12)
+		craft_btn.add_theme_font_size_override("font_size", 14)
 		craft_btn.add_theme_color_override("font_color",    C_WHITE)
 		craft_btn.add_theme_stylebox_override("normal",  _btn_style(C_CRAFT))
 		craft_btn.add_theme_stylebox_override("hover",   _btn_style(C_CRAFT.lightened(0.15)))
@@ -2103,7 +4249,7 @@ func _build_recipe_modal() -> void:
 		info_circle.size                = Vector2(22, 22)
 		info_circle.mouse_filter        = MOUSE_FILTER_STOP
 		info_circle.add_theme_stylebox_override("panel", ibtn_bg)
-		var ilbl := _label("i", _font_bold, 11, Color(0.20, 0.85, 1.00))
+		var ilbl := _label("i", _font_bold, 14, Color(0.20, 0.85, 1.00))
 		ilbl.position             = Vector2(0, 0)
 		ilbl.size                 = Vector2(22, 22)
 		ilbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -2116,7 +4262,17 @@ func _build_recipe_modal() -> void:
 
 		# Large centered stat panel — shown on click
 		const SPW : int = 660
-		const SPH : int = 480
+		const SPH : int = 580
+		# Click-outside catcher — added FIRST so stat_panel (added after) gets input priority
+		var sp_catcher := ColorRect.new()
+		sp_catcher.color        = Color(0, 0, 0, 0.0)
+		sp_catcher.position     = Vector2.ZERO
+		sp_catcher.size         = Vector2(1280, 720)
+		sp_catcher.z_index      = 119
+		sp_catcher.visible      = false
+		sp_catcher.mouse_filter = MOUSE_FILTER_STOP
+		overlay.add_child(sp_catcher)
+
 		var stat_panel := Panel.new()
 		stat_panel.visible  = false
 		stat_panel.z_index  = 120
@@ -2131,20 +4287,13 @@ func _build_recipe_modal() -> void:
 		sp_style.border_color = Color(0.20, 0.85, 1.00, 0.60)
 		stat_panel.add_theme_stylebox_override("panel", sp_style)
 		overlay.add_child(stat_panel)
-
-		# Click-outside catcher sits behind stat_panel to close it
-		var sp_catcher := ColorRect.new()
-		sp_catcher.color       = Color(0, 0, 0, 0.0)
-		sp_catcher.position    = Vector2.ZERO
-		sp_catcher.size        = Vector2(1280, 720)
-		sp_catcher.z_index     = 119
-		sp_catcher.visible     = false
-		sp_catcher.mouse_filter = MOUSE_FILTER_STOP
-		overlay.add_child(sp_catcher)
 		sp_catcher.gui_input.connect(func(ev: InputEvent):
-			if ev is InputEventMouseButton and ev.pressed:
-				stat_panel.visible = false
-				sp_catcher.visible = false
+			if ev is InputEventMouseButton and ev.pressed \
+					and ev.button_index not in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN, MOUSE_BUTTON_WHEEL_LEFT, MOUSE_BUTTON_WHEEL_RIGHT]:
+				var click_pos : Vector2 = (ev as InputEventMouseButton).position
+				if not Rect2(stat_panel.position, stat_panel.size).has_point(click_pos):
+					stat_panel.visible = false
+					sp_catcher.visible = false
 		)
 
 		# Header bar
@@ -2198,9 +4347,9 @@ func _build_recipe_modal() -> void:
 		var sp_reff : String = result_def.get("effect", "none")
 		var stat_rows := [
 			["Rarity",   "✨ Fusion"],
-			["Damage",   "%.1f" % result_def.get("damage", 0.0)],
-			["Range",    "%d" % int(result_def.get("range", 0.0))],
-			["Fire Rate","%.1f/s" % result_def.get("fire_rate", 0.0)],
+			["⚔ Damage",   "%.1f" % result_def.get("damage", 0.0)],
+			["🎯 Range",    "%d" % int(result_def.get("range", 0.0))],
+			["🏹 Fire Rate","%.1f/s" % result_def.get("fire_rate", 0.0)],
 			["Effect",   eff_map3.get(sp_reff, sp_reff.capitalize())],
 		]
 		for si in range(stat_rows.size()):
@@ -2215,12 +4364,43 @@ func _build_recipe_modal() -> void:
 			vl.mouse_filter = MOUSE_FILTER_IGNORE
 			stat_panel.add_child(vl)
 
-		var sp_desc := _label(result_def.get("desc", ""), _font_reg, 13, C_DIM)
-		sp_desc.position      = Vector2(14, 396)
-		sp_desc.size          = Vector2(left_w - 10, 70)
-		sp_desc.autowrap_mode = TextServer.AUTOWRAP_WORD
-		sp_desc.mouse_filter  = MOUSE_FILTER_IGNORE
-		stat_panel.add_child(sp_desc)
+		var sp_effect_map : Dictionary = {
+			"poison_cloud":      "Hits all enemies in range each shot. Spawns a persistent poison cloud that slowly expands along the path, dealing 2 damage/s to any enemy inside it.",
+			"frost_cannon_tri":  "Fires at up to 3 separate targets per shot. Boss targets take +50% damage and receive a 10% slow that refreshes on repeat hits.",
+			"arcane_overload":   "Every 5th attack triggers Arcane Overload — instant lasers hit ALL enemies in range (minimum 5 lasers). Counter never resets.",
+			"tempest_strike":          "Every 10th hit deals bonus damage equal to 5% of the target's total max HP.",
+			"infernal_serpent_summon": "Each hit has a 10% chance to summon a living fire serpent (100 damage per bite) that races around the battlefield once.",
+			"storm_chain":       "Strikes the primary target for full damage, then chains to the 4 nearest enemies globally for 150% damage. Chain targets can be outside the tower's range.",
+			"lightning":         "Chains to the primary target and up to 3 additional enemies at 80% damage.",
+			"aoe":               "Hits all enemies currently in range.",
+			"pierce":            "Bolt pierces through up to 3 enemies in a line, hitting each for full damage.",
+			"shadow_weaver_phase": "Shadow phase: single-target attack. After 10 hits transforms for 5s — white laser fires every 0.5s hitting 5 enemies for 50% tower damage + 1% max HP (0.5% on bosses).",
+			"natures_wrath_buff":"Passively buffs all towers one tile away with +15 flat damage and +75% attack speed. Each hit has a 5% chance to generate 2 gold.",
+		}
+		var sp_eff_div := ColorRect.new()
+		sp_eff_div.color        = Color(1,1,1,0.08)
+		sp_eff_div.position     = Vector2(14, 388)
+		sp_eff_div.size         = Vector2(left_w - 18, 2)
+		sp_eff_div.mouse_filter = MOUSE_FILTER_IGNORE
+		stat_panel.add_child(sp_eff_div)
+		var sp_eff_hdr := _label("Special Effect", _font_bold, 14, C_GOLD)
+		sp_eff_hdr.position     = Vector2(14, 394)
+		sp_eff_hdr.size         = Vector2(left_w - 18, 18)
+		sp_eff_hdr.mouse_filter = MOUSE_FILTER_IGNORE
+		stat_panel.add_child(sp_eff_hdr)
+		var sp_desc := _label(sp_effect_map.get(sp_reff, result_def.get("desc", "")), _font_reg, 14, Color(0.92, 0.88, 0.72))
+		sp_desc.custom_minimum_size   = Vector2(left_w - 18, 0)
+		sp_desc.autowrap_mode         = TextServer.AUTOWRAP_WORD
+		sp_desc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		sp_desc.size_flags_vertical   = Control.SIZE_SHRINK_BEGIN
+		sp_desc.mouse_filter          = MOUSE_FILTER_PASS
+		var sp_eff_scroll := ScrollContainer.new()
+		sp_eff_scroll.position               = Vector2(14, 416)
+		sp_eff_scroll.size                   = Vector2(left_w - 18, SPH - 430)
+		sp_eff_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		sp_eff_scroll.vertical_scroll_mode   = ScrollContainer.SCROLL_MODE_AUTO
+		stat_panel.add_child(sp_eff_scroll)
+		sp_eff_scroll.add_child(sp_desc)
 
 		# Vertical divider
 		var vdiv := ColorRect.new()
@@ -2261,10 +4441,10 @@ func _build_recipe_modal() -> void:
 		var rrate2: float = result_def.get("fire_rate", 1.0)
 		var buff_rows := [
 			["Lv. 1", "Unlocked",                                              true],
-			["Lv. 2", "+15% DMG  (%.1f → %.1f)" % [rdmg, rdmg*1.15],         false],
+			["Lv. 2", "+15%% DMG  (%.1f → %.1f)" % [rdmg, rdmg*1.15],         false],
 			["Lv. 3", "Special: " + eff_map3.get(sp_reff, sp_reff.capitalize()) + " +50% radius", false],
-			["Lv. 4", "+20% Range  (%d → %d)" % [int(rrng), int(rrng*1.2)],  false],
-			["Lv. 5", "+25% Fire Rate  (%.1f → %.1f/s)" % [rrate2, rrate2*1.25], false],
+			["Lv. 4", "+20%% Range  (%d → %d)" % [int(rrng), int(rrng*1.2)],  false],
+			["Lv. 5", "+25%% Fire Rate  (%.1f → %.1f/s)" % [rrate2, rrate2*1.25], false],
 		]
 		for bi in range(buff_rows.size()):
 			var br      : Array = buff_rows[bi]
@@ -2276,11 +4456,11 @@ func _build_recipe_modal() -> void:
 			row_bg2.size     = Vector2(rw + 4, 50)
 			row_bg2.mouse_filter = MOUSE_FILTER_IGNORE
 			stat_panel.add_child(row_bg2)
-			var lv_tag := _label(br[0], _font_bold, 13, C_GOLD if unlocked else C_DIM)
+			var lv_tag := _label(br[0], _font_bold, 14, C_GOLD if unlocked else C_DIM)
 			lv_tag.position = Vector2(rx, by); lv_tag.size = Vector2(50, 22)
 			lv_tag.mouse_filter = MOUSE_FILTER_IGNORE
 			stat_panel.add_child(lv_tag)
-			var buff_lbl := _label(br[1], _font_reg, 12, C_WHITE if unlocked else C_DIM)
+			var buff_lbl := _label(br[1], _font_reg, 14, C_WHITE if unlocked else C_DIM)
 			buff_lbl.position      = Vector2(rx, by + 22)
 			buff_lbl.size          = Vector2(rw, 24)
 			buff_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD
@@ -2319,12 +4499,12 @@ func _build_recipe_modal() -> void:
 		craft_p.bg_color = Color(0.08, 0.08, 0.06)
 		var craft_btn := Button.new()
 		craft_btn.text         = "Craft!"
-		craft_btn.position     = Vector2(180, row_y + 7)
+		craft_btn.position     = Vector2(180, row_y + 18)
 		craft_btn.size         = Vector2(74, 22)
 		craft_btn.focus_mode   = FOCUS_NONE
 		craft_btn.visible      = false
 		craft_btn.add_theme_font_override("font",           _font_bold)
-		craft_btn.add_theme_font_size_override("font_size", 11)
+		craft_btn.add_theme_font_size_override("font_size", 14)
 		craft_btn.add_theme_color_override("font_color",    C_GOLD)
 		craft_btn.add_theme_stylebox_override("normal",  craft_s)
 		craft_btn.add_theme_stylebox_override("hover",   craft_h)
@@ -2337,19 +4517,14 @@ func _build_recipe_modal() -> void:
 		)
 		inner.add_child(craft_btn)
 
-		var res_rar := _label("✨ Fusion", _font_bold, 11, Color(0.20, 1.00, 0.85))
+		var res_rar := _label("✨ Fusion", _font_bold, 14, Color(0.20, 1.00, 0.85))
 		res_rar.position = Vector2(82, row_y + 32)
 		res_rar.size     = Vector2(170, 18)
 		inner.add_child(res_rar)
 
-		var res_desc := _label(result_def.get("desc", ""), _font_reg, 10, C_DIM)
-		res_desc.position      = Vector2(82, row_y + 52)
-		res_desc.size          = Vector2(170, 44)
-		res_desc.autowrap_mode = TextServer.AUTOWRAP_WORD
-		inner.add_child(res_desc)
 
 		# Hidden badge label (kept for _recipe_row_refs compat but invisible)
-		var badge_lbl := _label("", _font_bold, 11, C_GOLD)
+		var badge_lbl := _label("", _font_bold, 14, C_GOLD)
 		badge_lbl.visible = false
 		inner.add_child(badge_lbl)
 
@@ -2396,17 +4571,18 @@ func _build_recipe_modal() -> void:
 			mat_pv.position    = Vector2(27, 2)
 			mat_card.add_child(mat_pv)
 
-			var mat_rar_lbl := _label(mat_rarity.capitalize(), _font_bold, 9, mat_col)
-			mat_rar_lbl.position             = Vector2(0, 64)
-			mat_rar_lbl.size                 = Vector2(110, 14)
+			var mat_rar_lbl := _label(mat_rarity.capitalize(), _font_bold, 14, mat_col)
+			mat_rar_lbl.position             = Vector2(0, 62)
+			mat_rar_lbl.size                 = Vector2(110, 16)
 			mat_rar_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 			mat_rar_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
 			mat_card.add_child(mat_rar_lbl)
 
-			var mat_name_lbl := _label(mat_def.get("name", "?"), _font_bold, 10, C_WHITE)
+			var mat_name_lbl := _label(mat_def.get("name", "?"), _font_bold, 14, C_WHITE)
 			mat_name_lbl.position             = Vector2(0, 78)
 			mat_name_lbl.size                 = Vector2(110, 20)
 			mat_name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			mat_name_lbl.autowrap_mode        = TextServer.AUTOWRAP_WORD
 			mat_name_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
 			mat_card.add_child(mat_name_lbl)
 
@@ -2484,11 +4660,42 @@ func _refresh_recipe_modal() -> void:
 
 # ── Button helpers ────────────────────────────────────────────────────────────
 
+func _wire_all_button_hovers() -> void:
+	_wire_hover_recursive(self)
+
+func _wire_hover_recursive(node: Node) -> void:
+	for child in node.get_children():
+		if child is Button:
+			_add_btn_hover(child)
+		_wire_hover_recursive(child)
+
+func _add_btn_hover(btn: Button) -> void:
+	# Set pivot to center so scale animates from the middle
+	btn.pivot_offset = btn.size / 2.0
+	btn.mouse_entered.connect(func():
+		if _btn_tweens.has(btn) and is_instance_valid(_btn_tweens[btn]):
+			_btn_tweens[btn].kill()
+		var tw := create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		tw.tween_property(btn, "scale", Vector2(1.06, 1.06), 0.12)
+		_btn_tweens[btn] = tw
+	)
+	btn.mouse_exited.connect(func():
+		if _btn_tweens.has(btn) and is_instance_valid(_btn_tweens[btn]):
+			_btn_tweens[btn].kill()
+		var tw := create_tween().set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		tw.tween_property(btn, "scale", Vector2(1.0, 1.0), 0.10)
+		_btn_tweens[btn] = tw
+	)
+
+
 func _tween_scale(node: Control, target: Vector2, dur: float) -> void:
 	if _btn_tweens.has(node) and is_instance_valid(_btn_tweens[node]):
 		_btn_tweens[node].kill()
-	var tw := create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	tw.tween_property(node, "scale", target, dur)
+	var tw := create_tween()
+	tw.tween_property(node, "scale", target, dur) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tw.tween_property(node, "scale", Vector2(1.0, 1.0), dur * 1.4) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	_btn_tweens[node] = tw
 
 
@@ -2537,8 +4744,8 @@ func _build_settings_gear() -> void:
 	var menu : Panel = _gear_menu
 	menu.visible  = false
 	menu.z_index  = 91
-	menu.position = Vector2(1280 - 200, 720 - 110)
-	menu.size     = Vector2(188, 96)
+	menu.position = Vector2(1280 - 200, 720 - 210)
+	menu.size     = Vector2(188, 196)
 	var ms := StyleBoxFlat.new()
 	ms.bg_color = Color(0.10, 0.10, 0.16, 0.97)
 	ms.corner_radius_top_left = 8; ms.corner_radius_top_right = 8
@@ -2549,7 +4756,7 @@ func _build_settings_gear() -> void:
 	menu.add_theme_stylebox_override("panel", ms)
 	add_child(menu)
 
-	var menu_title := _label("Settings", _font_bold, 12, C_DIM)
+	var menu_title := _label("Settings", _font_bold, 14, C_DIM)
 	menu_title.position             = Vector2(0, 6)
 	menu_title.size                 = Vector2(188, 20)
 	menu_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -2562,9 +4769,29 @@ func _build_settings_gear() -> void:
 	hdiv2.mouse_filter = MOUSE_FILTER_IGNORE
 	menu.add_child(hdiv2)
 
+	# ── Toggle: Damage Numbers ────────────────────────────────────────────────
+	var dmg_row := _make_settings_toggle(
+		menu, "Damage Numbers", 36, GameData.show_damage_numbers,
+		func(on: bool): GameData.show_damage_numbers = on
+	)
+	menu.add_child(dmg_row)
+
+	# ── Toggle: Projectiles ───────────────────────────────────────────────────
+	var proj_row := _make_settings_toggle(
+		menu, "Projectiles", 76, GameData.show_projectiles,
+		func(on: bool): GameData.show_projectiles = on
+	)
+	menu.add_child(proj_row)
+
+	var hdiv3 := ColorRect.new()
+	hdiv3.color        = Color(1, 1, 1, 0.07)
+	hdiv3.position     = Vector2(8, 120); hdiv3.size = Vector2(172, 1)
+	hdiv3.mouse_filter = MOUSE_FILTER_IGNORE
+	menu.add_child(hdiv3)
+
 	var leave_btn := Button.new()
 	leave_btn.text         = "🚪  Leave Game"
-	leave_btn.position     = Vector2(8, 36)
+	leave_btn.position     = Vector2(8, 128)
 	leave_btn.size         = Vector2(172, 50)
 	leave_btn.focus_mode   = FOCUS_NONE
 	leave_btn.add_theme_font_override("font",           _font_bold)
@@ -2603,6 +4830,71 @@ func _build_settings_gear() -> void:
 	_game_over_screen.visibility_changed.connect(_update_gear_vis)
 	_upgrades_screen.visibility_changed.connect(_update_gear_vis)
 	_victory_screen.visibility_changed.connect(_update_gear_vis)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SETTINGS HELPERS
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Builds a labeled toggle row for the settings menu.
+# Returns the container node (already populated, caller must add_child to menu).
+func _make_settings_toggle(menu: Panel, label_text: String, y: float,
+		initial: bool, on_toggle: Callable) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.position      = Vector2(8, y)
+	row.size          = Vector2(172, 36)
+	row.mouse_filter  = MOUSE_FILTER_PASS
+
+	var lbl := Label.new()
+	lbl.text          = label_text
+	lbl.add_theme_font_override("font",           _font_bold)
+	lbl.add_theme_font_size_override("font_size", 13)
+	lbl.add_theme_color_override("font_color",    C_WHITE)
+	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	lbl.vertical_alignment    = VERTICAL_ALIGNMENT_CENTER
+	lbl.mouse_filter          = MOUSE_FILTER_IGNORE
+	row.add_child(lbl)
+
+	# Styled toggle button showing ON (green) / OFF (dark red)
+	var chk := Button.new()
+	chk.toggle_mode    = true
+	chk.button_pressed = initial
+	chk.focus_mode     = FOCUS_NONE
+	chk.text           = "ON" if initial else "OFF"
+	chk.size           = Vector2(52, 28)
+	chk.custom_minimum_size = Vector2(52, 28)
+	chk.add_theme_font_override("font",           _font_bold)
+	chk.add_theme_font_size_override("font_size", 12)
+
+	var _make_tog_style := func(bg: Color) -> StyleBoxFlat:
+		var s := StyleBoxFlat.new()
+		s.bg_color = bg
+		s.corner_radius_top_left     = 6
+		s.corner_radius_top_right    = 6
+		s.corner_radius_bottom_left  = 6
+		s.corner_radius_bottom_right = 6
+		s.border_width_left   = 1; s.border_width_right  = 1
+		s.border_width_top    = 1; s.border_width_bottom = 1
+		s.border_color = bg.lightened(0.25)
+		return s
+
+	var _refresh_chk := func(pressed: bool) -> void:
+		chk.text = "ON" if pressed else "OFF"
+		var col : Color = Color(0.15, 0.55, 0.20) if pressed else Color(0.40, 0.10, 0.10)
+		chk.add_theme_stylebox_override("normal",   _make_tog_style.call(col))
+		chk.add_theme_stylebox_override("hover",    _make_tog_style.call(col.lightened(0.15)))
+		chk.add_theme_stylebox_override("pressed",  _make_tog_style.call(col.darkened(0.10)))
+		chk.add_theme_stylebox_override("focus",    _make_tog_style.call(col))
+		chk.add_theme_color_override("font_color",  C_WHITE)
+
+	_refresh_chk.call(initial)
+	chk.toggled.connect(func(pressed: bool) -> void:
+		_refresh_chk.call(pressed)
+		on_toggle.call(pressed)
+	)
+	row.add_child(chk)
+
+	return row
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2668,6 +4960,286 @@ func _label(text: String, font: Font, size: int, color: Color) -> Label:
 	return l
 
 
+func show_boss_buff_cards(buffs: Array, stage: int) -> void:
+	if is_instance_valid(_boss_buff_overlay):
+		_boss_buff_overlay.queue_free()
+
+	var rarity_colors := {
+		"common": Color(0.80, 0.80, 0.80),
+		"rare":   Color(0.25, 0.55, 1.00),
+		"epic":   Color(0.72, 0.25, 0.90),
+	}
+	var rarity_labels := {
+		"common": "COMMON",
+		"rare":   "RARE",
+		"epic":   "EPIC",
+	}
+	# Emoji icons per buff id
+	var buff_icons := {
+		"dmg_2":           "⚔",  "dmg_5":       "⚔",  "dmg_8":       "⚔",
+		"fire_rate_5":     "⚡",  "fire_rate_15": "⚡",  "fire_rate_30": "⚡",
+		"gold_10":         "🪙",
+		"summon_cost_10g": "💰",
+		"lives_5":         "❤️",
+		"boss_dmg_25":     "💀",  "boss_dmg_50":  "💀",
+		"enemy_slow_10":   "❄️",  "enemy_slow_25": "❄️",
+		"dot_1":           "🧪",  "dot_3":         "🧪",
+	}
+
+	# Overlay fades in
+	var overlay := ColorRect.new()
+	overlay.color        = Color(0, 0, 0, 0.0)
+	overlay.position     = Vector2.ZERO
+	overlay.size         = Vector2(1280, 720)
+	overlay.mouse_filter = MOUSE_FILTER_STOP
+	add_child(overlay)
+	_boss_buff_overlay = overlay
+
+	var fade_tw := create_tween()
+	fade_tw.tween_property(overlay, "color", Color(0, 0, 0, 0.82), 0.25) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+
+	# Title
+	var title := _label("⚔  Boss Defeated! Choose a Reward  ⚔", _font_bold, 26, C_GOLD)
+	title.position             = Vector2(0, 48)
+	title.size                 = Vector2(1280, 48)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	title.modulate             = Color(1, 1, 1, 0)
+	overlay.add_child(title)
+	fade_tw.parallel().tween_property(title, "modulate:a", 1.0, 0.35) \
+		.set_delay(0.1).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+
+	var rarity_str : String = buffs[0].get("rarity", "common") if buffs.size() > 0 else "common"
+	var rc         : Color  = rarity_colors.get(rarity_str, C_WHITE)
+	var rl         : String = rarity_labels.get(rarity_str, "COMMON")
+	var sub := _label("Stage %d  —  %s Rewards" % [stage, rl], _font_bold, 18, rc)
+	sub.position             = Vector2(0, 96)
+	sub.size                 = Vector2(1280, 26)
+	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sub.modulate             = Color(1, 1, 1, 0)
+	overlay.add_child(sub)
+	fade_tw.parallel().tween_property(sub, "modulate:a", 1.0, 0.35) \
+		.set_delay(0.15).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+
+	# Layout constants
+	const CARD_W  : int = 260
+	const CARD_H  : int = 380
+	const CARD_Y  : int = 135
+	const SPACING : int = 50
+	var total_w   : int = buffs.size() * CARD_W + (buffs.size() - 1) * SPACING
+	var start_x   : int = (1280 - total_w) / 2
+
+	# Track all card refs so hover/click can lock all of them
+	var all_cards : Array = []
+
+	for i in buffs.size():
+		var buff       : Dictionary = buffs[i]
+		var bx         : int        = start_x + i * (CARD_W + SPACING)
+		var flip_delay : float      = 0.28 + i * 0.18
+		var icon_str   : String     = buff_icons.get(buff.get("id", ""), "✨")
+
+		# Card container — starts invisible, input disabled until flip done
+		var card := Panel.new()
+		card.position     = Vector2(bx, CARD_Y)
+		card.size         = Vector2(CARD_W, CARD_H)
+		card.pivot_offset = Vector2(CARD_W / 2.0, CARD_H / 2.0)
+		card.modulate     = Color(1, 1, 1, 0)
+		card.mouse_filter = MOUSE_FILTER_IGNORE
+		card.add_theme_stylebox_override("panel", _rounded(Color(0, 0, 0, 0)))
+		overlay.add_child(card)
+		all_cards.append(card)
+
+		# ── Back face ────────────────────────────────────────────────────────────
+		var back_style := _rounded(Color(0.10, 0.08, 0.14, 1.0))
+		back_style.border_width_left   = 3; back_style.border_width_right  = 3
+		back_style.border_width_top    = 3; back_style.border_width_bottom = 3
+		back_style.border_color        = rc.darkened(0.4)
+		var back := Panel.new()
+		back.size         = Vector2(CARD_W, CARD_H)
+		back.mouse_filter = MOUSE_FILTER_IGNORE
+		back.add_theme_stylebox_override("panel", back_style)
+		card.add_child(back)
+
+		var q_lbl := _label("?", _font_bold, 80, rc.darkened(0.25))
+		q_lbl.position             = Vector2(0, CARD_H / 2 - 56)
+		q_lbl.size                 = Vector2(CARD_W, 88)
+		q_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		q_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+		back.add_child(q_lbl)
+
+		var back_rl := _label(rl, _font_bold, 13, rc.darkened(0.3))
+		back_rl.position             = Vector2(0, CARD_H - 52)
+		back_rl.size                 = Vector2(CARD_W, 22)
+		back_rl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		back_rl.mouse_filter         = MOUSE_FILTER_IGNORE
+		back.add_child(back_rl)
+
+		# ── Front face (hidden until flip) ───────────────────────────────────────
+		var front_style := _rounded(Color(0.14, 0.12, 0.10, 1.0))
+		front_style.border_width_left   = 3; front_style.border_width_right  = 3
+		front_style.border_width_top    = 3; front_style.border_width_bottom = 3
+		front_style.border_color        = rc
+		var front := Panel.new()
+		front.size          = Vector2(CARD_W, CARD_H)
+		front.visible       = false
+		front.clip_contents = true
+		front.mouse_filter  = MOUSE_FILTER_IGNORE
+		front.add_theme_stylebox_override("panel", front_style)
+		card.add_child(front)
+
+		# Colored top bar
+		var top_bar := ColorRect.new()
+		top_bar.color = rc.darkened(0.3); top_bar.position = Vector2(0, 0)
+		top_bar.size  = Vector2(CARD_W, 8); top_bar.mouse_filter = MOUSE_FILTER_IGNORE
+		front.add_child(top_bar)
+
+		# Rarity label
+		var rar_lbl := _label(rl, _font_bold, 12, rc)
+		rar_lbl.position             = Vector2(0, 12)
+		rar_lbl.size                 = Vector2(CARD_W, 20)
+		rar_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		rar_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+		front.add_child(rar_lbl)
+
+		# Divider under rarity
+		var div1 := ColorRect.new()
+		div1.color = rc.darkened(0.5); div1.position = Vector2(16, 35)
+		div1.size  = Vector2(CARD_W - 32, 2); div1.mouse_filter = MOUSE_FILTER_IGNORE
+		front.add_child(div1)
+
+		# Icon (emoji, large)
+		var icon_lbl := _label(icon_str, _font_bold, 52, C_WHITE)
+		icon_lbl.position             = Vector2(0, 44)
+		icon_lbl.size                 = Vector2(CARD_W, 68)
+		icon_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		icon_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+		icon_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+		front.add_child(icon_lbl)
+
+		# Divider under icon
+		var div2 := ColorRect.new()
+		div2.color = rc.darkened(0.5); div2.position = Vector2(16, 118)
+		div2.size  = Vector2(CARD_W - 32, 2); div2.mouse_filter = MOUSE_FILTER_IGNORE
+		front.add_child(div2)
+
+		# Buff name
+		var name_lbl := _label(buff.get("name", ""), _font_bold, 19, C_WHITE)
+		name_lbl.position             = Vector2(10, 126)
+		name_lbl.size                 = Vector2(CARD_W - 20, 54)
+		name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		name_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+		name_lbl.autowrap_mode        = TextServer.AUTOWRAP_WORD_SMART
+		name_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+		front.add_child(name_lbl)
+
+		# Description — wrapped in a ScrollContainer so autowrap is constrained correctly
+		var desc_lbl := _label(buff.get("desc", ""), _font_bold, 16, C_DIM)
+		desc_lbl.custom_minimum_size       = Vector2(CARD_W - 32, 0)
+		desc_lbl.autowrap_mode             = TextServer.AUTOWRAP_WORD
+		desc_lbl.horizontal_alignment      = HORIZONTAL_ALIGNMENT_CENTER
+		desc_lbl.size_flags_horizontal     = Control.SIZE_EXPAND_FILL
+		desc_lbl.size_flags_vertical       = Control.SIZE_SHRINK_BEGIN
+		desc_lbl.mouse_filter              = MOUSE_FILTER_IGNORE
+		var desc_scroll := ScrollContainer.new()
+		desc_scroll.position               = Vector2(16, 186)
+		desc_scroll.size                   = Vector2(CARD_W - 32, 148)
+		desc_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		desc_scroll.vertical_scroll_mode   = ScrollContainer.SCROLL_MODE_DISABLED
+		desc_scroll.mouse_filter           = MOUSE_FILTER_IGNORE
+		desc_scroll.add_child(desc_lbl)
+		front.add_child(desc_scroll)
+
+
+		# Golden selection glow — invisible until card is clicked
+		var glow_style := _rounded(Color(0, 0, 0, 0))
+		glow_style.border_width_left   = 4; glow_style.border_width_right  = 4
+		glow_style.border_width_top    = 4; glow_style.border_width_bottom = 4
+		glow_style.border_color        = C_GOLD
+		glow_style.shadow_color        = Color(1.0, 0.82, 0.22, 0.6)
+		glow_style.shadow_size         = 8
+		var glow_panel := Panel.new()
+		glow_panel.size         = Vector2(CARD_W, CARD_H)
+		glow_panel.modulate     = Color(1, 1, 1, 0)
+		glow_panel.mouse_filter = MOUSE_FILTER_IGNORE
+		glow_panel.add_theme_stylebox_override("panel", glow_style)
+		front.add_child(glow_panel)
+
+		# ── Flip animation ───────────────────────────────────────────────────────
+		var back_ref  : Panel   = back
+		var front_ref : Panel   = front
+		var card_ref  : Panel   = card
+		var glow_ref  : Panel   = glow_panel
+		var flip_tw := create_tween()
+		flip_tw.tween_property(card, "modulate:a", 1.0, 0.20) \
+			.set_delay(flip_delay).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		flip_tw.tween_property(card, "scale:x", 0.0, 0.18) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+		flip_tw.tween_callback(func():
+			back_ref.visible  = false
+			front_ref.visible = true
+		)
+		flip_tw.tween_property(card, "scale:x", 1.0, 0.22) \
+			.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+		# ── Enable hover + click after flip completes ────────────────────────────
+		var bid         : String  = buff.get("id", "")
+		var overlay_ref : Control = overlay
+		var all_ref     : Array   = all_cards
+		flip_tw.tween_callback(func():
+			card_ref.mouse_filter = MOUSE_FILTER_STOP
+
+			card_ref.mouse_entered.connect(func():
+				if card_ref.mouse_filter == MOUSE_FILTER_IGNORE:
+					return
+				if _btn_tweens.has(card_ref) and is_instance_valid(_btn_tweens[card_ref]):
+					_btn_tweens[card_ref].kill()
+				var hw := create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+				hw.tween_property(card_ref, "scale", Vector2(1.07, 1.07), 0.14)
+				_btn_tweens[card_ref] = hw
+			)
+			card_ref.mouse_exited.connect(func():
+				if _btn_tweens.has(card_ref) and is_instance_valid(_btn_tweens[card_ref]):
+					_btn_tweens[card_ref].kill()
+				var hw := create_tween().set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+				hw.tween_property(card_ref, "scale", Vector2(1.0, 1.0), 0.12)
+				_btn_tweens[card_ref] = hw
+			)
+			card_ref.gui_input.connect(func(event: InputEvent):
+				if not (event is InputEventMouseButton and \
+						event.button_index == MOUSE_BUTTON_LEFT and event.pressed):
+					return
+				# Lock all cards immediately
+				for c in all_ref:
+					if is_instance_valid(c):
+						c.mouse_filter = MOUSE_FILTER_IGNORE
+				# Golden border flash
+				var glow_tw := create_tween().set_parallel(true)
+				glow_tw.tween_property(glow_ref, "modulate:a", 1.0, 0.12) \
+					.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+				glow_tw.chain().tween_property(glow_ref, "modulate:a", 0.0, 0.22) \
+					.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+				# Punch-in on selected card
+				var pick_tw := create_tween()
+				pick_tw.tween_property(card_ref, "scale", Vector2(0.88, 0.88), 0.08) \
+					.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+				pick_tw.tween_property(card_ref, "scale", Vector2(1.15, 1.15), 0.16) \
+					.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+				pick_tw.tween_property(card_ref, "scale", Vector2(1.0, 1.0), 0.10)
+				# Fade overlay out then fire signal
+				var out_tw := create_tween()
+				out_tw.tween_interval(0.36)
+				out_tw.tween_property(overlay_ref, "modulate:a", 0.0, 0.20) \
+					.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+				out_tw.tween_callback(func():
+					overlay_ref.queue_free()
+					_boss_buff_overlay = null
+					buff_chosen.emit(bid)
+				)
+			)
+		)
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # INNER CLASS — draws the turret icon inside cards
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2686,6 +5258,7 @@ class _TurretPreview extends Node2D:
 		match idx:
 			6, 7, 8, 10, 12:     sc = 0.67   # frost spire, poison, sniper, infernal core, arcane cannon
 			17, 18, 19, 20, 21, 22, 23, 24, 25:  sc = 0.60   # fusion turrets
+			30, 31, 32, 33:                       sc = 0.56   # melee epics/legendaries
 			_:                   sc = 0.56   # all others stay at original size
 		draw_set_transform(Vector2(cx, cy), 0.0, Vector2(sc, sc))
 		var tc := turret_data.get("color", Color(0.5, 0.5, 0.5)) as Color
@@ -2716,6 +5289,17 @@ class _TurretPreview extends Node2D:
 			23: _pv_shadow_weaver()
 			24: _pv_natures_wrath()
 			25: _pv_void_titan()
+			30: _pv_blade_assassin()
+			31: _pv_axe_warrior()
+			32: _pv_hercules()
+			33: _pv_taunt_tank()
+			26: _pv_spearman()
+			27: _pv_rogue()
+			28: _pv_elite_knight()
+			29: _pv_iron_guard()
+			50: _pv_hero_paladin(tc)
+			51: _pv_hero_rogue(tc)
+			52: _pv_hero_warlock(tc)
 			_:  _pv_generic(tc)
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
@@ -3098,6 +5682,306 @@ class _TurretPreview extends Node2D:
 		draw_circle(Vector2(0,-18),11,dark)
 		draw_colored_polygon(PackedVector2Array([Vector2(-7,-20),Vector2(7,-20),Vector2(6,-16),Vector2(-6,-16)]),crys)
 		draw_colored_polygon(PackedVector2Array([Vector2(0,-6),Vector2(-5,0),Vector2(0,6),Vector2(5,0)]),crys)
+
+	# ── Hero-exclusive visuals (idx 50-52) ────────────────────────────────────
+
+	func _pv_hero_paladin(tc: Color) -> void:
+		# Heavyset holy warrior with a warhammer and kite shield
+		var gold   := Color(0.90, 0.78, 0.22)
+		var tc_d   := tc.darkened(0.35)
+		var tc_l   := tc.lightened(0.25)
+		var white  := Color(0.95, 0.92, 0.85)
+		# Legs
+		draw_rect(Rect2(-11, 10, 10, 14), tc_d)
+		draw_rect(Rect2(1,   10, 10, 14), tc_d)
+		# Tabard (holy cloth over chest)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-11, -6), Vector2(11, -6), Vector2(13, 12), Vector2(-13, 12)
+		]), white)
+		draw_line(Vector2(0, -6), Vector2(0, 12), gold, 2.0)
+		draw_line(Vector2(-13, 4), Vector2(13, 4), gold, 1.5)
+		# Breastplate shoulders
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-14, -10), Vector2(14, -10), Vector2(12, -2), Vector2(-12, -2)
+		]), tc)
+		draw_circle(Vector2(-16, -8), 7, tc); draw_circle(Vector2(16, -8), 7, tc)
+		# Helm (full visor helm)
+		draw_circle(Vector2(0, -20), 10, tc)
+		draw_rect(Rect2(-8, -24, 16, 5), tc_d)
+		draw_rect(Rect2(-5, -22, 10, 4), Color(0.10, 0.10, 0.12, 0.9))  # visor slit
+		draw_line(Vector2(-8, -24), Vector2(8, -24), gold, 2.0)
+		# Warhammer (right side)
+		draw_rect(Rect2(16, -28, 6, 22), tc.darkened(0.2))   # handle
+		draw_rect(Rect2(12, -32, 14, 12), tc)                 # hammerhead
+		draw_line(Vector2(12, -32), Vector2(26, -32), gold, 1.5)
+		draw_line(Vector2(12, -20), Vector2(26, -20), gold, 1.5)
+		# Kite shield (left side)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-28, -18), Vector2(-14, -18),
+			Vector2(-14,  4),  Vector2(-21, 14), Vector2(-28, 4)
+		]), tc_l)
+		draw_polyline(PackedVector2Array([
+			Vector2(-28, -18), Vector2(-14, -18),
+			Vector2(-14,  4),  Vector2(-21, 14), Vector2(-28, 4), Vector2(-28, -18)
+		]), gold, 1.5)
+		draw_line(Vector2(-21, -18), Vector2(-21, 14), gold, 1.0)
+		draw_line(Vector2(-28, -7),  Vector2(-14, -7), gold, 1.0)
+
+	func _pv_hero_rogue(tc: Color) -> void:
+		# Hooded assassin with twin daggers
+		var skin   := Color(0.94, 0.78, 0.60)
+		var dark   := tc.darkened(0.30)
+		var silver := Color(0.75, 0.78, 0.82)
+		var wrap   := tc.lightened(0.10)
+		# Legs (crouching stance — offset)
+		draw_rect(Rect2(-10,  8,  9, 12), dark)
+		draw_rect(Rect2(  1,  6,  9, 14), dark)
+		# Cloak body
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-12, -8), Vector2(12, -8), Vector2(14, 20), Vector2(-14, 20)
+		]), tc)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(4, -8), Vector2(12, -8), Vector2(14, 20), Vector2(6, 20)
+		]), dark)
+		# Belt
+		draw_line(Vector2(-13, 6), Vector2(13, 6), silver, 2.0)
+		draw_rect(Rect2(-3, 4, 6, 5), silver.darkened(0.1))
+		# Neck & face (mostly hidden by hood)
+		draw_circle(Vector2(0, -18), 7, skin)
+		# Hood (deep cowl)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-13, -12), Vector2(13, -12),
+			Vector2(10,  -22), Vector2(-10, -22)
+		]), tc)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-8, -22), Vector2(8, -22),
+			Vector2(5,  -33), Vector2(-5, -33)
+		]), tc)
+		draw_arc(Vector2(0, -20), 8, -PI * 0.7, PI * 0.7, 12, dark, 2.5)
+		# Left dagger (held low)
+		draw_rect(Rect2(-22, 2, 3, 14), wrap)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-22, 2), Vector2(-19, 2), Vector2(-20, -8)
+		]), silver)
+		draw_line(Vector2(-24, 2), Vector2(-17, 2), silver, 2.0)
+		# Right dagger (raised)
+		draw_rect(Rect2(18, -14, 3, 14), wrap)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(18, -14), Vector2(21, -14), Vector2(20, -24)
+		]), silver)
+		draw_line(Vector2(16, -14), Vector2(23, -14), silver, 2.0)
+
+	func _pv_hero_warlock(tc: Color) -> void:
+		# Dark-robed warlock with a curved staff and glowing orb
+		var dark   := tc.darkened(0.40)
+		var tc_l   := tc.lightened(0.30)
+		var skin   := Color(0.80, 0.68, 0.55)   # slightly sallow
+		var staff  := Color(0.25, 0.18, 0.10)
+		var orb    := tc.lightened(0.50)
+		var trim   := tc.lightened(0.15)
+		# Robe — longer and narrower than mage
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-7, -8), Vector2(7, -8), Vector2(11, 24), Vector2(-11, 24)
+		]), dark)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(3, -8), Vector2(7, -8), Vector2(11, 24), Vector2(6, 24)
+		]), tc.darkened(0.55))
+		# Rune trim on robe hem
+		draw_line(Vector2(-11, 18), Vector2(11, 18), trim, 1.5)
+		for rx in [-8, -4, 0, 4, 8]:
+			draw_line(Vector2(rx, 18), Vector2(rx, 22), trim, 1.0)
+		# Face
+		draw_circle(Vector2(0, -18), 7, skin)
+		# Tall pointed hood with side flares
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-10, -22), Vector2(10, -22),
+			Vector2(6, -30), Vector2(-6, -30)
+		]), dark)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-5, -30), Vector2(5, -30), Vector2(1, -42), Vector2(-1, -42)
+		]), dark)
+		draw_line(Vector2(-5, -30), Vector2(-1, -42), trim, 1.0)
+		draw_line(Vector2(5, -30), Vector2(1, -42), trim, 1.0)
+		# Curved staff (left side, angled)
+		draw_line(Vector2(-15, 20), Vector2(-18, -20), staff, 4.0)
+		draw_arc(Vector2(-22, -20), 8, -PI * 0.5, PI * 0.2, 10, staff, 4.0)
+		# Glowing orb atop staff
+		draw_circle(Vector2(-22, -28), 7, orb.darkened(0.2))
+		draw_circle(Vector2(-22, -28), 5, orb)
+		draw_circle(Vector2(-24, -30), 2, tc_l)
+		# Floating rune shard (right side)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(14, -16), Vector2(20, -10), Vector2(16, -4), Vector2(10, -10)
+		]), tc)
+		draw_polyline(PackedVector2Array([
+			Vector2(14, -16), Vector2(20, -10), Vector2(16, -4), Vector2(10, -10), Vector2(14, -16)
+		]), tc_l, 1.5)
+
+	func _pv_blade_assassin() -> void:
+		var dark  := Color(0.07, 0.05, 0.12); var cloak := Color(0.16, 0.10, 0.26)
+		var steel := Color(0.75, 0.80, 0.95); var edge  := Color(0.95, 0.97, 1.00)
+		var eye_c := Color(0.85, 0.15, 0.90)
+		draw_rect(Rect2(-12,14,24,10),dark); draw_rect(Rect2(-10,12,20,4),cloak.lightened(0.06))
+		draw_colored_polygon(PackedVector2Array([Vector2(0,-18),Vector2(-12,14),Vector2(12,14)]),cloak)
+		draw_colored_polygon(PackedVector2Array([Vector2(0,-12),Vector2(-4,10),Vector2(4,10)]),dark)
+		draw_circle(Vector2(0,-15),9,dark); draw_circle(Vector2(0,-16),8,cloak)
+		draw_circle(Vector2(-3,-16),2,eye_c); draw_circle(Vector2(3,-16),2,eye_c)
+		draw_circle(Vector2(-3,-16),0.9,Color(1,0.85,1,0.9)); draw_circle(Vector2(3,-16),0.9,Color(1,0.85,1,0.9))
+		# Left blade at rest
+		draw_colored_polygon(PackedVector2Array([Vector2(-7,4)+Vector2(2.5,0),Vector2(-7,4)+Vector2(-1,0),Vector2(-16,-26)+Vector2(-0.3,0),Vector2(-16,-26)+Vector2(0.3,0)]),steel)
+		draw_line(Vector2(-7,4)+Vector2(5.5,0),Vector2(-7,4)+Vector2(-4,0),steel,3.0)
+		# Right blade at rest
+		draw_colored_polygon(PackedVector2Array([Vector2(7,4)+Vector2(-2.5,0),Vector2(7,4)+Vector2(1,0),Vector2(16,-26)+Vector2(0.3,0),Vector2(16,-26)+Vector2(-0.3,0)]),steel)
+		draw_line(Vector2(7,4)+Vector2(-5.5,0),Vector2(7,4)+Vector2(4,0),steel,3.0)
+		draw_arc(Vector2(0,-16),10,0,TAU,20,Color(eye_c.r,eye_c.g,eye_c.b,0.20),2.0)
+
+	func _pv_axe_warrior() -> void:
+		var iron   := Color(0.42, 0.40, 0.45); var steel  := Color(0.70, 0.72, 0.80)
+		var wood   := Color(0.48, 0.28, 0.10); var skin   := Color(0.78, 0.55, 0.35)
+		var fur    := Color(0.55, 0.42, 0.28); var fur_d  := Color(0.38, 0.28, 0.16)
+		draw_rect(Rect2(-10,14,8,10),fur_d); draw_rect(Rect2(2,14,8,10),fur_d)
+		draw_rect(Rect2(-9,5,7,11),fur); draw_rect(Rect2(2,5,7,11),fur)
+		draw_rect(Rect2(-11,-8,22,14),skin)
+		draw_colored_polygon(PackedVector2Array([Vector2(-13,-8),Vector2(13,-8),Vector2(10,-14),Vector2(-10,-14)]),fur)
+		draw_colored_polygon(PackedVector2Array([Vector2(-11,-8),Vector2(11,-8),Vector2(8,-13),Vector2(-8,-13)]),fur_d)
+		draw_circle(Vector2(0,-18),9,iron); draw_circle(Vector2(0,-19),8,steel)
+		draw_line(Vector2(-9,-14),Vector2(9,-14),iron,3.0)
+		draw_colored_polygon(PackedVector2Array([Vector2(-9,-18),Vector2(-8,-25),Vector2(-14,-20)]),steel)
+		draw_colored_polygon(PackedVector2Array([Vector2(9,-18),Vector2(8,-25),Vector2(14,-20)]),steel)
+		# Axe at rest — held right side
+		draw_line(Vector2(14,10),Vector2(14,-24),wood,4.0)
+		draw_colored_polygon(PackedVector2Array([Vector2(10,-24),Vector2(22,-24),Vector2(24,-16),Vector2(10,-14)]),iron)
+		draw_colored_polygon(PackedVector2Array([Vector2(10,-24),Vector2(22,-24),Vector2(22,-20),Vector2(10,-18)]),steel)
+
+	func _pv_hercules() -> void:
+		var gold   := Color(0.85, 0.65, 0.10); var gold_d := Color(0.60, 0.44, 0.05)
+		var steel  := Color(0.70, 0.72, 0.80); var steel_d:= Color(0.42, 0.40, 0.45)
+		var skin   := Color(0.80, 0.58, 0.36); var tiger  := Color(0.85, 0.50, 0.10)
+		var tiger_s:= Color(0.15, 0.10, 0.05); var leather:= Color(0.38, 0.22, 0.08)
+		draw_rect(Rect2(-10,14,8,10),leather); draw_rect(Rect2(2,14,8,10),leather)
+		draw_rect(Rect2(-10,5,20,10),gold_d); draw_line(Vector2(-10,9),Vector2(10,9),gold,1.5)
+		draw_rect(Rect2(-12,-8,24,14),steel); draw_rect(Rect2(-10,-6,20,10),steel_d)
+		draw_line(Vector2(-12,-8),Vector2(12,-8),gold,2.5)
+		draw_circle(Vector2(0,-19),10,tiger); draw_circle(Vector2(0,-20),9,Color(tiger.r+0.05,tiger.g+0.03,tiger.b))
+		draw_line(Vector2(-10,-14),Vector2(10,-14),gold,3.0)
+		draw_line(Vector2(-6,-22),Vector2(-4,-16),tiger_s,1.5); draw_line(Vector2(6,-22),Vector2(4,-16),tiger_s,1.5)
+		draw_colored_polygon(PackedVector2Array([Vector2(-10,-23),Vector2(-6,-29),Vector2(-3,-22)]),tiger)
+		draw_colored_polygon(PackedVector2Array([Vector2(10,-23),Vector2(6,-29),Vector2(3,-22)]),tiger)
+		draw_circle(Vector2(-3.5,-17),2.5,skin); draw_circle(Vector2(3.5,-17),2.5,skin)
+		# Longsword at rest
+		draw_line(Vector2(6,-30),Vector2(2,10),steel_d,18.0)
+		draw_line(Vector2(6,-30),Vector2(2,10),steel,14.0)
+		draw_line(Vector2(6,-30),Vector2(2,10),Color(0.88,0.92,1.0,0.55),4.0)
+		draw_rect(Rect2(-4,-2,16,5),gold)
+
+	func _pv_taunt_tank() -> void:
+		var crimson  := Color(0.72, 0.10, 0.18); var crimson_d := Color(0.45, 0.05, 0.10)
+		var purple   := Color(0.55, 0.10, 0.72); var steel     := Color(0.65, 0.65, 0.75)
+		var gold     := Color(0.85, 0.65, 0.10)
+		draw_arc(Vector2(0,0),28,0,TAU,32,Color(0.55,0.05,0.40,0.20),2.5)
+		draw_rect(Rect2(-10,14,8,10),crimson_d); draw_rect(Rect2(2,14,8,10),crimson_d)
+		draw_rect(Rect2(-10,5,20,10),crimson); draw_line(Vector2(-10,9),Vector2(10,9),crimson_d,1.5)
+		draw_rect(Rect2(-13,-9,26,15),crimson); draw_rect(Rect2(-11,-7,22,11),crimson_d)
+		draw_line(Vector2(-13,-9),Vector2(13,-9),purple,3.0)
+		draw_line(Vector2(-13,-9),Vector2(-13,5),purple,2.0); draw_line(Vector2(13,-9),Vector2(13,5),purple,2.0)
+		draw_circle(Vector2(-14,-7),7,crimson); draw_circle(Vector2(14,-7),7,crimson)
+		draw_arc(Vector2(-14,-7),7,PI*0.5,PI*1.5,16,purple,2.0)
+		draw_arc(Vector2(14,-7),7,-PI*0.5,PI*0.5,16,purple,2.0)
+		draw_circle(Vector2(0,-19),11,crimson); draw_circle(Vector2(0,-20),10,crimson_d)
+		draw_rect(Rect2(-8,-22,16,4),purple); draw_rect(Rect2(-2,-22,4,8),purple)
+		draw_line(Vector2(-9,-26),Vector2(9,-26),gold,3.0)
+		draw_line(Vector2(-6,-29),Vector2(-6,-26),gold,2.5)
+		draw_line(Vector2(0,-31),Vector2(0,-26),gold,2.5)
+		draw_line(Vector2(6,-29),Vector2(6,-26),gold,2.5)
+		draw_circle(Vector2(-20,-4),5.5,crimson_d); draw_arc(Vector2(-20,-4),5.5,0,TAU,16,purple,1.5)
+		draw_circle(Vector2(20,-4),5.5,crimson_d);  draw_arc(Vector2(20,-4),5.5,0,TAU,16,purple,1.5)
+
+	func _pv_spearman() -> void:
+		var skin   := Color(0.94, 0.78, 0.60); var iron   := Color(0.55, 0.58, 0.65)
+		var iron_d := Color(0.32, 0.34, 0.40); var tunic  := Color(0.72, 0.18, 0.18)
+		var pants  := Color(0.28, 0.20, 0.10); var shaft  := Color(0.52, 0.33, 0.12)
+		draw_rect(Rect2(-9,4,8,14),pants); draw_rect(Rect2(1,4,8,14),pants)
+		draw_colored_polygon(PackedVector2Array([Vector2(-11,-8),Vector2(11,-8),Vector2(13,6),Vector2(-13,6)]),iron.darkened(0.1))
+		draw_colored_polygon(PackedVector2Array([Vector2(-8,-7),Vector2(8,-7),Vector2(9,5),Vector2(-9,5)]),tunic)
+		draw_circle(Vector2(-14,-5),6,iron); draw_circle(Vector2(-14,-5),6,iron_d,false,1.5)
+		draw_circle(Vector2(14,-5),6,iron);  draw_circle(Vector2(14,-5),6,iron_d,false,1.5)
+		draw_circle(Vector2(0,-17),8,skin)
+		draw_rect(Rect2(-9,-22,18,7),iron); draw_rect(Rect2(-2,-22,4,10),iron_d)
+		# Spear shaft + head
+		draw_line(Vector2(-6,22),Vector2(20,-28),shaft,3.5)
+		draw_line(Vector2(-6,22),Vector2(20,-28),shaft.lightened(0.2),1.0)
+		draw_colored_polygon(PackedVector2Array([Vector2(20,-28),Vector2(16,-20),Vector2(24,-20)]),iron)
+
+	func _pv_rogue() -> void:
+		var skin    := Color(0.94, 0.78, 0.60); var dark    := Color(0.14, 0.14, 0.18)
+		var dark_l  := Color(0.22, 0.22, 0.30); var leather := Color(0.30, 0.20, 0.10)
+		var bandana := Color(0.10, 0.10, 0.12); var blade   := Color(0.75, 0.80, 0.88)
+		draw_rect(Rect2(-9,4,8,12),dark); draw_rect(Rect2(1,4,8,12),dark)
+		draw_colored_polygon(PackedVector2Array([Vector2(-10,-8),Vector2(10,-8),Vector2(12,6),Vector2(-12,6)]),dark)
+		draw_colored_polygon(PackedVector2Array([Vector2(-10,-8),Vector2(10,-8),Vector2(9,-2),Vector2(-9,-2)]),dark_l)
+		draw_line(Vector2(-10,-4),Vector2(10,-2),leather,1.5)
+		draw_rect(Rect2(-12,4,24,4),leather)
+		draw_rect(Rect2(-16,-7,9,5),skin); draw_rect(Rect2(7,-7,9,5),skin)
+		draw_circle(Vector2(0,-17),8,skin)
+		draw_circle(Vector2(0,-24),7,dark); draw_rect(Rect2(-7,-24,14,8),dark)
+		draw_rect(Rect2(-9,-19,18,5),bandana)
+		draw_circle(Vector2(-3,-21),1.5,Color(0.20,0.12,0.08)); draw_circle(Vector2(3,-21),1.5,Color(0.20,0.12,0.08))
+		# Twin daggers at rest
+		draw_line(Vector2(-18,-6),Vector2(-10,-18),blade,3.0); draw_line(Vector2(-18,-6),Vector2(-10,-18),Color(1,1,1,0.4),1.0)
+		draw_line(Vector2(18,-6),Vector2(10,-18),blade,3.0);   draw_line(Vector2(18,-6),Vector2(10,-18),Color(1,1,1,0.4),1.0)
+
+	func _pv_elite_knight() -> void:
+		var steel   := Color(0.22, 0.38, 0.72); var steel_d := Color(0.12, 0.22, 0.48)
+		var gold    := Color(0.95, 0.82, 0.22); var crimson := Color(0.80, 0.12, 0.14)
+		var leather := Color(0.38, 0.22, 0.10)
+		# Cape
+		draw_colored_polygon(PackedVector2Array([Vector2(-10,-4),Vector2(10,-4),Vector2(14,22),Vector2(-14,22)]),crimson)
+		# Greaves
+		draw_rect(Rect2(-11,12,10,12),steel_d); draw_rect(Rect2(1,12,10,12),steel_d)
+		draw_rect(Rect2(-11,4,10,10),steel);    draw_rect(Rect2(1,4,10,10),steel)
+		# Breastplate
+		draw_colored_polygon(PackedVector2Array([Vector2(-13,-10),Vector2(13,-10),Vector2(11,6),Vector2(-11,6)]),steel)
+		draw_line(Vector2(-13,-10),Vector2(13,-10),gold,3.0)
+		# Pauldrons
+		draw_circle(Vector2(-17,-7),9,steel); draw_circle(Vector2(-17,-7),9,steel_d,false,2.5)
+		draw_circle(Vector2(17,-7),9,steel);  draw_circle(Vector2(17,-7),9,steel_d,false,2.5)
+		# Helmet + plume
+		draw_circle(Vector2(0,-20),10,steel); draw_circle(Vector2(0,-20),10,steel_d,false,2.0)
+		draw_rect(Rect2(-10,-24,20,6),steel_d)
+		draw_rect(Rect2(-8,-23,6,4),steel.darkened(0.6)); draw_rect(Rect2(2,-23,6,4),steel.darkened(0.6))
+		draw_rect(Rect2(-3,-32,6,14),steel); draw_rect(Rect2(-4,-38,8,10),crimson)
+		draw_line(Vector2(-10,-17),Vector2(10,-17),gold,2.5)
+		# Great-sword at rest
+		draw_rect(Rect2(14,-6,7,6),steel)
+		draw_rect(Rect2(16,-38,7,44),steel); draw_rect(Rect2(16,-38,7,44),steel_d,false,1.8)
+		draw_rect(Rect2(8,-4,22,6),gold); draw_rect(Rect2(18,2,6,14),leather)
+
+	func _pv_iron_guard() -> void:
+		var iron   := Color(0.52, 0.56, 0.66); var iron_d := Color(0.30, 0.32, 0.42)
+		var iron_l := Color(0.72, 0.76, 0.88); var tunic  := Color(0.18, 0.32, 0.72)
+		var boots  := Color(0.18, 0.12, 0.06); var gold   := Color(0.90, 0.76, 0.20)
+		draw_rect(Rect2(-10,16,9,8),boots); draw_rect(Rect2(1,16,9,8),boots)
+		draw_rect(Rect2(-10,4,9,14),iron.darkened(0.1)); draw_rect(Rect2(-10,4,9,14),iron_d,false,1.5)
+		draw_rect(Rect2(1,4,9,14),iron.darkened(0.1));   draw_rect(Rect2(1,4,9,14),iron_d,false,1.5)
+		draw_colored_polygon(PackedVector2Array([Vector2(-12,-10),Vector2(12,-10),Vector2(14,6),Vector2(-14,6)]),iron)
+		draw_polyline(PackedVector2Array([Vector2(-12,-10),Vector2(12,-10),Vector2(14,6),Vector2(-14,6),Vector2(-12,-10)]),iron_d,2.0)
+		draw_line(Vector2(-12,-10),Vector2(12,-10),gold,3.0)
+		draw_colored_polygon(PackedVector2Array([Vector2(-5,-10),Vector2(5,-10),Vector2(4,0),Vector2(-4,0)]),tunic)
+		draw_circle(Vector2(-16,-6),9,iron); draw_circle(Vector2(-16,-6),9,iron_d,false,2.5)
+		draw_circle(Vector2(16,-6),9,iron);  draw_circle(Vector2(16,-6),9,iron_d,false,2.5)
+		draw_circle(Vector2(0,-20),10,iron); draw_circle(Vector2(0,-20),10,iron_d,false,2.0)
+		draw_rect(Rect2(-10,-24,20,6),iron_d)
+		draw_rect(Rect2(-8,-23,6,4),Color(0.08,0.08,0.12,0.9))
+		draw_rect(Rect2(2,-23,6,4),Color(0.08,0.08,0.12,0.9))
+		draw_line(Vector2(-10,-17),Vector2(10,-17),gold,2.5)
+		# Left shield at rest
+		draw_colored_polygon(PackedVector2Array([Vector2(-28,-14),Vector2(-16,-14),Vector2(-14,6),Vector2(-21,14),Vector2(-28,6)]),iron)
+		draw_polyline(PackedVector2Array([Vector2(-28,-14),Vector2(-16,-14),Vector2(-14,6),Vector2(-21,14),Vector2(-28,6),Vector2(-28,-14)]),gold,2.0)
+		draw_circle(Vector2(-21,-4),3,gold)
+		# Right shield at rest
+		draw_colored_polygon(PackedVector2Array([Vector2(16,-14),Vector2(28,-14),Vector2(28,6),Vector2(21,14),Vector2(14,6)]),iron)
+		draw_polyline(PackedVector2Array([Vector2(16,-14),Vector2(28,-14),Vector2(28,6),Vector2(21,14),Vector2(14,6),Vector2(16,-14)]),gold,2.0)
+		draw_circle(Vector2(21,-4),3,gold)
 
 	func _pv_generic(tc: Color) -> void:
 		var rar := turret_data.get("rarity","common") as String

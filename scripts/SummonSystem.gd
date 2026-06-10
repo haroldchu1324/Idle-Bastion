@@ -66,8 +66,8 @@ const RITUAL_ODDS   : Array = [ 0, 55, 40,  5]
 # ── Rarity pools ──────────────────────────────────────────────────────────────
 const COMMON_IDS    : Array = ["archer", "crossbow", "mage", "catapult", "spearman", "rogue"]
 const RARE_IDS      : Array = ["flame_tower", "frost_spire", "poison_tower", "sniper_tower", "elite_knight", "iron_guard"]
-const EPIC_IDS      : Array = ["tesla_tower", "infernal_core", "ballista", "arcane_cannon"]
-const LEGENDARY_IDS : Array = ["sun_dragon", "storm_lord", "chrono_mage", "world_tree"]
+const EPIC_IDS      : Array = ["tesla_tower", "infernal_core", "ballista", "arcane_cannon", "blade_assassin", "axe_warrior"]
+const LEGENDARY_IDS : Array = ["sun_dragon", "storm_lord", "chrono_mage", "world_tree", "hercules", "taunt_tank"]
 
 # ── All turret definitions ────────────────────────────────────────────────────
 # "cost" field kept at 0 — turrets are obtained only through summons.
@@ -118,7 +118,7 @@ const TURRET_DEFS : Dictionary = {
 	},
 	"frost_spire": {
 		"id": "frost_spire", "name": "Frost Spire", "rarity": "rare", "idx": 6,
-		"desc": "Icy shots slow enemies;\nevery 5th drops a slow zone.",
+		"desc": "Icy shots slow enemies;\nevery 4th hit drops a slow zone.",
 		"cost": 0, "damage": 12.0, "range": 200.0, "fire_rate": 1.2,
 		"color": Color(0.50, 0.85, 1.00), "effect": "slow_zone",
 	},
@@ -150,7 +150,7 @@ const TURRET_DEFS : Dictionary = {
 	"tesla_tower": {
 		"id": "tesla_tower", "name": "Tesla Tower", "rarity": "epic", "idx": 9,
 		"desc": "Chains lightning\nto 4 enemies at once.",
-		"cost": 0, "damage": 12.5, "range": 230.0, "fire_rate": 1.0,
+		"cost": 0, "damage": 13.0, "range": 230.0, "fire_rate": 1.0,
 		"color": Color(0.40, 0.80, 1.00), "effect": "lightning",
 	},
 	"infernal_core": {
@@ -167,9 +167,21 @@ const TURRET_DEFS : Dictionary = {
 	},
 	"arcane_cannon": {
 		"id": "arcane_cannon", "name": "Arcane Cannon", "rarity": "epic", "idx": 12,
-		"desc": "Charges over 20 hits — releases\na blue ray hitting all enemies.",
+		"desc": "Charges over 15 hits — releases\na blue ray hitting all enemies.",
 		"cost": 0, "damage": 40.0, "range": 220.0, "fire_rate": 1.0,
 		"color": Color(0.80, 0.30, 0.90), "effect": "arcane_charge",
+	},
+	"blade_assassin": {
+		"id": "blade_assassin", "name": "Blade Assassin", "rarity": "epic", "idx": 30,
+		"desc": "Twin blades strike 2 targets.\n10% chance: orbiting blades spin for 3s.",
+		"cost": 0, "damage": 30.0, "range": 130.0, "fire_rate": 1.4,
+		"color": Color(0.35, 0.10, 0.55), "effect": "blade_spin",
+	},
+	"axe_warrior": {
+		"id": "axe_warrior", "name": "Axe Warrior", "rarity": "epic", "idx": 31,
+		"desc": "Cleaves 2 enemies at once,\napplying Bleed + Poison to each.",
+		"cost": 0, "damage": 28.0, "range": 130.0, "fire_rate": 1.0,
+		"color": Color(0.58, 0.55, 0.65), "effect": "axe_warrior",
 	},
 	# ── Legendary ─────────────────────────────────────────────────────────────
 	"sun_dragon": {
@@ -196,24 +208,36 @@ const TURRET_DEFS : Dictionary = {
 		"cost": 0, "damage": 10.0, "range": 240.0, "fire_rate": 1.3,
 		"color": Color(0.20, 0.75, 0.30), "effect": "chain",
 	},
+	"hercules": {
+		"id": "hercules", "name": "Hercules", "rarity": "legendary", "idx": 32,
+		"desc": "Strikes 2 enemies at once.\nGains +5 permanent damage per wave cleared.",
+		"cost": 0, "damage": 50.0, "range": 130.0, "fire_rate": 0.8,
+		"color": Color(0.85, 0.65, 0.10), "effect": "hercules_cleave",
+	},
+	"taunt_tank": {
+		"id": "taunt_tank", "name": "Taunt Tank", "rarity": "legendary", "idx": 33,
+		"desc": "Hits up to 5 enemies at once.\nEvery 5th hit stuns all in range for 2s.",
+		"cost": 0, "damage": 25.0, "range": 150.0, "fire_rate": 1.0,
+		"color": Color(0.72, 0.10, 0.18), "effect": "taunt_slam",
+	},
 	# ── Fusion (special crafted turrets) ──────────────────────────────────────
 	"venom_drake": {
 		"id": "venom_drake", "name": "Venom Drake", "rarity": "fusion", "idx": 17,
-		"desc": "Toxic storm rains\npoison on all nearby foes.",
-		"cost": 0, "damage": 35.0, "range": 215.0, "fire_rate": 0.8,
-		"color": Color(0.28, 0.78, 0.30), "effect": "aoe",
+		"desc": "Hits all enemies in range.\nPoison Cloud slowly covers the path (2 dmg/s).",
+		"cost": 0, "damage": 35.0, "range": 215.0, "fire_rate": 1.0,
+		"color": Color(0.28, 0.78, 0.30), "effect": "poison_cloud",
 	},
 	"frost_cannon": {
 		"id": "frost_cannon", "name": "Frost Cannon", "rarity": "fusion", "idx": 18,
-		"desc": "Penetrating icy bolt\nslows and pierces all enemies.",
-		"cost": 0, "damage": 45.0, "range": 350.0, "fire_rate": 0.5,
-		"color": Color(0.55, 0.90, 1.00), "effect": "pierce",
+		"desc": "Fires at up to 3 targets at once.\n+50% dmg vs bosses; slows bosses 10%.",
+		"cost": 0, "damage": 50.0, "range": 350.0, "fire_rate": 0.8,
+		"color": Color(0.55, 0.90, 1.00), "effect": "frost_cannon_tri",
 	},
 	"arcane_overlord": {
 		"id": "arcane_overlord", "name": "Arcane Overlord", "rarity": "fusion", "idx": 19,
-		"desc": "Arcane inferno erupts\nin chains across the field.",
+		"desc": "Every 5th attack fires Arcane Overload:\nlasers hit ALL enemies in range (min 5).",
 		"cost": 0, "damage": 55.0, "range": 230.0, "fire_rate": 0.65,
-		"color": Color(0.90, 0.42, 0.12), "effect": "chain",
+		"color": Color(0.90, 0.42, 0.12), "effect": "arcane_overload",
 	},
 	"dragon_lich": {
 		"id": "dragon_lich", "name": "Dragon Lich", "rarity": "fusion", "idx": 20,
@@ -223,27 +247,27 @@ const TURRET_DEFS : Dictionary = {
 	},
 	"tempest_warden": {
 		"id": "tempest_warden", "name": "Tempest Warden", "rarity": "fusion", "idx": 21,
-		"desc": "Storm lord's chosen:\nlightning slows and decimates.",
-		"cost": 0, "damage": 60.0, "range": 250.0, "fire_rate": 1.1,
-		"color": Color(0.45, 0.75, 1.00), "effect": "lightning",
+		"desc": "Every 10th hit unleashes a storm strike\ndealing bonus damage equal to 5% of target's max HP.",
+		"cost": 0, "damage": 40.0, "range": 200.0, "fire_rate": 2.0,
+		"color": Color(0.45, 0.75, 1.00), "effect": "tempest_strike",
 	},
 	"infernal_serpent": {
 		"id": "infernal_serpent", "name": "Infernal Serpent", "rarity": "fusion", "idx": 22,
-		"desc": "Erupts in a pillar of dragonfire,\nincinerating all nearby foes.",
-		"cost": 0, "damage": 90.0, "range": 220.0, "fire_rate": 0.75,
-		"color": Color(1.00, 0.30, 0.05), "effect": "aoe",
+		"desc": "Single-target fire attack. 10% chance per hit to summon\na living fire serpent that laps the battlefield.",
+		"cost": 0, "damage": 60.0, "range": 250.0, "fire_rate": 0.8,
+		"color": Color(1.00, 0.30, 0.05), "effect": "infernal_serpent_summon",
 	},
 	"shadow_weaver": {
 		"id": "shadow_weaver", "name": "Shadow Weaver", "rarity": "fusion", "idx": 23,
-		"desc": "Void bolts pierce all enemies\nand freeze them in place.",
-		"cost": 0, "damage": 55.0, "range": 420.0, "fire_rate": 0.55,
-		"color": Color(0.55, 0.20, 0.85), "effect": "pierce",
+		"desc": "Single-target shadow attack. After 10 hits, transforms for 5s:\nwhite laser hits 5 enemies every 0.5s for 50% tower damage + 1% max HP (0.5% on bosses).",
+		"cost": 0, "damage": 55.0, "range": 300.0, "fire_rate": 1.2,
+		"color": Color(0.55, 0.20, 0.85), "effect": "shadow_weaver_phase",
 	},
 	"natures_wrath": {
 		"id": "natures_wrath", "name": "Nature's Wrath", "rarity": "fusion", "idx": 24,
-		"desc": "Ancient roots chain poison\nthrough entire enemy groups.",
-		"cost": 0, "damage": 40.0, "range": 250.0, "fire_rate": 1.3,
-		"color": Color(0.22, 0.85, 0.35), "effect": "chain",
+		"desc": "Buffs nearby towers (+15 dmg, +75% atk spd).\n5% chance per hit to earn 2 gold.",
+		"cost": 0, "damage": 40.0, "range": 250.0, "fire_rate": 1.0,
+		"color": Color(0.22, 0.85, 0.35), "effect": "natures_wrath_buff",
 	},
 	"void_titan": {
 		"id": "void_titan", "name": "Void Titan", "rarity": "fusion", "idx": 25,
@@ -256,32 +280,32 @@ const TURRET_DEFS : Dictionary = {
 # ── Special fusion recipes ────────────────────────────────────────────────────
 # Each requires exactly the listed material IDs (bench or placed), produces result.
 const FUSION_RECIPES : Array = [
-	# Venom Drake — no legendary (4 materials: 2 common + 1 rare + 1 epic)
-	{ "materials": ["catapult", "mage", "poison_tower", "tesla_tower"],
+	# Venom Drake — Easy (1C + 2R + 1E)
+	{ "materials": ["rogue", "poison_tower", "flame_tower", "tesla_tower"],
 	  "result": "venom_drake" },
-	# Frost Cannon — no legendary (4 materials: 1 common + 2 rare + 1 epic)
+	# Frost Cannon — Easy (1C + 2R + 1E)
 	{ "materials": ["archer", "frost_spire", "sniper_tower", "ballista"],
 	  "result": "frost_cannon" },
-	# Arcane Overlord — no legendary (5 materials: 2 common + 1 rare + 2 epic)
-	{ "materials": ["crossbow", "catapult", "flame_tower", "arcane_cannon", "infernal_core"],
+	# Arcane Overlord — Easy (2C + 1R + 2E)
+	{ "materials": ["mage", "crossbow", "iron_guard", "ballista", "arcane_cannon"],
 	  "result": "arcane_overlord" },
-	# Dragon Lich — 1 legendary (4 materials: 1 common + 1 rare + 1 epic + 1 legendary)
-	{ "materials": ["mage", "poison_tower", "arcane_cannon", "sun_dragon"],
-	  "result": "dragon_lich" },
-	# Tempest Warden — 1 legendary (5 materials: 2 common + 1 rare + 1 epic + 1 legendary)
-	{ "materials": ["archer", "crossbow", "frost_spire", "tesla_tower", "storm_lord"],
-	  "result": "tempest_warden" },
-	# Infernal Serpent — 1 legendary (4 materials: 1 common + 1 rare + 1 epic + 1 legendary)
-	{ "materials": ["catapult", "flame_tower", "infernal_core", "sun_dragon"],
-	  "result": "infernal_serpent" },
-	# Shadow Weaver — 1 legendary (4 materials: 1 common + 2 rare + 1 legendary)
-	{ "materials": ["crossbow", "sniper_tower", "ballista", "chrono_mage"],
-	  "result": "shadow_weaver" },
-	# Nature's Wrath — 1 legendary (5 materials: 1 common + 1 rare + 2 epic + 1 legendary)
-	{ "materials": ["mage", "poison_tower", "tesla_tower", "arcane_cannon", "world_tree"],
+	# Nature's Wrath — Easy (2C + 1R + 1L)
+	{ "materials": ["archer", "mage", "poison_tower", "world_tree"],
 	  "result": "natures_wrath" },
-	# Void Titan — 1 legendary (4 materials: 1 common + 1 epic + 2 legendary)
-	{ "materials": ["catapult", "arcane_cannon", "storm_lord", "chrono_mage"],
+	# Tempest Warden — Standard (2C + 1R + 1E + 1L)
+	{ "materials": ["crossbow", "spearman", "elite_knight", "tesla_tower", "storm_lord"],
+	  "result": "tempest_warden" },
+	# Infernal Serpent — Standard (1C + 2R + 1E + 1L)
+	{ "materials": ["catapult", "flame_tower", "elite_knight", "infernal_core", "sun_dragon"],
+	  "result": "infernal_serpent" },
+	# Shadow Weaver — Standard (1C + 1R + 1E + 1L)
+	{ "materials": ["rogue", "sniper_tower", "ballista", "chrono_mage"],
+	  "result": "shadow_weaver" },
+	# Dragon Lich — Standard (2C + 1R + 1E + 1L)
+	{ "materials": ["mage", "rogue", "poison_tower", "arcane_cannon", "sun_dragon"],
+	  "result": "dragon_lich" },
+	# Void Titan — Premium (1R + 1E + 2L)
+	{ "materials": ["iron_guard", "arcane_cannon", "storm_lord", "chrono_mage"],
 	  "result": "void_titan" },
 ]
 

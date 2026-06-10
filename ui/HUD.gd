@@ -1,5 +1,8 @@
 extends Control
 
+# ── Debug toggle — set false before exporting ─────────────────────────────────
+const DEBUG : bool = true
+
 # ── Signals ───────────────────────────────────────────────────────────────────
 signal wave_pressed
 signal speed_toggled(factor: float)
@@ -14,6 +17,8 @@ signal roll_upgrade_requested
 signal recipe_fusion_requested(result_id: String)
 signal upgrade_merge_requested
 signal debug_gold_requested
+signal sell_tower_requested
+signal debug_summon_requested(tower_id: String)
 
 # ── Palette ───────────────────────────────────────────────────────────────────
 const C_BG       := Color(0.10, 0.07, 0.04, 0.94)
@@ -91,6 +96,8 @@ var _info_rng_lbl       : Label
 var _info_rate_lbl      : Label
 var _info_effect_lbl    : Label
 var _info_upgrade_btn   : Button
+var _info_counter_lbl   : Label
+var _info_counter_bg    : Panel
 
 # Screens
 var _game_over_screen   : Control
@@ -100,6 +107,13 @@ var _shop_screen        : Control
 var _world_map_screen   : Control
 var _heroes_screen      : Control
 var _towers_screen      : Control
+# World Map page refs
+var _world_node_panels  : Array          = []
+var _wm_stage_panel     : Control        = null
+var _wm_sp_title        : Label          = null
+var _wm_sp_grid         : GridContainer  = null
+var _wm_selected_world  : int            = 0
+var _wm_canvas          : Node2D          = null
 # Heroes page refs
 var _hero_sel_container : Control  = null   # "Hero Selected" inner box
 var _hero_det_panel     : Panel    = null   # detail popup
@@ -132,6 +146,10 @@ var _tw_effect_lbl      : Label   = null
 var _tw_level_lbl       : Label   = null
 var _tw_xp_bar_fill     : ColorRect = null
 var _tw_xp_bar_lbl      : Label   = null
+var _tw_copies_lbl      : Label   = null
+var _tw_buy_btn         : Button  = null
+var _tw_buy_cost_lbl    : Label   = null
+var _tw_current_def     : Dictionary = {}
 var _tw_lvl_rows        : Array   = []   # [{lv_lbl, buff_lbl, bg}] x10
 var _victory_screen     : Control
 var _upg_gold_lbl       : Label
@@ -146,6 +164,10 @@ var _font_bold  : FontFile
 
 # Floating in-world upgrade button
 var _upgrade_popup_btn : Button = null
+# Floating in-world sell button (debug)
+var _sell_btn          : Button = null
+# Debug tower-list panel
+var _dbg_tower_panel   : Control = null
 
 # Recipe notification panel (right side of track)
 var _recipe_panel        : Control = null
@@ -161,6 +183,39 @@ var _gear_btn            : Button  = null
 var _gear_menu           : Panel   = null
 var _recipe_btn_badge    : Label   = null
 var _recipe_row_refs     : Array   = []   # [{result_id, badge_lbl, craft_btn, mat_refs:[{panel,id}]}]
+
+# ── Tower Gacha Shop ──────────────────────────────────────────────────────────
+const GACHA_SUMMON_COST    : int   = 100
+const GACHA_SUMMON_10_COST : int   = 950
+const GACHA_SPIN_DURATION  : float = 2.5
+const GACHA_CARD_W         : int   = 112
+const GACHA_CARD_H         : int   = 160
+const GACHA_CARD_SLOT      : int   = 120
+const GACHA_STRIP_COUNT    : int   = 60
+const GACHA_WIN_IDX        : int   = 48
+
+var _gacha_spinning       : bool          = false
+var _gacha_is_multi       : bool          = false
+var _gacha_multi_results  : Array         = []
+var _gacha_strip          : Control       = null
+var _gacha_summon_btn     : Button        = null
+var _gacha_summon_10_btn  : Button        = null
+var _gacha_gem_lbl        : Label         = null
+var _gacha_result_panel   : Control       = null
+var _gacha_result_inner   : Control       = null
+var _gacha_result_title   : Label         = null
+var _gacha_tween          : Tween         = null
+var _gacha_result_prev    : Node          = null
+var _gacha_result_name    : Label         = null
+var _gacha_result_rar     : Label         = null
+var _gacha_result_info    : Label         = null
+var _gacha_result_lvlup   : Label         = null
+var _gacha_result_card_s  : StyleBoxFlat  = null
+var _gacha_result_ps      : StyleBoxFlat  = null
+var _gacha_multi_panel    : Control       = null
+var _gacha_wheel_glow     : ColorRect     = null
+
+var _tower_card_refs      : Dictionary   = {}      # tower_id → {lvl_lbl, copies_lbl}
 
 const _UPG_DATA : Array = [
 	["⚔  Tower Damage", "Increase all tower damage by 15%.", 100],
@@ -405,6 +460,7 @@ func _refresh_upg_row_set(rows: Array, _ingame: bool) -> void:
 
 func _build_ui() -> void:
 	_build_upgrade_popup()
+	_build_sell_btn()
 	_build_rarity_modal()       # build modal before right panel so info_btn can reference it
 	_build_right_panel()
 	_build_wave_label()
@@ -673,6 +729,42 @@ func is_upgrade_popup_clicked(click_pos: Vector2) -> bool:
 	return Rect2(_upgrade_popup_btn.position, _upgrade_popup_btn.size).has_point(click_pos)
 
 
+func _build_sell_btn() -> void:
+	_sell_btn = Button.new()
+	_sell_btn.text       = "💰 Sell  +25g"
+	_sell_btn.size       = Vector2(120, 26)
+	_sell_btn.focus_mode = FOCUS_NONE
+	_sell_btn.visible    = false
+	_sell_btn.z_index    = 20
+	_sell_btn.add_theme_font_override("font",           _font_bold)
+	_sell_btn.add_theme_font_size_override("font_size", 13)
+	_sell_btn.add_theme_color_override("font_color",    Color(0.20, 0.90, 0.35))
+	_sell_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.08, 0.22, 0.10)))
+	_sell_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.12, 0.32, 0.14)))
+	_sell_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.05, 0.14, 0.07)))
+	_sell_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.08, 0.22, 0.10)))
+	_sell_btn.pressed.connect(func(): sell_tower_requested.emit())
+	add_child(_sell_btn)
+
+
+func show_sell_btn(world_pos: Vector2) -> void:
+	if not is_instance_valid(_sell_btn):
+		return
+	_sell_btn.position = world_pos + Vector2(-_sell_btn.size.x / 2.0, 28)
+	_sell_btn.visible  = true
+
+
+func hide_sell_btn() -> void:
+	if is_instance_valid(_sell_btn):
+		_sell_btn.visible = false
+
+
+func is_sell_btn_clicked(click_pos: Vector2) -> bool:
+	if not is_instance_valid(_sell_btn) or not _sell_btn.visible:
+		return false
+	return Rect2(_sell_btn.position, _sell_btn.size).has_point(click_pos)
+
+
 func _build_rarity_modal() -> void:
 	var overlay := ColorRect.new()
 	overlay.color        = Color(0, 0, 0, 0.75)
@@ -779,7 +871,7 @@ func _build_rarity_modal() -> void:
 
 		for pi in range(3):
 			var val : int = (all_pool_odds[pi] as Array)[ri]
-			var txt : String = "%d%%" % val if val > 0 else "—"
+			var txt : String = "%d%" % val if val > 0 else "—"
 			var pct := _label(txt, _font_bold, 14, C_WHITE)
 			pct.position             = Vector2(col_x[pi + 1], ry)
 			pct.size                 = Vector2(COL_W, 28)
@@ -1075,7 +1167,25 @@ func _fill_turrets_tab(page: Control) -> void:
 		_tween_scale(dbg_btn, Vector2(0.95, 0.95), 0.06)
 		debug_gold_requested.emit()
 	)
+	dbg_btn.visible = DEBUG
 	page.add_child(dbg_btn)
+
+	# ── Debug: Summon Tower panel toggle ──────────────────────────────────────
+	var summon_btn := Button.new()
+	summon_btn.text         = "🐛  Summon Tower (Debug)"
+	summon_btn.position     = Vector2(8, 392)
+	summon_btn.size         = Vector2(w - 16, 36)
+	summon_btn.focus_mode   = FOCUS_NONE
+	summon_btn.add_theme_font_override("font",           _font_reg)
+	summon_btn.add_theme_font_size_override("font_size", 14)
+	summon_btn.add_theme_color_override("font_color",    Color(0.55, 0.75, 1.00))
+	summon_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.08, 0.12, 0.28)))
+	summon_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.12, 0.18, 0.38)))
+	summon_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.06, 0.08, 0.20)))
+	summon_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.08, 0.12, 0.28)))
+	summon_btn.pressed.connect(func(): _toggle_dbg_tower_panel())
+	summon_btn.visible = DEBUG
+	page.add_child(summon_btn)
 
 	# Connect ℹ to open the centered rarity modal
 	info_btn.gui_input.connect(func(ev: InputEvent):
@@ -1085,6 +1195,126 @@ func _fill_turrets_tab(page: Control) -> void:
 				_refresh_rarity_modal()
 	)
 
+
+
+# ── Debug tower-list panel ────────────────────────────────────────────────────
+
+func _toggle_dbg_tower_panel() -> void:
+	if is_instance_valid(_dbg_tower_panel):
+		_dbg_tower_panel.visible = not _dbg_tower_panel.visible
+		return
+	_dbg_tower_panel = _build_dbg_tower_panel()
+	add_child(_dbg_tower_panel)
+
+
+func _build_dbg_tower_panel() -> Control:
+	# Floating panel — positioned to the left of the sidebar
+	var panel := Panel.new()
+	panel.z_index = 50
+	var vp := get_viewport_rect().size
+	panel.position = Vector2(vp.x - 530, 60)
+	panel.size     = Vector2(240, 500)
+	var ps := StyleBoxFlat.new()
+	ps.bg_color          = Color(0.08, 0.06, 0.12, 0.97)
+	ps.border_color      = Color(0.40, 0.55, 1.00, 0.80)
+	ps.border_width_left = 2; ps.border_width_right  = 2
+	ps.border_width_top  = 2; ps.border_width_bottom = 2
+	ps.corner_radius_top_left     = 6; ps.corner_radius_top_right    = 6
+	ps.corner_radius_bottom_left  = 6; ps.corner_radius_bottom_right = 6
+	panel.add_theme_stylebox_override("panel", ps)
+
+	# Title bar
+	var title_lbl := Label.new()
+	title_lbl.text      = "🐛 Summon Tower"
+	title_lbl.position  = Vector2(8, 8)
+	title_lbl.size      = Vector2(180, 22)
+	title_lbl.add_theme_font_override("font",           _font_bold)
+	title_lbl.add_theme_font_size_override("font_size", 14)
+	title_lbl.add_theme_color_override("font_color",    Color(0.60, 0.80, 1.00))
+	panel.add_child(title_lbl)
+
+	# Close button
+	var close_btn := Button.new()
+	close_btn.text       = "✕"
+	close_btn.position   = Vector2(204, 4)
+	close_btn.size       = Vector2(30, 28)
+	close_btn.focus_mode = FOCUS_NONE
+	close_btn.add_theme_font_override("font",           _font_bold)
+	close_btn.add_theme_font_size_override("font_size", 14)
+	close_btn.add_theme_color_override("font_color",    Color(1.0, 0.4, 0.4))
+	var cs := StyleBoxFlat.new()
+	cs.bg_color = Color(0.22, 0.08, 0.08, 0.80)
+	cs.corner_radius_top_left = 4; cs.corner_radius_top_right    = 4
+	cs.corner_radius_bottom_left = 4; cs.corner_radius_bottom_right = 4
+	close_btn.add_theme_stylebox_override("normal",  cs)
+	close_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.40, 0.10, 0.10)))
+	close_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.20, 0.05, 0.05)))
+	close_btn.add_theme_stylebox_override("focus",   cs)
+	close_btn.pressed.connect(func():
+		if is_instance_valid(_dbg_tower_panel):
+			_dbg_tower_panel.visible = false
+	)
+	panel.add_child(close_btn)
+
+	# Separator
+	var sep := HSeparator.new()
+	sep.position = Vector2(4, 36)
+	sep.size     = Vector2(232, 4)
+	panel.add_child(sep)
+
+	# Scroll container for tower list
+	var scroll := ScrollContainer.new()
+	scroll.position                    = Vector2(4, 44)
+	scroll.size                        = Vector2(232, 448)
+	scroll.horizontal_scroll_mode      = ScrollContainer.SCROLL_MODE_DISABLED
+	panel.add_child(scroll)
+
+	var vbox := VBoxContainer.new()
+	vbox.custom_minimum_size = Vector2(220, 0)
+	vbox.add_theme_constant_override("separation", 3)
+	scroll.add_child(vbox)
+
+	# Rarity order for display grouping
+	var rarity_order := ["common", "rare", "epic", "legendary", "fusion"]
+	var rarity_colors := {
+		"common":    Color(0.75, 0.75, 0.75),
+		"rare":      Color(0.30, 0.65, 1.00),
+		"epic":      Color(0.75, 0.35, 1.00),
+		"legendary": Color(1.00, 0.78, 0.10),
+		"fusion":    Color(0.20, 1.00, 0.85),
+	}
+
+	for rar in rarity_order:
+		# Rarity header
+		var hdr := Label.new()
+		hdr.text = rar.to_upper()
+		hdr.add_theme_font_override("font",           _font_bold)
+		hdr.add_theme_font_size_override("font_size", 11)
+		hdr.add_theme_color_override("font_color",    rarity_colors.get(rar, C_WHITE))
+		hdr.custom_minimum_size = Vector2(220, 18)
+		vbox.add_child(hdr)
+
+		# One button per tower in this rarity
+		for id in SummonSystem.TURRET_DEFS:
+			var td : Dictionary = SummonSystem.TURRET_DEFS[id]
+			if td.get("rarity", "") != rar:
+				continue
+			var btn := Button.new()
+			btn.text            = td.get("name", id)
+			btn.custom_minimum_size = Vector2(220, 28)
+			btn.focus_mode      = FOCUS_NONE
+			btn.add_theme_font_override("font",           _font_reg)
+			btn.add_theme_font_size_override("font_size", 13)
+			btn.add_theme_color_override("font_color",    C_WHITE)
+			btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.12, 0.10, 0.18)))
+			btn.add_theme_stylebox_override("hover",   _btn_style(rarity_colors.get(rar, C_WHITE).darkened(0.55)))
+			btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.06, 0.05, 0.10)))
+			btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.12, 0.10, 0.18)))
+			var captured_id : String = id
+			btn.pressed.connect(func(): debug_summon_requested.emit(captured_id))
+			vbox.add_child(btn)
+
+	return panel
 
 
 # ── Upgrades Tab (Gacha) ──────────────────────────────────────────────────────
@@ -1305,6 +1535,27 @@ func _build_tower_info_panel() -> void:
 	panel.add_child(preview)
 	_info_preview = preview
 
+	# Counter badge — top-right corner, hidden when not applicable
+	var counter_bg_style := _rounded(Color(0.10, 0.10, 0.14, 0.90))
+	counter_bg_style.border_width_left   = 1
+	counter_bg_style.border_width_right  = 1
+	counter_bg_style.border_width_top    = 1
+	counter_bg_style.border_width_bottom = 1
+	counter_bg_style.border_color        = Color(1.0, 0.75, 0.20, 0.80)
+	_info_counter_bg = Panel.new()
+	_info_counter_bg.position     = Vector2(PW - 74, 34)
+	_info_counter_bg.size         = Vector2(68, 22)
+	_info_counter_bg.mouse_filter = MOUSE_FILTER_IGNORE
+	_info_counter_bg.visible      = false
+	_info_counter_bg.add_theme_stylebox_override("panel", counter_bg_style)
+	panel.add_child(_info_counter_bg)
+	_info_counter_lbl = _label("", _font_bold, 12, Color(1.0, 0.85, 0.30))
+	_info_counter_lbl.position             = Vector2(0, 4)
+	_info_counter_lbl.size                 = Vector2(68, 14)
+	_info_counter_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_info_counter_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	_info_counter_bg.add_child(_info_counter_lbl)
+
 	# Rarity badge (colored, updated in show_tower_info)
 	_info_rarity_lbl = _label("", _font_bold, 14, C_DIM)
 	_info_rarity_lbl.position             = Vector2(0, 94)
@@ -1342,22 +1593,22 @@ func _build_tower_info_panel() -> void:
 		panel.add_child(lbl)
 
 	_info_dmg_lbl = _label("", _font_bold, 14, C_WHITE)
-	_info_dmg_lbl.position             = Vector2(115, 146)
-	_info_dmg_lbl.size                 = Vector2(PW - 123, 20)
+	_info_dmg_lbl.position             = Vector2(100, 146)
+	_info_dmg_lbl.size                 = Vector2(PW - 108, 20)
 	_info_dmg_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_info_dmg_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
 	panel.add_child(_info_dmg_lbl)
 
 	_info_rng_lbl = _label("", _font_bold, 14, C_WHITE)
-	_info_rng_lbl.position             = Vector2(115, 168)
-	_info_rng_lbl.size                 = Vector2(PW - 123, 20)
+	_info_rng_lbl.position             = Vector2(100, 168)
+	_info_rng_lbl.size                 = Vector2(PW - 108, 20)
 	_info_rng_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_info_rng_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
 	panel.add_child(_info_rng_lbl)
 
 	_info_rate_lbl = _label("", _font_bold, 14, C_WHITE)
-	_info_rate_lbl.position             = Vector2(115, 190)
-	_info_rate_lbl.size                 = Vector2(PW - 123, 20)
+	_info_rate_lbl.position             = Vector2(100, 190)
+	_info_rate_lbl.size                 = Vector2(PW - 108, 20)
 	_info_rate_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_info_rate_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
 	panel.add_child(_info_rate_lbl)
@@ -1445,12 +1696,29 @@ func show_tower_info(tower, merge_count: int = 0) -> void:
 	var tid         : String = d.get("id", "")
 	var dmg_mult    : float  = GameData.turret_damage_mult(tid)
 	var spd_mult    : float  = GameData.turret_fire_rate_mult(tid)
-	var eff_dmg     : float  = (tower.damage + GameData.buff_damage_flat) * dmg_mult
+	var wt_dmg      : float  = tower._wt_dmg_bonus
+	var wt_rate     : float  = tower._wt_rate_bonus
+	var herc_bonus  : float  = tower._hercules_wave_bonus
+	var eff_dmg     : float  = (tower.damage + GameData.buff_damage_flat + wt_dmg + herc_bonus) * dmg_mult
 	var base_rate   : float  = d.get("fire_rate", tower.fire_rate)
-	var eff_rate    : float  = base_rate * spd_mult
-	_info_dmg_lbl.text   = "%.0f" % eff_dmg + (" (+%.0f%%)" % [(dmg_mult - 1.0) * 100] if dmg_mult > 1.0 else "")
+	var eff_rate    : float  = base_rate * spd_mult * (1.0 + wt_rate + tower._ranger_rate_bonus + tower._frost_speed_bonus)
+	var dmg_suffix  : String = ""
+	if dmg_mult > 1.0 and wt_dmg > 0.0:
+		dmg_suffix = " (+%.0f%%, 🌳)" % [(dmg_mult - 1.0) * 100]
+	elif dmg_mult > 1.0:
+		dmg_suffix = " (+%.0f%%)" % [(dmg_mult - 1.0) * 100]
+	elif wt_dmg > 0.0:
+		dmg_suffix = " (🌳)"
+	var rate_suffix : String = ""
+	if spd_mult > 1.0 and wt_rate > 0.0:
+		rate_suffix = " (+%.0f%%, 🌳)" % [(spd_mult - 1.0) * 100]
+	elif spd_mult > 1.0:
+		rate_suffix = " (+%.0f%%)" % [(spd_mult - 1.0) * 100]
+	elif wt_rate > 0.0:
+		rate_suffix = " (🌳)"
+	_info_dmg_lbl.text   = "%.0f" % eff_dmg + dmg_suffix
 	_info_rng_lbl.text   = "%.0f px" % tower.attack_range
-	_info_rate_lbl.text  = "%.1f / s" % eff_rate + (" (+%.0f%%)" % [(spd_mult - 1.0) * 100] if spd_mult > 1.0 else "")
+	_info_rate_lbl.text  = "%.1f / s" % eff_rate + rate_suffix
 	var eff_map : Dictionary = {
 		"none":          "Standard single-target shot. No bonus effect.",
 		"focused_shot":  "Consecutive hits on the same target deal +50% damage. Resets when switching targets.",
@@ -1460,16 +1728,34 @@ func show_tower_info(tower, merge_count: int = 0) -> void:
 		"aoe_burst":     "Explosive shot hits up to 5 enemies in range.",
 		"melee_cleave":  "Every 3rd hit strikes all enemies in range instead of just the primary target.",
 		"bleed_aoe":     "Every hit damages all enemies in range and applies a bleed stack (max 3 stacks). Each stack deals base damage per second.",
-		"slow_zone":     "Normal shots deal damage. Every 5th shot drops an ice zone that slows enemies by 55% for 3 seconds.",
+		"slow_zone":     "Normal shots deal damage. Every 4th shot drops an ice zone that slows enemies by 55% for 3 seconds.",
 		"poison_debuff": "Poisons the target — poisoned enemies take 10% more damage from all sources for 5s. Refreshes on re-hit. Prioritizes un-poisoned enemies.",
 		"execute_shot":  "Damage scales with enemy's current HP. Full HP = 2× base damage. Scales down linearly to 1× at 0 HP.",
-		"knight_slam":   "Every 3rd hit is AoE (up to 5 enemies) and knocks them back along the path. Knockback has no effect on bosses.",
+		"knight_slam":   "Every 3rd hit throws 2 swords at nearby enemies and knocks them back. Knockback has no effect on bosses.",
+		"ranger_fire_aura": "Every 5th hit grants towers 1 tile away +10% fire rate for 3 seconds.",
 		"hp_strike":     "Deals base damage plus 1% of the target's current HP as bonus damage. Bonus does not apply to boss enemies.",
-		"arcane_charge": "Persistent charge counter — every 20th hit fires a blue ray hitting all enemies in range. Counter never resets.",
+		"poison_cloud":  "Hits all enemies in range each shot. Spawns a persistent poison cloud that slowly expands along the path, dealing 2 damage/s to any enemy inside it.",
+		"frost_cannon_tri": "Fires at up to 3 separate targets per shot. Boss targets take +50% damage and receive a 10% slow that refreshes on repeat hits.",
+		"arcane_overload": "Every 5th attack triggers Arcane Overload — instant lasers hit ALL enemies in range (minimum 5 lasers). Counter never resets.",
+		"arcane_charge": "Persistent charge counter — every 15th hit fires a blue ray hitting all enemies in range. Counter never resets.",
 		"lock_beam":     "Locks onto one target until it dies or leaves range. Beam damage ramps from 1× to 1.5× over 5 seconds of continuous fire.",
+		"tempest_strike":         "Every 10th hit deals bonus damage equal to 5% of the target's total max HP.",
+		"infernal_serpent_summon":"Each hit has a 10% chance to summon a living fire serpent (100 damage per bite) that races around the battlefield once.",
 		"lightning":     "Chains to the primary target and up to 3 additional enemies at 80% damage.",
-		"storm_chain":   "Chains to the primary target and up to 4 additional enemies at 85% damage.",
+		"storm_chain":   "Strikes the primary target for full damage, then chains to the 4 nearest enemies globally for 150% damage. Chain targets can be outside the tower's range.",
+		"chrono_aoe":    "Hits all enemies in range each shot. Each hit applies a 15% slow for 2s that stacks with other slows (e.g. Frost Spire).",
+		"world_tree_buff": "Passively buffs all towers one tile away with +10 flat damage and +50% attack speed.",
+		"natures_wrath_buff": "Passively buffs all towers one tile away with +15 flat damage and +75% attack speed. Each hit has a 5% chance to generate 2 gold.",
+		"taunt_slam":     "Strikes up to 5 enemies simultaneously. Every 5th hit taunts all enemies in range — stunning them for 2s and causing them to take +20% damage from all sources.",
+		"hercules_cleave": "Strikes the primary target and one additional enemy simultaneously. Gains +5 permanent damage after every wave cleared. Boss waves do not count.",
 		"pierce":        "Bolt pierces through up to 3 enemies in a line, hitting each for full damage.",
+		"shadow_weaver_phase": "Shadow phase: single-target attack. After 10 hits transforms for 5s — white laser fires every 0.5s hitting 5 enemies for 50% tower damage + 1% max HP (0.5% on bosses).",
+		"axe_warrior":   "Each swing hits up to 2 enemies in melee range, applying 1 Bleed stack and 1 Poison stack. Poisoned enemies take +10% damage from all sources for 5s.",
+		"blade_spin":    "Dual melee strike hits 2 targets. Each attack has a 10% chance to summon 2 razor blades that orbit the tower for 3s, shredding any enemy they contact.",
+		"rock_drop":          "Fires at target. Every 3rd hit drops a brittle zone at the target's location for 2s. Enemies entering the zone take +20 bonus damage on their very next hit from any source.",
+		"dual_debuff":        "Hits 2 enemies per attack. Every other attack inflicts a random debuff on each target for 1 second. (Bleed, 10% Slow, or +10% damage taken — 5s cooldown per debuff per target.)",
+		"shadow_blade_combo": "Every 3rd hit strikes with both blades at 2× damage and applies a bleed dealing 2× damage/s for 3s. Max 1 bleed stack per target.",
+		"frost_shatter":      "Fires 2 projectiles per attack. Every hit slows the target by 5% for 2s. Gains +3% attack speed per slowed enemy on the map (max +30%). Resets after 3s without attacking.",
 	}
 	var base_effect_desc : String = eff_map.get(d.get("effect", "none"), "No special effect.")
 	var special_map : Dictionary = {
@@ -1483,6 +1769,53 @@ func show_tower_info(tower, merge_count: int = 0) -> void:
 	if GameData.turret_has_special(tid) and special_map.has(tid):
 		base_effect_desc += "\n" + special_map[tid]
 	_info_effect_lbl.text = base_effect_desc
+
+	# Counter badge — show for towers/heroes with hit counters or stack systems
+	var counter_text : String = ""
+	var eff : String = d.get("effect", "")
+	match eff:
+		"slow_zone":
+			counter_text = "%d / 4" % (tower._hit_counter % 4)
+		"melee_cleave", "knight_slam":
+			counter_text = "%d / 3" % tower._hit_counter
+		"taunt_slam":
+			counter_text = "%d / 5" % tower._hit_counter
+		"arcane_charge":
+			counter_text = "%d / 15" % (tower._arcane_charge % 15)
+		"arcane_overload":
+			counter_text = "%d / 5" % (tower._arcane_charge % 5)
+		"hercules_cleave":
+			counter_text = "+%d dmg" % int(tower._hercules_wave_bonus)
+		"frost_shatter":
+			counter_text = "+%d%% spd" % int(tower._frost_speed_bonus * 100)
+		"shadow_blade_combo":
+			counter_text = "%d / 3" % tower._hit_counter
+		"tempest_strike":
+			counter_text = "%d / 10" % tower._hit_counter
+		"dual_debuff":
+			counter_text = "%d / 2" % (tower._hit_counter % 2)
+		"ranger_fire_aura":
+			counter_text = "%d / 5" % tower._hit_counter
+		"rock_drop":
+			counter_text = "%d / 3" % (tower._hit_counter % 3)
+		"shadow_weaver_phase":
+			if tower._sw_light_timer > 0.0:
+				counter_text = "LIGHT %.1fs" % tower._sw_light_timer
+			else:
+				counter_text = "%d / 10" % tower._sw_stacks
+		"blade_spin":
+			if tower._blade_timer > 0.0:
+				counter_text = "SPIN %.1fs" % tower._blade_timer
+			else:
+				counter_text = "10% proc"
+		"dual_shot", "focused_shot":
+			pass   # no meaningful counter
+	if counter_text != "":
+		_info_counter_lbl.text   = counter_text
+		_info_counter_bg.visible = true
+	else:
+		_info_counter_bg.visible = false
+
 	var can_upgrade : bool = merge_count >= 3 and \
 		rarity != "legendary" and rarity != "fusion" and rarity != ""
 	if is_instance_valid(_info_upgrade_btn):
@@ -1798,6 +2131,7 @@ func _on_main_nav_pressed(idx: int) -> void:
 		2: # World Map
 			_game_over_screen.visible = false
 			_world_map_screen.visible = true
+			_refresh_world_map()
 		3: # Heroes
 			_game_over_screen.visible = false
 			_heroes_screen.visible = true
@@ -1898,11 +2232,1245 @@ func _build_placeholder_screen(var_ref: String, title_text: String) -> Control:
 
 
 func _build_shop_screen() -> void:
-	_shop_screen = _build_placeholder_screen("_shop_screen", "🛒  Shop")
+	const CLIP_X : int = 220
+	const CLIP_W : int = 840
+	const CLIP_Y : int = 188
+	const CLIP_H : int = 176
 
+	# ── Outer overlay ────────────────────────────────────────────────────────────
+	var overlay := Panel.new()
+	var bg_s := StyleBoxFlat.new()
+	bg_s.bg_color = Color(0.03, 0.03, 0.09)
+	overlay.add_theme_stylebox_override("panel", bg_s)
+	overlay.position     = Vector2.ZERO
+	overlay.size         = Vector2(1280, 720)
+	overlay.mouse_filter = MOUSE_FILTER_STOP
+	overlay.visible      = false
+	add_child(overlay)
+	_shop_screen = overlay
+
+	# ── Title ────────────────────────────────────────────────────────────────────
+	var title := _label("Tower  Gacha", _font_bold, 32, C_WHITE)
+	title.position             = Vector2(0, 18)
+	title.size                 = Vector2(1280, 46)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	overlay.add_child(title)
+
+	var uline := ColorRect.new()
+	uline.color        = Color(0.55, 0.30, 0.90, 0.38)
+	uline.position     = Vector2(490, 64)
+	uline.size         = Vector2(300, 2)
+	uline.mouse_filter = MOUSE_FILTER_IGNORE
+	overlay.add_child(uline)
+
+	# ── Gem display ──────────────────────────────────────────────────────────────
+	_gacha_gem_lbl = _label("🔷 0", _font_bold, 20, Color(0.50, 0.82, 1.0))
+	_gacha_gem_lbl.position             = Vector2(0, 72)
+	_gacha_gem_lbl.size                 = Vector2(1280, 28)
+	_gacha_gem_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	overlay.add_child(_gacha_gem_lbl)
+
+	# ── Rarity odds pills ─────────────────────────────────────────────────────────
+	var odds_defs : Array = [
+		["75%", Color(0.72, 0.72, 0.72), "Common"],
+		["20%", Color(0.25, 0.55, 1.00), "Rare"],
+		[ "4%", Color(0.72, 0.25, 0.90), "Epic"],
+		[ "1%", Color(1.00, 0.72, 0.10), "Legendary"],
+	]
+	const PILL_W : int = 148; const PILL_H : int = 26; const PILL_GAP : int = 10
+	var pill_total : int = 4 * PILL_W + 3 * PILL_GAP
+	var pill_x0    : int = (1280 - pill_total) / 2
+	for pi in range(odds_defs.size()):
+		var od   : Array = odds_defs[pi]
+		var pcol : Color = od[1]
+		var pill := Panel.new()
+		var ps2  := StyleBoxFlat.new()
+		ps2.bg_color                   = Color(pcol.r, pcol.g, pcol.b, 0.09)
+		ps2.corner_radius_top_left     = 13; ps2.corner_radius_top_right    = 13
+		ps2.corner_radius_bottom_left  = 13; ps2.corner_radius_bottom_right = 13
+		ps2.border_width_left  = 1; ps2.border_width_right  = 1
+		ps2.border_width_top   = 1; ps2.border_width_bottom = 1
+		ps2.border_color = Color(pcol.r, pcol.g, pcol.b, 0.38)
+		pill.add_theme_stylebox_override("panel", ps2)
+		pill.position     = Vector2(pill_x0 + pi * (PILL_W + PILL_GAP), 106)
+		pill.size         = Vector2(PILL_W, PILL_H)
+		pill.mouse_filter = MOUSE_FILTER_IGNORE
+		overlay.add_child(pill)
+		var pl := _label(od[0] + "  " + od[2], _font_bold, 13, pcol)
+		pl.position             = Vector2(0, 4)
+		pl.size                 = Vector2(PILL_W, 20)
+		pl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		pl.mouse_filter         = MOUSE_FILTER_IGNORE
+		pill.add_child(pl)
+
+	# ── Ambient glow behind wheel ─────────────────────────────────────────────────
+	var glow := ColorRect.new()
+	glow.color        = Color(0.24, 0.07, 0.55, 0.14)
+	glow.position     = Vector2(CLIP_X - 54, CLIP_Y - 30)
+	glow.size         = Vector2(CLIP_W + 108, CLIP_H + 60)
+	glow.mouse_filter = MOUSE_FILTER_IGNORE
+	glow.z_index      = 0
+	overlay.add_child(glow)
+	_gacha_wheel_glow = glow
+
+	var glow2 := ColorRect.new()
+	glow2.color        = Color(0.12, 0.04, 0.38, 0.09)
+	glow2.position     = Vector2(CLIP_X - 100, CLIP_Y - 55)
+	glow2.size         = Vector2(CLIP_W + 200, CLIP_H + 110)
+	glow2.mouse_filter = MOUSE_FILTER_IGNORE
+	glow2.z_index      = 0
+	overlay.add_child(glow2)
+
+	var glow_tw := create_tween()
+	glow_tw.set_loops()
+	glow_tw.tween_property(glow, "modulate:a", 0.42, 2.4)
+	glow_tw.tween_property(glow, "modulate:a", 1.00, 2.4)
+
+	# ── Red center arrow ──────────────────────────────────────────────────────────
+	var arrow := _label("▼", _font_bold, 28, Color(0.95, 0.18, 0.18))
+	arrow.position             = Vector2(CLIP_X, CLIP_Y - 36)
+	arrow.size                 = Vector2(CLIP_W, 32)
+	arrow.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	overlay.add_child(arrow)
+
+	# ── Wheel clip container ──────────────────────────────────────────────────────
+	var clip := Panel.new()
+	var clip_s := StyleBoxFlat.new()
+	clip_s.bg_color                   = Color(0.06, 0.06, 0.12)
+	clip_s.corner_radius_top_left     = 12; clip_s.corner_radius_top_right    = 12
+	clip_s.corner_radius_bottom_left  = 12; clip_s.corner_radius_bottom_right = 12
+	clip_s.border_width_left  = 2; clip_s.border_width_right  = 2
+	clip_s.border_width_top   = 2; clip_s.border_width_bottom = 2
+	clip_s.border_color = Color(0.40, 0.25, 0.72, 0.60)
+	clip_s.shadow_color = Color(0.18, 0.04, 0.40, 0.55)
+	clip_s.shadow_size  = 12
+	clip.add_theme_stylebox_override("panel", clip_s)
+	clip.position      = Vector2(CLIP_X, CLIP_Y)
+	clip.size          = Vector2(CLIP_W, CLIP_H)
+	clip.clip_contents = true
+	clip.mouse_filter  = MOUSE_FILTER_IGNORE
+	clip.z_index       = 2
+	overlay.add_child(clip)
+
+	var cline := ColorRect.new()
+	cline.color        = Color(0.95, 0.18, 0.18, 0.72)
+	cline.position     = Vector2(CLIP_X + CLIP_W / 2 - 1, CLIP_Y - 6)
+	cline.size         = Vector2(2, CLIP_H + 12)
+	cline.mouse_filter = MOUSE_FILTER_IGNORE
+	cline.z_index      = 6
+	overlay.add_child(cline)
+
+	var left_fade := ColorRect.new()
+	left_fade.color        = Color(0.03, 0.03, 0.09, 0.76)
+	left_fade.position     = Vector2(CLIP_X, CLIP_Y)
+	left_fade.size         = Vector2(52, CLIP_H)
+	left_fade.mouse_filter = MOUSE_FILTER_IGNORE
+	left_fade.z_index      = 4
+	overlay.add_child(left_fade)
+
+	var right_fade := ColorRect.new()
+	right_fade.color        = Color(0.03, 0.03, 0.09, 0.76)
+	right_fade.position     = Vector2(CLIP_X + CLIP_W - 52, CLIP_Y)
+	right_fade.size         = Vector2(52, CLIP_H)
+	right_fade.mouse_filter = MOUSE_FILTER_IGNORE
+	right_fade.z_index      = 4
+	overlay.add_child(right_fade)
+
+	# ── Card strip ────────────────────────────────────────────────────────────────
+	var strip := Control.new()
+	strip.position     = Vector2(4, (CLIP_H - GACHA_CARD_H) / 2)
+	strip.mouse_filter = MOUSE_FILTER_IGNORE
+	clip.add_child(strip)
+	_gacha_strip = strip
+
+	_gacha_rebuild_strip("")
+
+	# ── Summon buttons (side-by-side) ─────────────────────────────────────────────
+	const BTN_W   : int = 340
+	const BTN_H   : int = 56
+	const BTN_GAP : int = 24
+	var btn_y     : int = CLIP_Y + CLIP_H + 20
+	var btn_x0    : int = (1280 - 2 * BTN_W - BTN_GAP) / 2
+
+	_gacha_summon_btn = Button.new()
+	_gacha_summon_btn.text       = "✦  Summon x1    🔷 %d" % GACHA_SUMMON_COST
+	_gacha_summon_btn.position   = Vector2(btn_x0, btn_y)
+	_gacha_summon_btn.size       = Vector2(BTN_W, BTN_H)
+	_gacha_summon_btn.focus_mode = FOCUS_NONE
+	_gacha_summon_btn.add_theme_font_override("font",           _font_bold)
+	_gacha_summon_btn.add_theme_font_size_override("font_size", 19)
+	_gacha_summon_btn.add_theme_color_override("font_color",    C_WHITE)
+	_gacha_summon_btn.add_theme_stylebox_override("normal",   _btn_style(Color(0.52, 0.14, 0.06)))
+	_gacha_summon_btn.add_theme_stylebox_override("hover",    _btn_style(Color(0.68, 0.20, 0.09)))
+	_gacha_summon_btn.add_theme_stylebox_override("pressed",  _btn_style(Color(0.36, 0.09, 0.04)))
+	_gacha_summon_btn.add_theme_stylebox_override("focus",    _btn_style(Color(0.52, 0.14, 0.06)))
+	_gacha_summon_btn.add_theme_stylebox_override("disabled", _btn_style(Color(0.22, 0.22, 0.28)))
+	_gacha_summon_btn.pressed.connect(_gacha_on_summon_pressed)
+	overlay.add_child(_gacha_summon_btn)
+
+	_gacha_summon_10_btn = Button.new()
+	_gacha_summon_10_btn.text       = "✦✦  Summon x10  🔷 %d" % GACHA_SUMMON_10_COST
+	_gacha_summon_10_btn.position   = Vector2(btn_x0 + BTN_W + BTN_GAP, btn_y)
+	_gacha_summon_10_btn.size       = Vector2(BTN_W, BTN_H)
+	_gacha_summon_10_btn.focus_mode = FOCUS_NONE
+	_gacha_summon_10_btn.add_theme_font_override("font",           _font_bold)
+	_gacha_summon_10_btn.add_theme_font_size_override("font_size", 19)
+	_gacha_summon_10_btn.add_theme_color_override("font_color",    C_WHITE)
+	_gacha_summon_10_btn.add_theme_stylebox_override("normal",   _btn_style(Color(0.14, 0.36, 0.62)))
+	_gacha_summon_10_btn.add_theme_stylebox_override("hover",    _btn_style(Color(0.20, 0.46, 0.76)))
+	_gacha_summon_10_btn.add_theme_stylebox_override("pressed",  _btn_style(Color(0.09, 0.25, 0.46)))
+	_gacha_summon_10_btn.add_theme_stylebox_override("focus",    _btn_style(Color(0.14, 0.36, 0.62)))
+	_gacha_summon_10_btn.add_theme_stylebox_override("disabled", _btn_style(Color(0.22, 0.22, 0.28)))
+	_gacha_summon_10_btn.pressed.connect(_gacha_on_summon_10_pressed)
+	overlay.add_child(_gacha_summon_10_btn)
+
+	# ── Popups (built hidden) ─────────────────────────────────────────────────────
+	_gacha_build_result_popup(overlay)
+	_gacha_build_multi_panel(overlay)
+
+	# ── Back button ───────────────────────────────────────────────────────────────
+	var back_btn := Button.new()
+	back_btn.text       = "<  Back"
+	back_btn.position   = Vector2(30, 662)
+	back_btn.size       = Vector2(140, 44)
+	back_btn.focus_mode = FOCUS_NONE
+	back_btn.add_theme_font_override("font",           _font_bold)
+	back_btn.add_theme_font_size_override("font_size", 16)
+	back_btn.add_theme_color_override("font_color",    C_WHITE)
+	back_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.22, 0.22, 0.28)))
+	back_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.30, 0.30, 0.38)))
+	back_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.16, 0.16, 0.20)))
+	back_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.22, 0.22, 0.28)))
+	back_btn.pressed.connect(func():
+		overlay.visible = false
+		_game_over_screen.visible = true
+	)
+	overlay.add_child(back_btn)
+
+	overlay.visibility_changed.connect(func():
+		if overlay.visible and is_instance_valid(_gacha_gem_lbl):
+			_gacha_gem_lbl.text = "🔷 %d" % GameData.blue_gems
+	)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GACHA HELPERS
+# ─────────────────────────────────────────────────────────────────────────────
+
+func _gacha_rebuild_strip(winning_id: String) -> void:
+	if not is_instance_valid(_gacha_strip):
+		return
+	for child in _gacha_strip.get_children():
+		child.queue_free()
+	for i in range(GACHA_STRIP_COUNT):
+		var tid : String
+		if i == GACHA_WIN_IDX and winning_id != "":
+			tid = winning_id
+		else:
+			tid = _gacha_random_dummy()
+		var card := _gacha_make_wheel_card(tid)
+		card.position = Vector2(i * GACHA_CARD_SLOT, 0)
+		_gacha_strip.add_child(card)
+
+
+func _gacha_random_dummy() -> String:
+	var r : int = randi() % 100
+	var pool : Array
+	if r < 1:      pool = SummonSystem.LEGENDARY_IDS
+	elif r < 5:    pool = SummonSystem.EPIC_IDS
+	elif r < 25:   pool = SummonSystem.RARE_IDS
+	else:          pool = SummonSystem.COMMON_IDS
+	return pool[randi() % pool.size()]
+
+
+func _gacha_roll_tower() -> String:
+	var r : int = randi() % 100
+	var pool : Array
+	if r < 1:      pool = SummonSystem.LEGENDARY_IDS
+	elif r < 5:    pool = SummonSystem.EPIC_IDS
+	elif r < 25:   pool = SummonSystem.RARE_IDS
+	else:          pool = SummonSystem.COMMON_IDS
+	return pool[randi() % pool.size()]
+
+
+func _gacha_make_wheel_card(tower_id: String) -> Control:
+	var def    : Dictionary = SummonSystem.TURRET_DEFS.get(tower_id, {})
+	var rarity : String     = def.get("rarity", "common")
+	var rcol   : Color      = SummonSystem.RARITY_COLORS.get(rarity, C_WHITE)
+
+	var card := Panel.new()
+	var cs   := StyleBoxFlat.new()
+	cs.bg_color                   = Color(0.10, 0.10, 0.17)
+	cs.corner_radius_top_left     = 8; cs.corner_radius_top_right    = 8
+	cs.corner_radius_bottom_left  = 8; cs.corner_radius_bottom_right = 8
+	cs.border_width_left  = 2; cs.border_width_right  = 2
+	cs.border_width_top   = 2; cs.border_width_bottom = 2
+	cs.border_color       = Color(rcol.r, rcol.g, rcol.b, 0.55)
+	card.add_theme_stylebox_override("panel", cs)
+	card.custom_minimum_size = Vector2(GACHA_CARD_W, GACHA_CARD_H)
+	card.mouse_filter        = MOUSE_FILTER_IGNORE
+	card.set_meta("style", cs)
+
+	var pbg := Panel.new()
+	var pbs := StyleBoxFlat.new()
+	pbs.bg_color                  = Color(0.06, 0.06, 0.12)
+	pbs.corner_radius_top_left    = 6; pbs.corner_radius_top_right    = 6
+	pbs.corner_radius_bottom_left = 6; pbs.corner_radius_bottom_right = 6
+	pbg.add_theme_stylebox_override("panel", pbs)
+	pbg.position     = Vector2((GACHA_CARD_W - 80) / 2, 8)
+	pbg.size         = Vector2(80, 80)
+	pbg.mouse_filter = MOUSE_FILTER_IGNORE
+	card.add_child(pbg)
+
+	var prev := _TurretPreview.new()
+	prev.turret_data = def
+	prev.position    = Vector2(28, 16)
+	card.add_child(prev)
+
+	var name_lbl := _label(def.get("name", tower_id), _font_bold, 12, C_WHITE)
+	name_lbl.position             = Vector2(2, 93)
+	name_lbl.size                 = Vector2(GACHA_CARD_W - 4, 18)
+	name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	name_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	card.add_child(name_lbl)
+
+	var rar_lbl := _label(rarity.capitalize(), _font_reg, 11, rcol)
+	rar_lbl.position             = Vector2(2, 113)
+	rar_lbl.size                 = Vector2(GACHA_CARD_W - 4, 16)
+	rar_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	rar_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	card.add_child(rar_lbl)
+
+	var stripe := ColorRect.new()
+	stripe.color        = Color(rcol.r, rcol.g, rcol.b, 0.28)
+	stripe.position     = Vector2(2, GACHA_CARD_H - 12)
+	stripe.size         = Vector2(GACHA_CARD_W - 4, 10)
+	stripe.mouse_filter = MOUSE_FILTER_IGNORE
+	card.add_child(stripe)
+
+	return card
+
+
+func _gacha_build_result_popup(parent: Control) -> void:
+	const PW : int = 480
+	const PH : int = 372
+
+	var dim := ColorRect.new()
+	dim.color        = Color(0, 0, 0, 0.76)
+	dim.position     = Vector2.ZERO
+	dim.size         = Vector2(1280, 720)
+	dim.mouse_filter = MOUSE_FILTER_STOP
+	dim.z_index      = 50
+	dim.visible      = false
+	parent.add_child(dim)
+	_gacha_result_panel = dim
+
+	var panel := Panel.new()
+	var ps    := StyleBoxFlat.new()
+	ps.bg_color                   = Color(0.07, 0.06, 0.14, 0.98)
+	ps.corner_radius_top_left     = 14; ps.corner_radius_top_right    = 14
+	ps.corner_radius_bottom_left  = 14; ps.corner_radius_bottom_right = 14
+	ps.border_width_left  = 3; ps.border_width_right  = 3
+	ps.border_width_top   = 3; ps.border_width_bottom = 3
+	ps.border_color       = Color(0.50, 0.50, 0.60, 0.50)
+	ps.shadow_color       = Color(0, 0, 0, 0.86)
+	ps.shadow_size        = 24
+	panel.add_theme_stylebox_override("panel", ps)
+	panel.position     = Vector2((1280 - PW) / 2, (720 - PH) / 2)
+	panel.size         = Vector2(PW, PH)
+	panel.mouse_filter = MOUSE_FILTER_STOP
+	panel.z_index      = 51
+	dim.add_child(panel)
+	_gacha_result_inner = panel
+	_gacha_result_ps    = ps
+
+	var hdr_s := StyleBoxFlat.new()
+	hdr_s.bg_color                   = Color(0.12, 0.06, 0.26)
+	hdr_s.corner_radius_top_left     = 12; hdr_s.corner_radius_top_right   = 12
+	hdr_s.corner_radius_bottom_left  = 0;  hdr_s.corner_radius_bottom_right = 0
+	var hdr := Panel.new()
+	hdr.add_theme_stylebox_override("panel", hdr_s)
+	hdr.position     = Vector2(3, 3)
+	hdr.size         = Vector2(PW - 6, 54)
+	hdr.mouse_filter = MOUSE_FILTER_IGNORE
+	panel.add_child(hdr)
+
+	_gacha_result_title = _label("Tower  Received!", _font_bold, 22, C_WHITE)
+	_gacha_result_title.position             = Vector2(0, 14)
+	_gacha_result_title.size                 = Vector2(PW, 30)
+	_gacha_result_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_gacha_result_title.mouse_filter         = MOUSE_FILTER_IGNORE
+	panel.add_child(_gacha_result_title)
+
+	var glow_ring := ColorRect.new()
+	glow_ring.color        = Color(0.50, 0.30, 1.0, 0.12)
+	glow_ring.position     = Vector2((PW - 152) / 2, 62)
+	glow_ring.size         = Vector2(152, 152)
+	glow_ring.mouse_filter = MOUSE_FILTER_IGNORE
+	panel.add_child(glow_ring)
+	panel.set_meta("glow_ring", glow_ring)
+
+	var card_bg := Panel.new()
+	var cbs     := StyleBoxFlat.new()
+	cbs.bg_color                  = Color(0.09, 0.09, 0.18)
+	cbs.corner_radius_top_left    = 10; cbs.corner_radius_top_right    = 10
+	cbs.corner_radius_bottom_left = 10; cbs.corner_radius_bottom_right = 10
+	cbs.border_width_left  = 3; cbs.border_width_right  = 3
+	cbs.border_width_top   = 3; cbs.border_width_bottom = 3
+	cbs.border_color       = Color(0.50, 0.50, 0.60, 0.50)
+	cbs.shadow_color       = Color(0, 0, 0, 0.60)
+	cbs.shadow_size        = 10
+	card_bg.add_theme_stylebox_override("panel", cbs)
+	card_bg.position     = Vector2((PW - 130) / 2, 67)
+	card_bg.size         = Vector2(130, 130)
+	card_bg.mouse_filter = MOUSE_FILTER_IGNORE
+	panel.add_child(card_bg)
+	_gacha_result_card_s = cbs
+
+	var prev := _TurretPreview.new()
+	prev.turret_data = {}
+	prev.scale       = Vector2(2.0, 2.0)
+	prev.position    = Vector2(184, 68)
+	panel.add_child(prev)
+	_gacha_result_prev = prev
+
+	_gacha_result_name = _label("", _font_bold, 23, C_WHITE)
+	_gacha_result_name.position             = Vector2(0, 207)
+	_gacha_result_name.size                 = Vector2(PW, 30)
+	_gacha_result_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_gacha_result_name.mouse_filter         = MOUSE_FILTER_IGNORE
+	panel.add_child(_gacha_result_name)
+
+	_gacha_result_rar = _label("", _font_reg, 16, C_DIM)
+	_gacha_result_rar.position             = Vector2(0, 239)
+	_gacha_result_rar.size                 = Vector2(PW, 20)
+	_gacha_result_rar.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_gacha_result_rar.mouse_filter         = MOUSE_FILTER_IGNORE
+	panel.add_child(_gacha_result_rar)
+
+	_gacha_result_info = _label("", _font_bold, 15, Color(0.50, 0.82, 1.0))
+	_gacha_result_info.position             = Vector2(0, 263)
+	_gacha_result_info.size                 = Vector2(PW, 20)
+	_gacha_result_info.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_gacha_result_info.mouse_filter         = MOUSE_FILTER_IGNORE
+	panel.add_child(_gacha_result_info)
+
+	_gacha_result_lvlup = _label("", _font_bold, 18, C_GOLD)
+	_gacha_result_lvlup.position             = Vector2(0, 287)
+	_gacha_result_lvlup.size                 = Vector2(PW, 24)
+	_gacha_result_lvlup.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_gacha_result_lvlup.mouse_filter         = MOUSE_FILTER_IGNORE
+	panel.add_child(_gacha_result_lvlup)
+
+	var ok_btn := Button.new()
+	ok_btn.text       = "Collect"
+	ok_btn.position   = Vector2((PW - 190) / 2, 322)
+	ok_btn.size       = Vector2(190, 38)
+	ok_btn.focus_mode = FOCUS_NONE
+	ok_btn.add_theme_font_override("font",           _font_bold)
+	ok_btn.add_theme_font_size_override("font_size", 17)
+	ok_btn.add_theme_color_override("font_color",    C_WHITE)
+	ok_btn.add_theme_stylebox_override("normal",  _btn_style(C_BTN))
+	ok_btn.add_theme_stylebox_override("hover",   _btn_style(C_BTN_HOV))
+	ok_btn.add_theme_stylebox_override("pressed", _btn_style(C_BTN.darkened(0.2)))
+	ok_btn.add_theme_stylebox_override("focus",   _btn_style(C_BTN))
+	ok_btn.pressed.connect(func():
+		if is_instance_valid(_gacha_result_panel):
+			_gacha_result_panel.visible = false
+		_gacha_spinning = false
+		_gacha_is_multi = false
+		_gacha_enable_summon_btns()
+		_refresh_tower_cards()
+	)
+	panel.add_child(ok_btn)
+
+
+func _gacha_build_multi_panel(parent: Control) -> void:
+	const PW : int = 980
+	const PH : int = 530
+
+	var dim := ColorRect.new()
+	dim.color        = Color(0, 0, 0, 0.76)
+	dim.position     = Vector2.ZERO
+	dim.size         = Vector2(1280, 720)
+	dim.mouse_filter = MOUSE_FILTER_STOP
+	dim.z_index      = 50
+	dim.visible      = false
+	parent.add_child(dim)
+	_gacha_multi_panel = dim
+
+	var panel := Panel.new()
+	var ps    := StyleBoxFlat.new()
+	ps.bg_color                   = Color(0.07, 0.06, 0.14, 0.98)
+	ps.corner_radius_top_left     = 14; ps.corner_radius_top_right    = 14
+	ps.corner_radius_bottom_left  = 14; ps.corner_radius_bottom_right = 14
+	ps.border_width_left  = 3; ps.border_width_right  = 3
+	ps.border_width_top   = 3; ps.border_width_bottom = 3
+	ps.border_color       = Color(0.50, 0.50, 0.60, 0.50)
+	ps.shadow_color       = Color(0, 0, 0, 0.86)
+	ps.shadow_size        = 24
+	panel.add_theme_stylebox_override("panel", ps)
+	panel.position     = Vector2((1280 - PW) / 2, (720 - PH) / 2)
+	panel.size         = Vector2(PW, PH)
+	panel.mouse_filter = MOUSE_FILTER_STOP
+	panel.z_index      = 51
+	dim.add_child(panel)
+	dim.set_meta("inner_panel", panel)
+
+	var hdr_s := StyleBoxFlat.new()
+	hdr_s.bg_color                   = Color(0.10, 0.05, 0.22)
+	hdr_s.corner_radius_top_left     = 12; hdr_s.corner_radius_top_right   = 12
+	hdr_s.corner_radius_bottom_left  = 0;  hdr_s.corner_radius_bottom_right = 0
+	var hdr := Panel.new()
+	hdr.add_theme_stylebox_override("panel", hdr_s)
+	hdr.position     = Vector2(3, 3)
+	hdr.size         = Vector2(PW - 6, 56)
+	hdr.mouse_filter = MOUSE_FILTER_IGNORE
+	panel.add_child(hdr)
+
+	var title_lbl := _label("10x Summon Results", _font_bold, 24, C_WHITE)
+	title_lbl.position             = Vector2(0, 14)
+	title_lbl.size                 = Vector2(PW, 34)
+	title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	panel.add_child(title_lbl)
+
+	var grid := Control.new()
+	grid.position     = Vector2(24, 68)
+	grid.size         = Vector2(PW - 48, 224)
+	grid.mouse_filter = MOUSE_FILTER_IGNORE
+	panel.add_child(grid)
+	dim.set_meta("grid", grid)
+
+	var div := ColorRect.new()
+	div.color        = Color(1, 1, 1, 0.07)
+	div.position     = Vector2(20, 302)
+	div.size         = Vector2(PW - 40, 1)
+	div.mouse_filter = MOUSE_FILTER_IGNORE
+	panel.add_child(div)
+
+	var sum_lbl := _label("", _font_bold, 15, C_WHITE)
+	sum_lbl.position             = Vector2(0, 310)
+	sum_lbl.size                 = Vector2(PW, 26)
+	sum_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sum_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	panel.add_child(sum_lbl)
+	dim.set_meta("sum_lbl", sum_lbl)
+
+	var lvlup_lbl := _label("", _font_bold, 14, C_GOLD)
+	lvlup_lbl.position             = Vector2(10, 342)
+	lvlup_lbl.size                 = Vector2(PW - 20, 110)
+	lvlup_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lvlup_lbl.autowrap_mode        = TextServer.AUTOWRAP_WORD_SMART
+	lvlup_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	panel.add_child(lvlup_lbl)
+	dim.set_meta("lvlup_lbl", lvlup_lbl)
+
+	var collect_btn := Button.new()
+	collect_btn.text       = "Collect All"
+	collect_btn.position   = Vector2((PW - 240) / 2, 462)
+	collect_btn.size       = Vector2(240, 50)
+	collect_btn.focus_mode = FOCUS_NONE
+	collect_btn.add_theme_font_override("font",           _font_bold)
+	collect_btn.add_theme_font_size_override("font_size", 19)
+	collect_btn.add_theme_color_override("font_color",    C_WHITE)
+	collect_btn.add_theme_stylebox_override("normal",  _btn_style(C_BTN))
+	collect_btn.add_theme_stylebox_override("hover",   _btn_style(C_BTN_HOV))
+	collect_btn.add_theme_stylebox_override("pressed", _btn_style(C_BTN.darkened(0.2)))
+	collect_btn.add_theme_stylebox_override("focus",   _btn_style(C_BTN))
+	collect_btn.pressed.connect(func():
+		if is_instance_valid(_gacha_multi_panel):
+			_gacha_multi_panel.visible = false
+		_gacha_spinning = false
+		_gacha_is_multi = false
+		_gacha_enable_summon_btns()
+		_refresh_tower_cards()
+	)
+	panel.add_child(collect_btn)
+
+
+func _gacha_make_mini_card(tower_id: String) -> Control:
+	const MCW : int = 180; const MCH : int = 104
+	var def    : Dictionary = SummonSystem.TURRET_DEFS.get(tower_id, {})
+	var rarity : String     = def.get("rarity", "common")
+	var rcol   : Color      = SummonSystem.RARITY_COLORS.get(rarity, C_WHITE)
+
+	var card := Panel.new()
+	var cs   := StyleBoxFlat.new()
+	cs.bg_color                   = Color(0.10, 0.10, 0.17)
+	cs.corner_radius_top_left     = 6; cs.corner_radius_top_right    = 6
+	cs.corner_radius_bottom_left  = 6; cs.corner_radius_bottom_right = 6
+	cs.border_width_left  = 2; cs.border_width_right  = 2
+	cs.border_width_top   = 2; cs.border_width_bottom = 2
+	cs.border_color       = Color(rcol.r, rcol.g, rcol.b, 0.72)
+	card.add_theme_stylebox_override("panel", cs)
+	card.custom_minimum_size = Vector2(MCW, MCH)
+	card.mouse_filter        = MOUSE_FILTER_IGNORE
+
+	var pbg := Panel.new()
+	var pbs := StyleBoxFlat.new()
+	pbs.bg_color                  = Color(0.06, 0.06, 0.12)
+	pbs.corner_radius_top_left    = 5; pbs.corner_radius_top_right    = 5
+	pbs.corner_radius_bottom_left = 5; pbs.corner_radius_bottom_right = 5
+	pbg.add_theme_stylebox_override("panel", pbs)
+	pbg.position     = Vector2(8, 14)
+	pbg.size         = Vector2(60, 60)
+	pbg.mouse_filter = MOUSE_FILTER_IGNORE
+	card.add_child(pbg)
+
+	var prev := _TurretPreview.new()
+	prev.turret_data = def
+	prev.position    = Vector2(10, 12)
+	card.add_child(prev)
+
+	var name_lbl := _label(def.get("name", tower_id), _font_bold, 12, C_WHITE)
+	name_lbl.position     = Vector2(74, 16)
+	name_lbl.size         = Vector2(MCW - 80, 18)
+	name_lbl.mouse_filter = MOUSE_FILTER_IGNORE
+	card.add_child(name_lbl)
+
+	var rar_lbl := _label(rarity.capitalize(), _font_reg, 11, rcol)
+	rar_lbl.position     = Vector2(74, 36)
+	rar_lbl.size         = Vector2(MCW - 80, 16)
+	rar_lbl.mouse_filter = MOUSE_FILTER_IGNORE
+	card.add_child(rar_lbl)
+
+	var copy_lbl := _label("+1 Copy", _font_bold, 11, Color(0.50, 0.82, 1.0))
+	copy_lbl.position     = Vector2(74, 54)
+	copy_lbl.size         = Vector2(MCW - 80, 16)
+	copy_lbl.mouse_filter = MOUSE_FILTER_IGNORE
+	card.add_child(copy_lbl)
+
+	var stripe := ColorRect.new()
+	stripe.color        = Color(rcol.r, rcol.g, rcol.b, 0.22)
+	stripe.position     = Vector2(2, MCH - 8)
+	stripe.size         = Vector2(MCW - 4, 6)
+	stripe.mouse_filter = MOUSE_FILTER_IGNORE
+	card.add_child(stripe)
+
+	return card
+
+
+func _gacha_on_summon_pressed() -> void:
+	if _gacha_spinning:
+		return
+	if GameData.blue_gems < GACHA_SUMMON_COST:
+		_gacha_flash_gems_red()
+		return
+	GameData.blue_gems -= GACHA_SUMMON_COST
+	GameData.save_game()
+	_gacha_refresh_gems()
+	_gacha_spinning = true
+	_gacha_is_multi = false
+	_gacha_disable_summon_btns()
+	var result_id : String = _gacha_roll_tower()
+	_gacha_rebuild_strip(result_id)
+	_gacha_spin(result_id)
+
+
+func _gacha_on_summon_10_pressed() -> void:
+	if _gacha_spinning:
+		return
+	if GameData.blue_gems < GACHA_SUMMON_10_COST:
+		_gacha_flash_gems_red()
+		return
+	GameData.blue_gems -= GACHA_SUMMON_10_COST
+	GameData.save_game()
+	_gacha_refresh_gems()
+	_gacha_spinning = true
+	_gacha_is_multi = true
+	_gacha_disable_summon_btns()
+	_gacha_multi_results.clear()
+	for _i in range(10):
+		_gacha_multi_results.append(_gacha_roll_tower())
+	var display_id : String = _gacha_multi_results[randi() % 10]
+	_gacha_rebuild_strip(display_id)
+	_gacha_spin(display_id)
+
+
+func _gacha_flash_gems_red() -> void:
+	if not is_instance_valid(_gacha_gem_lbl):
+		return
+	_gacha_gem_lbl.add_theme_color_override("font_color", C_RED)
+	var tw := create_tween()
+	tw.tween_interval(0.6)
+	tw.tween_callback(func():
+		if is_instance_valid(_gacha_gem_lbl):
+			_gacha_gem_lbl.add_theme_color_override("font_color", Color(0.50, 0.82, 1.0))
+	)
+
+
+func _gacha_disable_summon_btns() -> void:
+	if is_instance_valid(_gacha_summon_btn):    _gacha_summon_btn.disabled    = true
+	if is_instance_valid(_gacha_summon_10_btn): _gacha_summon_10_btn.disabled = true
+
+
+func _gacha_enable_summon_btns() -> void:
+	if is_instance_valid(_gacha_summon_btn):    _gacha_summon_btn.disabled    = false
+	if is_instance_valid(_gacha_summon_10_btn): _gacha_summon_10_btn.disabled = false
+
+
+func _gacha_refresh_gems() -> void:
+	if is_instance_valid(_gacha_gem_lbl):
+		_gacha_gem_lbl.text = "🔷 %d" % GameData.blue_gems
+
+
+func _gacha_spin(result_id: String) -> void:
+	if not is_instance_valid(_gacha_strip):
+		return
+	const START_X : float = 4.0
+	const END_X   : float = 420.0 - GACHA_WIN_IDX * GACHA_CARD_SLOT - GACHA_CARD_W / 2.0
+	_gacha_strip.position.x = START_X
+	if is_instance_valid(_gacha_tween):
+		_gacha_tween.kill()
+	_gacha_tween = create_tween()
+	_gacha_tween.set_trans(Tween.TRANS_EXPO)
+	_gacha_tween.set_ease(Tween.EASE_OUT)
+	_gacha_tween.tween_property(_gacha_strip, "position:x", END_X, GACHA_SPIN_DURATION)
+	_gacha_tween.tween_callback(func():
+		_gacha_highlight_win_card()
+		var seq := create_tween()
+		seq.tween_interval(0.92)
+		seq.tween_callback(func():
+			if _gacha_is_multi:
+				_gacha_award_and_show_multi()
+			else:
+				_gacha_award_and_show_single(result_id)
+		)
+	)
+
+
+func _gacha_highlight_win_card() -> void:
+	if not is_instance_valid(_gacha_strip):
+		return
+	var children := _gacha_strip.get_children()
+
+	for i in range(children.size()):
+		if i != GACHA_WIN_IDX:
+			var sib : Control = children[i]
+			var dtw := create_tween()
+			dtw.tween_property(sib, "modulate", Color(0.28, 0.28, 0.38, 1.0), 0.42)
+
+	if GACHA_WIN_IDX >= children.size():
+		return
+	var wc     : Control      = children[GACHA_WIN_IDX]
+	var wstyle : StyleBoxFlat = wc.get_meta("style", null)
+
+	if wstyle != null:
+		wstyle.border_width_left   = 3
+		wstyle.border_width_right  = 3
+		wstyle.border_width_top    = 3
+		wstyle.border_width_bottom = 3
+		var gold_tw := create_tween()
+		gold_tw.set_loops(3)
+		gold_tw.tween_method(func(a: float):
+			wstyle.border_color = Color(0.95, 0.76, 0.10, a)
+		, 0.20, 1.0, 0.22)
+		gold_tw.tween_method(func(a: float):
+			wstyle.border_color = Color(0.95, 0.76, 0.10, a)
+		, 1.0, 0.42, 0.22)
+
+	wc.pivot_offset = Vector2(GACHA_CARD_W / 2.0, GACHA_CARD_H / 2.0)
+	var stw := create_tween()
+	stw.set_ease(Tween.EASE_OUT)
+	stw.set_trans(Tween.TRANS_BACK)
+	stw.tween_property(wc, "scale", Vector2(1.08, 1.08), 0.30)
+
+	var shine := ColorRect.new()
+	shine.color        = Color(1.0, 0.95, 0.80, 0.44)
+	shine.position     = Vector2(-38.0, 0.0)
+	shine.size         = Vector2(30, GACHA_CARD_H)
+	shine.rotation     = deg_to_rad(10.0)
+	shine.mouse_filter = MOUSE_FILTER_IGNORE
+	shine.z_index      = 10
+	wc.clip_contents   = true
+	wc.add_child(shine)
+	var sh_tw := create_tween()
+	sh_tw.tween_interval(0.08)
+	sh_tw.tween_property(shine, "position:x", float(GACHA_CARD_W + 12), 0.30)
+	sh_tw.tween_callback(func():
+		if is_instance_valid(shine):
+			shine.queue_free()
+	)
+
+
+func _gacha_award_and_show_single(tower_id: String) -> void:
+	var old_level : int = GameData.get_tower_level(tower_id)
+	GameData.add_tower_copy(tower_id)
+	var new_level : int = GameData.get_tower_level(tower_id)
+	_gacha_show_result(tower_id, old_level, new_level)
+
+
+func _gacha_award_and_show_multi() -> void:
+	var level_ups : Array = []
+	for tid in _gacha_multi_results:
+		var old_lv : int = GameData.get_tower_level(tid)
+		GameData.add_tower_copy(tid)
+		var new_lv : int = GameData.get_tower_level(tid)
+		if new_lv > old_lv:
+			level_ups.append({"id": tid, "old": old_lv, "new": new_lv})
+	_gacha_show_multi_result(level_ups)
+
+
+func _gacha_show_result(tower_id: String, old_level: int, new_level: int) -> void:
+	var def    : Dictionary = SummonSystem.TURRET_DEFS.get(tower_id, {})
+	var rarity : String     = def.get("rarity", "common")
+	var rcol   : Color      = SummonSystem.RARITY_COLORS.get(rarity, C_WHITE)
+
+	if is_instance_valid(_gacha_result_title):
+		match rarity:
+			"legendary": _gacha_result_title.text = "** Legendary Tower! **"
+			"epic":      _gacha_result_title.text = "*  Epic Tower!"
+			"rare":      _gacha_result_title.text = "Rare Tower!"
+			_:           _gacha_result_title.text = "Tower  Received!"
+
+	if _gacha_result_ps    != null: _gacha_result_ps.border_color    = Color(rcol.r, rcol.g, rcol.b, 0.65)
+	if _gacha_result_card_s != null: _gacha_result_card_s.border_color = Color(rcol.r, rcol.g, rcol.b, 0.80)
+
+	if is_instance_valid(_gacha_result_inner):
+		var gr : ColorRect = _gacha_result_inner.get_meta("glow_ring", null)
+		if gr != null:
+			gr.color = Color(rcol.r, rcol.g, rcol.b, 0.14)
+
+	if is_instance_valid(_gacha_result_prev):
+		_gacha_result_prev.turret_data = def
+		_gacha_result_prev.queue_redraw()
+	if is_instance_valid(_gacha_result_name):
+		_gacha_result_name.text = def.get("name", tower_id)
+	if is_instance_valid(_gacha_result_rar):
+		_gacha_result_rar.text = rarity.capitalize()
+		_gacha_result_rar.add_theme_color_override("font_color", rcol)
+
+	var copies : int = GameData.get_tower_xp(tower_id)
+	if is_instance_valid(_gacha_result_info):
+		if new_level >= GameData.TOWER_MAX_LEVEL:
+			_gacha_result_info.text = "+1 Copy  (Lv.%d MAX)" % new_level
+		else:
+			var needed : int = GameData.copies_needed_for_level(new_level)
+			_gacha_result_info.text = "+1 Copy  ·  Lv.%d  (%d / %d)" % [new_level, copies, needed]
+
+	if is_instance_valid(_gacha_result_lvlup):
+		_gacha_result_lvlup.text = ("Level Up!  Lv.%d -> Lv.%d" % [old_level, new_level]) \
+			if new_level > old_level else ""
+
+	if is_instance_valid(_gacha_result_panel):
+		_gacha_result_panel.visible = true
+	if is_instance_valid(_gacha_result_inner):
+		_gacha_result_inner.pivot_offset = _gacha_result_inner.size / 2.0
+		_gacha_result_inner.scale        = Vector2(0.82, 0.82)
+		var pop := create_tween()
+		pop.set_ease(Tween.EASE_OUT)
+		pop.set_trans(Tween.TRANS_BACK)
+		pop.tween_property(_gacha_result_inner, "scale", Vector2(1.0, 1.0), 0.32)
+
+
+func _gacha_show_multi_result(level_ups: Array) -> void:
+	if not is_instance_valid(_gacha_multi_panel):
+		return
+	var dim     : Control = _gacha_multi_panel
+	var panel   : Control = dim.get_meta("inner_panel")
+	var grid    : Control = dim.get_meta("grid")
+	var sum_lbl : Label   = dim.get_meta("sum_lbl")
+	var lvl_lbl : Label   = dim.get_meta("lvlup_lbl")
+
+	for child in grid.get_children():
+		child.queue_free()
+	const MCW : int = 180; const MCH : int = 104; const MCG : int = 8
+	for i in range(_gacha_multi_results.size()):
+		var mini := _gacha_make_mini_card(_gacha_multi_results[i])
+		mini.position = Vector2((i % 5) * (MCW + MCG), (i / 5) * (MCH + MCG))
+		grid.add_child(mini)
+
+	var counts : Dictionary = {"common": 0, "rare": 0, "epic": 0, "legendary": 0}
+	for tid in _gacha_multi_results:
+		var r : String = SummonSystem.TURRET_DEFS.get(tid, {}).get("rarity", "common")
+		if counts.has(r):
+			counts[r] += 1
+	var parts : Array = []
+	if counts["legendary"] > 0: parts.append("%d Legendary" % counts["legendary"])
+	if counts["epic"]      > 0: parts.append("%d Epic"      % counts["epic"])
+	if counts["rare"]      > 0: parts.append("%d Rare"      % counts["rare"])
+	if counts["common"]    > 0: parts.append("%d Common"    % counts["common"])
+	sum_lbl.text = "  /  ".join(parts)
+
+	if level_ups.size() > 0:
+		var lup_parts : Array = []
+		for lu in level_ups:
+			var dname : String = SummonSystem.TURRET_DEFS.get(lu["id"], {}).get("name", lu["id"])
+			lup_parts.append("%s  Lv.%d->Lv.%d" % [dname, lu["old"], lu["new"]])
+		lvl_lbl.text = "   ·   ".join(lup_parts)
+	else:
+		lvl_lbl.text = ""
+
+	dim.visible = true
+	panel.pivot_offset = panel.size / 2.0
+	panel.scale        = Vector2(0.88, 0.88)
+	var pop := create_tween()
+	pop.set_ease(Tween.EASE_OUT)
+	pop.set_trans(Tween.TRANS_BACK)
+	pop.tween_property(panel, "scale", Vector2(1.0, 1.0), 0.35)
 
 func _build_world_map_screen() -> void:
-	_world_map_screen = _build_placeholder_screen("_world_map_screen", "🗺  World Map")
+	# ── Overlay ──────────────────────────────────────────────────────────────
+	var overlay := Panel.new()
+	var bg_s    := StyleBoxFlat.new()
+	bg_s.bg_color = Color(0.04, 0.05, 0.12)
+	overlay.add_theme_stylebox_override("panel", bg_s)
+	overlay.position     = Vector2.ZERO
+	overlay.size         = Vector2(1280, 720)
+	overlay.mouse_filter = MOUSE_FILTER_STOP
+	overlay.visible      = false
+	add_child(overlay)
+	_world_map_screen = overlay
+
+	# ── Map canvas ───────────────────────────────────────────────────────────
+	var canvas_script := load("res://ui/WorldMapCanvas.gd")
+	_wm_canvas = canvas_script.new()
+	overlay.add_child(_wm_canvas)
+
+	# ── Title bar ────────────────────────────────────────────────────────────
+	var title_bg := ColorRect.new()
+	title_bg.color        = Color(0.02, 0.04, 0.12, 0.85)
+	title_bg.size         = Vector2(1280, 52)
+	title_bg.position     = Vector2.ZERO
+	title_bg.mouse_filter = MOUSE_FILTER_IGNORE
+	overlay.add_child(title_bg)
+
+	var title := _label("⚔⚔  Campaign World Map", _font_bold, 26, C_GOLD)
+	title.position             = Vector2(0, 10)
+	title.size                 = Vector2(1280, 34)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	overlay.add_child(title)
+
+	# ── Debug button ─────────────────────────────────────────────────────────
+	if DEBUG:
+		var dbg_btn := Button.new()
+		dbg_btn.text       = "Unlock All (Debug)"
+		dbg_btn.position   = Vector2(1050, 12)
+		dbg_btn.size       = Vector2(192, 30)
+		dbg_btn.focus_mode = FOCUS_NONE
+		dbg_btn.add_theme_font_override("font",           _font_bold)
+		dbg_btn.add_theme_font_size_override("font_size", 11)
+		dbg_btn.add_theme_color_override("font_color",    C_WHITE)
+		dbg_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.40, 0.14, 0.06)))
+		dbg_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.56, 0.20, 0.08)))
+		dbg_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.30, 0.10, 0.04)))
+		dbg_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.40, 0.14, 0.06)))
+		dbg_btn.pressed.connect(func():
+			GameData.max_world_unlocked     = 10
+			GameData.all_time_highest_stage = 10
+			GameData.save_game()
+			_refresh_world_map()
+		)
+		overlay.add_child(dbg_btn)
+
+	# ── Territory labels & click buttons ─────────────────────────────────────
+	var WM_DATA : Array = [
+		{"name": "Garden Plains",     "color": Color(0.22, 0.65, 0.16), "pos": Vector2(200, 558)},
+		{"name": "Deep Forest",       "color": Color(0.06, 0.38, 0.10), "pos": Vector2(118, 388)},
+		{"name": "Desert Ruins",      "color": Color(0.78, 0.58, 0.18), "pos": Vector2(268, 215)},
+		{"name": "Frost Peaks",       "color": Color(0.55, 0.78, 0.96), "pos": Vector2(468,  98)},
+		{"name": "Volcanic Wastes",   "color": Color(0.88, 0.18, 0.08), "pos": Vector2(718, 132)},
+		{"name": "Swamplands",        "color": Color(0.12, 0.48, 0.22), "pos": Vector2(948, 312)},
+		{"name": "Crystal Highlands", "color": Color(0.68, 0.22, 0.95), "pos": Vector2(858, 488)},
+		{"name": "Shadow Realm",      "color": Color(0.28, 0.08, 0.55), "pos": Vector2(618, 552)},
+		{"name": "Celestial Kingdom", "color": Color(0.95, 0.85, 0.28), "pos": Vector2(442, 432)},
+		{"name": "Eternal Citadel",   "color": Color(0.88, 0.88, 0.95), "pos": Vector2(588, 242)},
+	]
+	_world_node_panels.clear()
+	for i in range(10):
+		var w     := i + 1
+		var wdat  : Dictionary = WM_DATA[i]
+		var wpos  : Vector2    = wdat["pos"]
+		var wname : String     = wdat["name"]
+
+		# World number label (above circle)
+		var num_lbl := _label("W%d" % w, _font_bold, 12, Color(0.95, 0.92, 0.75, 0.85))
+		num_lbl.position             = wpos + Vector2(-28, -52)
+		num_lbl.size                 = Vector2(56, 18)
+		num_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		overlay.add_child(num_lbl)
+
+		# Territory name (below circle)
+		var name_lbl := _label(wname, _font_bold, 11, Color(0.92, 0.88, 0.72))
+		name_lbl.position             = wpos + Vector2(-55, 36)
+		name_lbl.size                 = Vector2(110, 18)
+		name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		overlay.add_child(name_lbl)
+
+		# Status icon centred on circle  (⚔ / ★ / 🔒)
+		var icon_lbl := _label("🔒", _font_bold, 22, Color(1, 1, 1, 0.88))
+		icon_lbl.position             = wpos + Vector2(-20, -16)
+		icon_lbl.size                 = Vector2(40, 32)
+		icon_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		overlay.add_child(icon_lbl)
+
+		# Progress text (W1 only)
+		var prog_lbl := _label("", _font_reg, 10, Color(0.80, 0.80, 0.70, 0.85))
+		prog_lbl.position             = wpos + Vector2(-52, 54)
+		prog_lbl.size                 = Vector2(104, 16)
+		prog_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		prog_lbl.visible              = false
+		overlay.add_child(prog_lbl)
+
+		# Invisible 66×66 click button centred on circle
+		var btn := Button.new()
+		btn.position   = wpos + Vector2(-33, -33)
+		btn.size       = Vector2(66, 66)
+		btn.flat       = true
+		btn.focus_mode = FOCUS_NONE
+		var _bn := StyleBoxFlat.new()
+		_bn.bg_color = Color(0, 0, 0, 0)
+		_bn.set_corner_radius_all(33)
+		var _bh := StyleBoxFlat.new()
+		_bh.bg_color = Color(1, 1, 1, 0.12)
+		_bh.set_corner_radius_all(33)
+		var _bp := StyleBoxFlat.new()
+		_bp.bg_color = Color(1, 1, 1, 0.22)
+		_bp.set_corner_radius_all(33)
+		btn.add_theme_stylebox_override("normal",  _bn)
+		btn.add_theme_stylebox_override("hover",   _bh)
+		btn.add_theme_stylebox_override("pressed", _bp)
+		btn.add_theme_stylebox_override("focus",   _bn)
+		btn.pressed.connect(_on_world_node_pressed.bind(w))
+		overlay.add_child(btn)
+
+		_world_node_panels.append({
+			"icon_lbl": icon_lbl,
+			"prog_lbl": prog_lbl,
+			"btn":      btn,
+		})
+
+	# ── Stage detail popup ───────────────────────────────────────────────────
+	var sp   := Panel.new()
+	var sp_s := StyleBoxFlat.new()
+	sp_s.bg_color     = Color(0.05, 0.06, 0.14, 0.98)
+	sp_s.border_color = Color(0.30, 0.42, 0.72)
+	sp_s.set_border_width_all(2)
+	sp_s.set_corner_radius_all(14)
+	sp.add_theme_stylebox_override("panel", sp_s)
+	sp.position     = Vector2(380, 110)
+	sp.size         = Vector2(520, 500)
+	sp.visible      = false
+	overlay.add_child(sp)
+	_wm_stage_panel = sp
+
+	var sp_close := Button.new()
+	sp_close.text       = "✕"
+	sp_close.position   = Vector2(480, 12)
+	sp_close.size       = Vector2(28, 28)
+	sp_close.flat       = true
+	sp_close.focus_mode = FOCUS_NONE
+	sp_close.add_theme_font_override("font",           _font_bold)
+	sp_close.add_theme_font_size_override("font_size", 16)
+	sp_close.add_theme_color_override("font_color",    C_WHITE)
+	sp_close.add_theme_stylebox_override("normal",  _btn_style(Color(0.30, 0.10, 0.10)))
+	sp_close.add_theme_stylebox_override("hover",   _btn_style(Color(0.50, 0.16, 0.10)))
+	sp_close.add_theme_stylebox_override("pressed", _btn_style(Color(0.22, 0.08, 0.08)))
+	sp_close.add_theme_stylebox_override("focus",   _btn_style(Color(0.30, 0.10, 0.10)))
+	sp_close.pressed.connect(func(): sp.visible = false)
+	sp.add_child(sp_close)
+
+	var sp_title := _label("", _font_bold, 20, C_GOLD)
+	sp_title.position             = Vector2(0, 14)
+	sp_title.size                 = Vector2(520, 34)
+	sp_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sp.add_child(sp_title)
+	_wm_sp_title = sp_title
+
+	var sp_grid := GridContainer.new()
+	sp_grid.columns  = 2
+	sp_grid.position = Vector2(20, 58)
+	sp_grid.size     = Vector2(480, 360)
+	sp_grid.add_theme_constant_override("h_separation", 12)
+	sp_grid.add_theme_constant_override("v_separation",  8)
+	sp.add_child(sp_grid)
+	_wm_sp_grid = sp_grid
+
+	for _s_i in range(10):
+		var sb := Button.new()
+		sb.custom_minimum_size = Vector2(224, 50)
+		sb.focus_mode          = FOCUS_NONE
+		sb.add_theme_font_override("font",           _font_bold)
+		sb.add_theme_font_size_override("font_size", 13)
+		sb.add_theme_color_override("font_color",    C_WHITE)
+		sb.add_theme_stylebox_override("normal",  _btn_style(Color(0.14, 0.14, 0.24)))
+		sb.add_theme_stylebox_override("hover",   _btn_style(Color(0.20, 0.20, 0.34)))
+		sb.add_theme_stylebox_override("pressed", _btn_style(Color(0.10, 0.10, 0.18)))
+		sb.add_theme_stylebox_override("focus",   _btn_style(Color(0.14, 0.14, 0.24)))
+		sp_grid.add_child(sb)
+
+	var sp_play := Button.new()
+	sp_play.text       = "▶  Start World"
+	sp_play.position   = Vector2(135, 438)
+	sp_play.size       = Vector2(250, 44)
+	sp_play.focus_mode = FOCUS_NONE
+	sp_play.add_theme_font_override("font",           _font_bold)
+	sp_play.add_theme_font_size_override("font_size", 18)
+	sp_play.add_theme_color_override("font_color",    C_WHITE)
+	sp_play.add_theme_stylebox_override("normal",  _btn_style(C_BTN))
+	sp_play.add_theme_stylebox_override("hover",   _btn_style(C_BTN_HOV))
+	sp_play.add_theme_stylebox_override("pressed", _btn_style(C_BTN.darkened(0.25)))
+	sp_play.add_theme_stylebox_override("focus",   _btn_style(C_BTN))
+	sp_play.pressed.connect(func():
+		sp.visible      = false
+		overlay.visible = false
+		get_tree().reload_current_scene()
+	)
+	sp.add_child(sp_play)
+
+	# ── Back button ──────────────────────────────────────────────────────────
+	var back_btn := Button.new()
+	back_btn.text       = "← Back"
+	back_btn.position   = Vector2(30, 666)
+	back_btn.size       = Vector2(148, 44)
+	back_btn.focus_mode = FOCUS_NONE
+	back_btn.add_theme_font_override("font",           _font_bold)
+	back_btn.add_theme_font_size_override("font_size", 18)
+	back_btn.add_theme_color_override("font_color",    C_WHITE)
+	back_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.20, 0.20, 0.26)))
+	back_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.28, 0.28, 0.36)))
+	back_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.14, 0.14, 0.18)))
+	back_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.20, 0.20, 0.26)))
+	back_btn.pressed.connect(func():
+		sp.visible                = false
+		overlay.visible           = false
+		_game_over_screen.visible = true
+	)
+	overlay.add_child(back_btn)
+
+	_refresh_world_map()
+
+func _on_world_node_pressed(world_num: int) -> void:
+	var unlocked := (world_num == 1) or (GameData.max_world_unlocked >= world_num)
+	if not unlocked:
+		return
+	_wm_selected_world = world_num
+	var WORLD_NAMES : Array = [
+		"Garden Plains", "Deep Forest", "Desert Ruins", "Frost Peaks",
+		"Volcanic Wastes", "Swamplands", "Crystal Highlands",
+		"Shadow Realm", "Celestial Kingdom", "Eternal Citadel",
+	]
+	if world_num == 1:
+		_wm_sp_title.text = "World %d  —  %s" % [world_num, WORLD_NAMES[world_num - 1]]
+	else:
+		_wm_sp_title.text = "World %d  —  %s  (Coming Soon)" % [world_num, WORLD_NAMES[world_num - 1]]
+
+	for s_i in range(10):
+		var s_num    := s_i + 1
+		var sb : Button = _wm_sp_grid.get_child(s_i)
+		var cleared  := false
+		var unlk_stg := false
+		if world_num == 1:
+			cleared  = GameData.all_time_highest_stage >= s_num
+			unlk_stg = GameData.all_time_highest_stage >= s_num - 1
+		# Worlds 2-10: no content yet, all stages locked
+
+		if cleared:
+			sb.text = "Stage %d  ✓" % s_num
+			sb.add_theme_color_override("font_color", Color(0.28, 0.92, 0.28))
+			sb.add_theme_stylebox_override("normal",  _btn_style(Color(0.08, 0.28, 0.10)))
+			sb.add_theme_stylebox_override("hover",   _btn_style(Color(0.12, 0.36, 0.14)))
+			sb.add_theme_stylebox_override("pressed", _btn_style(Color(0.06, 0.20, 0.08)))
+			sb.add_theme_stylebox_override("focus",   _btn_style(Color(0.08, 0.28, 0.10)))
+			sb.disabled = false
+		elif unlk_stg:
+			sb.text = "Stage %d" % s_num
+			sb.add_theme_color_override("font_color", C_WHITE)
+			sb.add_theme_stylebox_override("normal",  _btn_style(Color(0.18, 0.18, 0.32)))
+			sb.add_theme_stylebox_override("hover",   _btn_style(Color(0.26, 0.26, 0.44)))
+			sb.add_theme_stylebox_override("pressed", _btn_style(Color(0.12, 0.12, 0.22)))
+			sb.add_theme_stylebox_override("focus",   _btn_style(Color(0.18, 0.18, 0.32)))
+			sb.disabled = false
+		else:
+			sb.text = "Stage %d  🔒" % s_num
+			sb.add_theme_color_override("font_color", C_DIM)
+			sb.add_theme_stylebox_override("normal",  _btn_style(Color(0.10, 0.10, 0.14)))
+			sb.add_theme_stylebox_override("hover",   _btn_style(Color(0.10, 0.10, 0.14)))
+			sb.add_theme_stylebox_override("pressed", _btn_style(Color(0.10, 0.10, 0.14)))
+			sb.add_theme_stylebox_override("focus",   _btn_style(Color(0.10, 0.10, 0.14)))
+			sb.disabled = true
+
+	_wm_stage_panel.visible = true
+
+
+func _refresh_world_map() -> void:
+	if _world_node_panels.is_empty() or _wm_canvas == null:
+		return
+	# Auto-unlock world 2 when the player clears all 10 stages of world 1
+	if GameData.all_time_highest_stage >= 10 and GameData.max_world_unlocked < 2:
+		GameData.max_world_unlocked = 2
+		GameData.save_game()
+
+	var WM_DATA : Array = [
+		{"color": Color(0.22, 0.65, 0.16), "pos": Vector2(200, 558)},
+		{"color": Color(0.06, 0.38, 0.10), "pos": Vector2(118, 388)},
+		{"color": Color(0.78, 0.58, 0.18), "pos": Vector2(268, 215)},
+		{"color": Color(0.55, 0.78, 0.96), "pos": Vector2(468,  98)},
+		{"color": Color(0.88, 0.18, 0.08), "pos": Vector2(718, 132)},
+		{"color": Color(0.12, 0.48, 0.22), "pos": Vector2(948, 312)},
+		{"color": Color(0.68, 0.22, 0.95), "pos": Vector2(858, 488)},
+		{"color": Color(0.28, 0.08, 0.55), "pos": Vector2(618, 552)},
+		{"color": Color(0.95, 0.85, 0.28), "pos": Vector2(442, 432)},
+		{"color": Color(0.88, 0.88, 0.95), "pos": Vector2(588, 242)},
+	]
+
+	# Push territory states to the canvas node
+	_wm_canvas.territory_states = []
+	for i in range(10):
+		var w := i + 1
+		var state : String
+		if GameData.max_world_unlocked > w:
+			state = "cleared"
+		elif GameData.max_world_unlocked == w:
+			state = "active"
+		else:
+			state = "locked"
+		_wm_canvas.territory_states.append({
+			"pos":   WM_DATA[i]["pos"],
+			"color": WM_DATA[i]["color"],
+			"state": state,
+		})
+
+	# Update overlay labels / buttons
+	for i in range(_world_node_panels.size()):
+		var w    := i + 1
+		var refs : Dictionary = _world_node_panels[i]
+		var state : String
+		if GameData.max_world_unlocked > w:
+			state = "cleared"
+		elif GameData.max_world_unlocked == w:
+			state = "active"
+		else:
+			state = "locked"
+
+		var icon_lbl : Label  = refs["icon_lbl"]
+		var prog_lbl : Label  = refs["prog_lbl"]
+		var btn      : Button = refs["btn"]
+
+		match state:
+			"active":
+				icon_lbl.text     = "⚔"
+				icon_lbl.modulate = Color(1.0, 0.92, 0.28)
+				btn.disabled      = false
+			"cleared":
+				icon_lbl.text     = "★"
+				icon_lbl.modulate = Color(0.28, 0.96, 0.32)
+				btn.disabled      = false
+			"locked":
+				icon_lbl.text     = "🔒"
+				icon_lbl.modulate = Color(0.60, 0.58, 0.55)
+				btn.disabled      = true
+
+		if w == 1 and state != "locked":
+			if GameData.all_time_highest_stage >= 10:
+				prog_lbl.text    = "★ Complete!"
+				prog_lbl.visible = true
+			else:
+				prog_lbl.text    = "%d / 10" % GameData.all_time_highest_stage
+				prog_lbl.visible = true
+		else:
+			prog_lbl.visible = false
 
 
 func _build_heroes_screen() -> void:
@@ -2194,7 +3762,8 @@ func _hero_build_detail_panel(parent: Control) -> void:
 	dim.mouse_filter = MOUSE_FILTER_STOP
 	dim.z_index      = -1
 	dim.gui_input.connect(func(ev: InputEvent):
-		if ev is InputEventMouseButton and ev.pressed:
+		if ev is InputEventMouseButton and ev.pressed \
+				and ev.button_index not in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN, MOUSE_BUTTON_WHEEL_LEFT, MOUSE_BUTTON_WHEEL_RIGHT]:
 			panel.visible = false
 	)
 	panel.add_child(dim)
@@ -2282,27 +3851,7 @@ func _hero_build_detail_panel(parent: Control) -> void:
 	_hero_det_eff.position = Vector2(128, 260); _hero_det_eff.size = Vector2(LW - 136, 20)
 	_hero_det_eff.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(_hero_det_eff)
 
-	var div2 := ColorRect.new()
-	div2.color = Color(1,1,1,0.08); div2.position = Vector2(12,286); div2.size = Vector2(LW-20,1)
-	div2.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(div2)
-
-	var desc_hdr := _label("Description", _font_bold, 14, C_GOLD)
-	desc_hdr.position = Vector2(12, 292); desc_hdr.size = Vector2(LW - 20, 18)
-	desc_hdr.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(desc_hdr)
-
-	var desc_scroll := ScrollContainer.new()
-	desc_scroll.position              = Vector2(12, 314)
-	desc_scroll.size                  = Vector2(LW - 16, 100)
-	desc_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	desc_scroll.vertical_scroll_mode   = ScrollContainer.SCROLL_MODE_AUTO
-	panel.add_child(desc_scroll)
-	_hero_det_desc = _label("", _font_reg, 14, C_DIM)
-	_hero_det_desc.custom_minimum_size    = Vector2(LW - 16, 0)
-	_hero_det_desc.autowrap_mode          = TextServer.AUTOWRAP_WORD
-	_hero_det_desc.mouse_filter           = MOUSE_FILTER_PASS
-	_hero_det_desc.size_flags_horizontal  = Control.SIZE_EXPAND_FILL
-	_hero_det_desc.size_flags_vertical    = Control.SIZE_SHRINK_BEGIN
-	desc_scroll.add_child(_hero_det_desc)
+	_hero_det_desc = _label("", _font_reg, 14, C_DIM)  # kept for data flow, not displayed
 
 	# ── RIGHT COLUMN ───────────────────────────────────────────────────────────
 	var eff_hdr := _label("Special Ability", _font_bold, 14, C_GOLD)
@@ -2352,19 +3901,25 @@ func _hero_show_detail(def: Dictionary) -> void:
 		"none":          "Standard single-target shot. No bonus effect.",
 		"focused_shot":  "Consecutive hits on the same target deal +50% damage.",
 		"dual_shot":     "Fires at 2 separate enemies simultaneously.",
-		"chain":         "Chains to 2 nearby enemies at 50% damage.",
+		"chain":         "Hits primary at full damage, then chains to 2 nearby enemies at 50% damage.",
 		"aoe":           "Hits all enemies currently in range.",
 		"aoe_burst":     "Explosive shot hits up to 5 enemies in range.",
 		"melee_cleave":  "Every 3rd hit strikes all enemies in range.",
 		"bleed_aoe":     "Hits all in range; applies bleed (max 3 stacks, 1 dmg/s each).",
-		"slow_zone":     "Every 5th shot drops an ice zone slowing enemies 55% for 3s.",
+		"slow_zone":     "Every 4th shot drops an ice zone slowing enemies 55% for 3s.",
 		"poison_debuff": "Poisons targets — +10% damage taken for 5s.",
 		"execute_shot":  "Up to 2× damage based on enemy current HP%.",
-		"knight_slam":   "Every 3rd hit is AoE and knocks enemies back.",
+		"knight_slam":   "Every 3rd hit throws 2 swords and knocks enemies back.",
+		"ranger_fire_aura": "Every 5th hit: towers 1 tile away get +10% fire rate for 3s.",
+		"rock_drop":           "Every 3rd hit drops a brittle zone (2s). Enemies entering take +20 bonus damage on their next hit from any source (once per enemy per zone).",
+		"dual_debuff":         "Hits 2 enemies per attack. Every other attack inflicts a random debuff on each target for 1 second. (Bleed, 10% Slow, or +10% damage taken — 5s cooldown per debuff per target.)",
+		"shadow_blade_combo":  "Every 3rd hit strikes with both blades at 2× damage + bleed (2× dmg/s, 3s, max 1 stack).",
+		"frost_shatter":       "2 shots per attack. Every hit slows by 5% for 2s. Gains +3% attack speed per slowed enemy on map (max +30%). Resets after 3s without attacking.",
 		"hp_strike":     "Deals base dmg + 1% of target's current HP.",
-		"arcane_charge": "Every 20th hit fires a blue laser for 2× damage to all in range.",
+		"arcane_charge": "Every 15th hit fires a blue laser for 2× damage to all in range.",
 		"lightning":     "Chains to primary + 3 more at 80% damage.",
 		"pierce":        "Bolt pierces up to 3 enemies in a line.",
+		"shadow_weaver_phase": "Shadow phase: single-target attack. After 10 hits transforms for 5s — white laser fires every 0.5s hitting 5 enemies for 50% tower damage + 1% max HP (0.5% on bosses).",
 	}
 
 	var hero_id : String = def.get("id", "")
@@ -2478,21 +4033,38 @@ func _build_towers_screen() -> void:
 		"none":          "Standard single-target shot.",
 		"focused_shot":  "Consecutive hits on the same target deal +50% damage.",
 		"dual_shot":     "Fires at 2 separate enemies simultaneously.",
-		"chain":         "Chains to 2 nearby enemies at 50% damage.",
+		"chain":         "Hits primary at full damage, then chains to 2 nearby enemies at 50% damage.",
 		"aoe":           "Hits all enemies currently in range.",
 		"aoe_burst":     "Explosive shot hits up to 5 enemies in range.",
 		"melee_cleave":  "Every 3rd hit strikes all enemies in range.",
 		"bleed_aoe":     "Hits all in range; applies bleed (max 3 stacks, 1 dmg/s each).",
-		"slow_zone":     "Every 5th shot drops an ice zone slowing enemies 55% for 3s.",
+		"slow_zone":     "Every 4th shot drops an ice zone slowing enemies 55% for 3s.",
 		"poison_debuff": "Poisons targets — +10% damage taken for 5s.",
 		"execute_shot":  "Up to 2× damage based on enemy current HP%.",
-		"knight_slam":   "Every 3rd hit is AoE and knocks enemies back.",
+		"knight_slam":   "Every 3rd hit throws 2 swords and knocks enemies back.",
+		"ranger_fire_aura": "Every 5th hit: towers 1 tile away get +10% fire rate for 3s.",
+		"rock_drop":           "Every 3rd hit drops a brittle zone (2s). Enemies entering take +20 bonus damage on their next hit from any source (once per enemy per zone).",
+		"dual_debuff":         "Hits 2 enemies per attack. Every other attack inflicts a random debuff on each target for 1 second. (Bleed, 10% Slow, or +10% damage taken — 5s cooldown per debuff per target.)",
+		"shadow_blade_combo":  "Every 3rd hit strikes with both blades at 2× damage + bleed (2× dmg/s, 3s, max 1 stack).",
+		"frost_shatter":       "2 shots per attack. Every hit slows by 5% for 2s. Gains +3% attack speed per slowed enemy on map (max +30%). Resets after 3s without attacking.",
 		"hp_strike":     "Deals base dmg + 1% of target's current HP.",
-		"arcane_charge": "Every 20th hit fires a blue laser for 2× damage to all in range.",
+		"poison_cloud":     "Hits all enemies in range each shot. Spawns a persistent poison cloud that slowly expands along the path, dealing 2 damage/s to any enemy inside it.",
+		"frost_cannon_tri": "Fires at up to 3 separate targets per shot. Boss targets take +50% damage and receive a 10% slow that refreshes on repeat hits.",
+		"arcane_overload":  "Every 5th attack triggers Arcane Overload — instant lasers hit ALL enemies in range (minimum 5 lasers). Counter never resets.",
+		"arcane_charge": "Every 15th hit fires a blue laser for 2× damage to all in range.",
 		"lock_beam":     "Locks beam on one target; damage ramps to 1.5× over 5s.",
+		"tempest_strike":          "Every 10th hit deals bonus damage equal to 5% of the target's total max HP.",
+		"infernal_serpent_summon": "Each hit has a 10% chance to summon a fire serpent (100 damage per bite) that laps the battlefield once.",
 		"lightning":     "Chains to primary + 3 more at 80% damage.",
-		"storm_chain":   "Chains to primary + 4 more at 85% damage.",
+		"storm_chain":   "Strikes primary for full damage, then chains to 4 nearest enemies globally for 150% damage.",
+		"chrono_aoe":    "Hits all enemies in range each shot. Applies a 15% slow for 2s that stacks with other slows (e.g. Frost Spire).",
+		"world_tree_buff": "Passively buffs towers one tile away with +10 flat damage and +50% attack speed.",
+		"natures_wrath_buff": "Buffs towers one tile away with +15 flat damage and +75% attack speed. 5% chance per hit to earn 2 gold.",
+		"taunt_slam":     "Hits up to 5 enemies at once. Every 5th hit stuns all in range for 2s and causes them to take +20% damage from all sources.",
+		"hercules_cleave": "Strikes 2 enemies at once. Gains +5 permanent damage per wave cleared. Boss waves excluded.",
 		"pierce":        "Bolt pierces up to 3 enemies in a line.",
+		"axe_warrior":   "Each swing hits up to 2 enemies in melee range, applying 1 Bleed stack and 1 Poison stack.",
+		"blade_spin":    "Dual melee strike hits 2 targets. 10% chance to summon 2 razor blades orbiting for 3s.",
 	}
 
 	# Group defs by rarity in order
@@ -2653,6 +4225,24 @@ func _tw_make_card(parent: Control, def: Dictionary, cw: int, ch: int,
 	lvl_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
 	card.add_child(lvl_lbl)
 
+	# Copies badge (below level badge, top-right)
+	var copies_str : String
+	if lvl >= GameData.TOWER_MAX_LEVEL:
+		copies_str = "MAX"
+	else:
+		var needed_c : int = GameData.copies_needed_for_level(lvl)
+		copies_str = "%d/%d" % [GameData.get_tower_xp(tower_id), needed_c]
+	var copies_lbl := _label(copies_str, _font_reg, 12, C_DIM)
+	copies_lbl.position             = Vector2(cw - 52, 28)
+	copies_lbl.size                 = Vector2(46, 16)
+	copies_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	copies_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	card.add_child(copies_lbl)
+
+	# Store live-refresh refs
+	if tower_id != "":
+		_tower_card_refs[tower_id] = {"lvl_lbl": lvl_lbl, "copies_lbl": copies_lbl}
+
 	# Click → open detail
 	card.gui_input.connect(func(ev: InputEvent):
 		if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT:
@@ -2692,7 +4282,8 @@ func _tw_build_detail_panel(parent: Control) -> void:
 	dim.mouse_filter = MOUSE_FILTER_STOP
 	dim.z_index      = -1
 	dim.gui_input.connect(func(ev: InputEvent):
-		if ev is InputEventMouseButton and ev.pressed:
+		if ev is InputEventMouseButton and ev.pressed \
+				and ev.button_index not in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN, MOUSE_BUTTON_WHEEL_LEFT, MOUSE_BUTTON_WHEEL_RIGHT]:
 			panel.visible = false
 	)
 	panel.add_child(dim)
@@ -2814,26 +4405,17 @@ func _tw_build_detail_panel(parent: Control) -> void:
 	div2.color = Color(1,1,1,0.08); div2.position = Vector2(14,298); div2.size = Vector2(LW-24,1)
 	div2.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(div2)
 
-	# Description
-	var desc_hdr := _label("Description", _font_bold, 14, C_GOLD)
-	desc_hdr.position = Vector2(16, 306); desc_hdr.size = Vector2(LW - 24, 18)
-	desc_hdr.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(desc_hdr)
-
-	_tw_desc_lbl = _label("", _font_reg, 14, C_DIM)
-	_tw_desc_lbl.position      = Vector2(16, 326)
-	_tw_desc_lbl.size          = Vector2(LW - 24, 80)
-	_tw_desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD
-	_tw_desc_lbl.mouse_filter  = MOUSE_FILTER_IGNORE; panel.add_child(_tw_desc_lbl)
+	_tw_desc_lbl = _label("", _font_reg, 14, C_DIM)  # kept for data flow, not displayed
 
 	# Special effect description
 	var eff_hdr := _label("Special Effect", _font_bold, 14, C_GOLD)
-	eff_hdr.position = Vector2(16, 410); eff_hdr.size = Vector2(LW - 24, 18)
+	eff_hdr.position = Vector2(16, 306); eff_hdr.size = Vector2(LW - 24, 18)
 	eff_hdr.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(eff_hdr)
 
 	# reuse _tw_xp_bar_lbl as the special-effect detail text (inside a scroll container)
 	var eff_scroll := ScrollContainer.new()
-	eff_scroll.position                                    = Vector2(16, 430)
-	eff_scroll.size                                        = Vector2(LW - 24, 72)
+	eff_scroll.position                                    = Vector2(16, 326)
+	eff_scroll.size                                        = Vector2(LW - 24, 176)
 	eff_scroll.horizontal_scroll_mode                      = ScrollContainer.SCROLL_MODE_DISABLED
 	eff_scroll.vertical_scroll_mode                        = ScrollContainer.SCROLL_MODE_AUTO
 	panel.add_child(eff_scroll)
@@ -2867,19 +4449,31 @@ func _tw_build_detail_panel(parent: Control) -> void:
 	_tw_xp_bar_fill.position = Vector2(RX, 130); _tw_xp_bar_fill.size = Vector2(0, 10)
 	_tw_xp_bar_fill.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(_tw_xp_bar_fill)
 
+	# Copies counter label above the bar (right-aligned)
+	_tw_copies_lbl = _label("0 / 2", _font_bold, 12, Color(0.70, 0.85, 1.00))
+	_tw_copies_lbl.position             = Vector2(RX, 116)
+	_tw_copies_lbl.size                 = Vector2(RW, 14)
+	_tw_copies_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_tw_copies_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	panel.add_child(_tw_copies_lbl)
+
+	# (buy button removed — copies earned through gameplay only)
+	_tw_buy_btn      = Button.new()   # kept as variable to avoid null refs
+	_tw_buy_cost_lbl = _label("", _font_reg, 12, C_DIM)
+
 	var div3 := ColorRect.new()
-	div3.color = Color(1,1,1,0.08); div3.position = Vector2(RX,150); div3.size = Vector2(RW,1)
+	div3.color = Color(1,1,1,0.08); div3.position = Vector2(RX,148); div3.size = Vector2(RW,1)
 	div3.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(div3)
 
 	# "Level Buffs" header
 	var buff_hdr := _label("Level Buffs", _font_bold, 14, C_WHITE)
-	buff_hdr.position = Vector2(RX, 158); buff_hdr.size = Vector2(RW, 22)
+	buff_hdr.position = Vector2(RX, 156); buff_hdr.size = Vector2(RW, 22)
 	buff_hdr.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(buff_hdr)
 
 	# Scrollable level buff list
 	var scroll := ScrollContainer.new()
-	scroll.position               = Vector2(RX, 184)
-	scroll.size                   = Vector2(RW, PH - 194)
+	scroll.position               = Vector2(RX, 182)
+	scroll.size                   = Vector2(RW, PH - 192)
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.vertical_scroll_mode   = ScrollContainer.SCROLL_MODE_AUTO
 	panel.add_child(scroll)
@@ -2957,10 +4551,20 @@ func _tw_show_detail(def: Dictionary, eff_map: Dictionary,
 		_tw_preview_node.turret_data = def
 		_tw_preview_node.queue_redraw()
 
-	# Left column stats
-	_tw_dmg_lbl.text    = "%.0f" % (def.get("damage", 0.0) + GameData.buff_damage_flat)
-	_tw_rng_lbl.text    = "%.0f px" % def.get("range", 0.0)
-	_tw_rate_lbl.text   = "%.1f / s" % def.get("fire_rate", 0.0)
+	# Left column stats — boosted value + total bonus %
+	var _det_tid   : String = def.get("id", "")
+	var _det_dmgm  : float  = GameData.tower_total_damage_mult(_det_tid)
+	var _det_rngm  : float  = GameData.tower_total_range_mult(_det_tid)
+	var _det_ratem : float  = GameData.tower_total_fire_rate_mult(_det_tid)
+	var _det_dmg_pct  : int = roundi((_det_dmgm  - 1.0) * 100.0)
+	var _det_rng_pct  : int = roundi((_det_rngm  - 1.0) * 100.0)
+	var _det_rate_pct : int = roundi((_det_ratem - 1.0) * 100.0)
+	_tw_dmg_lbl.text  = "%.0f%s" % [(def.get("damage",    0.0) * _det_dmgm)  + GameData.buff_damage_flat,
+									 ("  +%d%%" % _det_dmg_pct)  if _det_dmg_pct  > 0 else ""]
+	_tw_rng_lbl.text  = "%.0f px%s" % [def.get("range",   0.0) * _det_rngm,
+									 ("  +%d%%" % _det_rng_pct)  if _det_rng_pct  > 0 else ""]
+	_tw_rate_lbl.text = "%.1f / s%s" % [def.get("fire_rate", 0.0) * _det_ratem,
+									 ("  +%d%%" % _det_rate_pct) if _det_rate_pct > 0 else ""]
 	# Effect short name (title-case the key)
 	var eff_key : String = def.get("effect", "none")
 	_tw_effect_lbl.text = eff_key.replace("_", " ").capitalize()
@@ -2980,10 +4584,11 @@ func _tw_show_detail(def: Dictionary, eff_map: Dictionary,
 		eff_text += "\n" + special_map[tower_id]
 	_tw_xp_bar_lbl.text = eff_text
 
-	# Right column — level & XP bar
+	# Right column — level & copies bar
+	_tw_current_def = def
 	var lvl     : int   = GameData.get_tower_level(tower_id)
-	var xp      : int   = GameData.get_tower_xp(tower_id)
-	var xp_need : int   = GameData.TOWER_XP_PER_LVL
+	var copies  : int   = GameData.get_tower_xp(tower_id)
+	var needed  : int   = GameData.copies_needed_for_level(lvl)
 	var max_lvl : int   = GameData.TOWER_MAX_LEVEL
 	const RW    : int   = 320   # must match RW in build function
 
@@ -2991,10 +4596,12 @@ func _tw_show_detail(def: Dictionary, eff_map: Dictionary,
 	if lvl >= max_lvl:
 		_tw_xp_bar_fill.size  = Vector2(RW, 10)
 		_tw_xp_bar_fill.color = C_GOLD
+		_tw_copies_lbl.text   = "MAX"
 	else:
-		var frac : float      = clampf(float(xp) / xp_need, 0.0, 1.0)
+		var frac : float      = clampf(float(copies) / needed, 0.0, 1.0)
 		_tw_xp_bar_fill.size  = Vector2(int(RW * frac), 10)
 		_tw_xp_bar_fill.color = Color(0.30, 0.70, 1.00)
+		_tw_copies_lbl.text   = "%d / %d copies" % [copies, needed]
 
 	# Highlight unlocked level rows
 	for i in range(_tw_lvl_rows.size()):
@@ -3022,6 +4629,21 @@ func _tw_show_detail(def: Dictionary, eff_map: Dictionary,
 
 func _refresh_all_upg_rows_postbattle() -> void:
 	pass
+
+
+func _refresh_tower_cards() -> void:
+	for tower_id in _tower_card_refs:
+		var refs  : Dictionary = _tower_card_refs[tower_id]
+		var lvl   : int        = GameData.get_tower_level(tower_id)
+		var copies: int        = GameData.get_tower_xp(tower_id)
+		if is_instance_valid(refs.get("lvl_lbl")):
+			refs["lvl_lbl"].text = "Lv.%d" % lvl
+		if is_instance_valid(refs.get("copies_lbl")):
+			if lvl >= GameData.TOWER_MAX_LEVEL:
+				refs["copies_lbl"].text = "MAX"
+			else:
+				var needed : int = GameData.copies_needed_for_level(lvl)
+				refs["copies_lbl"].text = "%d/%d" % [copies, needed]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -3430,7 +5052,17 @@ func _build_recipe_modal() -> void:
 
 		# Large centered stat panel — shown on click
 		const SPW : int = 660
-		const SPH : int = 480
+		const SPH : int = 580
+		# Click-outside catcher — added FIRST so stat_panel (added after) gets input priority
+		var sp_catcher := ColorRect.new()
+		sp_catcher.color        = Color(0, 0, 0, 0.0)
+		sp_catcher.position     = Vector2.ZERO
+		sp_catcher.size         = Vector2(1280, 720)
+		sp_catcher.z_index      = 119
+		sp_catcher.visible      = false
+		sp_catcher.mouse_filter = MOUSE_FILTER_STOP
+		overlay.add_child(sp_catcher)
+
 		var stat_panel := Panel.new()
 		stat_panel.visible  = false
 		stat_panel.z_index  = 120
@@ -3445,20 +5077,13 @@ func _build_recipe_modal() -> void:
 		sp_style.border_color = Color(0.20, 0.85, 1.00, 0.60)
 		stat_panel.add_theme_stylebox_override("panel", sp_style)
 		overlay.add_child(stat_panel)
-
-		# Click-outside catcher sits behind stat_panel to close it
-		var sp_catcher := ColorRect.new()
-		sp_catcher.color       = Color(0, 0, 0, 0.0)
-		sp_catcher.position    = Vector2.ZERO
-		sp_catcher.size        = Vector2(1280, 720)
-		sp_catcher.z_index     = 119
-		sp_catcher.visible     = false
-		sp_catcher.mouse_filter = MOUSE_FILTER_STOP
-		overlay.add_child(sp_catcher)
 		sp_catcher.gui_input.connect(func(ev: InputEvent):
-			if ev is InputEventMouseButton and ev.pressed:
-				stat_panel.visible = false
-				sp_catcher.visible = false
+			if ev is InputEventMouseButton and ev.pressed \
+					and ev.button_index not in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN, MOUSE_BUTTON_WHEEL_LEFT, MOUSE_BUTTON_WHEEL_RIGHT]:
+				var click_pos : Vector2 = (ev as InputEventMouseButton).position
+				if not Rect2(stat_panel.position, stat_panel.size).has_point(click_pos):
+					stat_panel.visible = false
+					sp_catcher.visible = false
 		)
 
 		# Header bar
@@ -3529,12 +5154,43 @@ func _build_recipe_modal() -> void:
 			vl.mouse_filter = MOUSE_FILTER_IGNORE
 			stat_panel.add_child(vl)
 
-		var sp_desc := _label(result_def.get("desc", ""), _font_reg, 14, C_DIM)
-		sp_desc.position      = Vector2(14, 396)
-		sp_desc.size          = Vector2(left_w - 10, 70)
-		sp_desc.autowrap_mode = TextServer.AUTOWRAP_WORD
-		sp_desc.mouse_filter  = MOUSE_FILTER_IGNORE
-		stat_panel.add_child(sp_desc)
+		var sp_effect_map : Dictionary = {
+			"poison_cloud":      "Hits all enemies in range each shot. Spawns a persistent poison cloud that slowly expands along the path, dealing 2 damage/s to any enemy inside it.",
+			"frost_cannon_tri":  "Fires at up to 3 separate targets per shot. Boss targets take +50% damage and receive a 10% slow that refreshes on repeat hits.",
+			"arcane_overload":   "Every 5th attack triggers Arcane Overload — instant lasers hit ALL enemies in range (minimum 5 lasers). Counter never resets.",
+			"tempest_strike":          "Every 10th hit deals bonus damage equal to 5% of the target's total max HP.",
+			"infernal_serpent_summon": "Each hit has a 10% chance to summon a living fire serpent (100 damage per bite) that races around the battlefield once.",
+			"storm_chain":       "Strikes the primary target for full damage, then chains to the 4 nearest enemies globally for 150% damage. Chain targets can be outside the tower's range.",
+			"lightning":         "Chains to the primary target and up to 3 additional enemies at 80% damage.",
+			"aoe":               "Hits all enemies currently in range.",
+			"pierce":            "Bolt pierces through up to 3 enemies in a line, hitting each for full damage.",
+			"shadow_weaver_phase": "Shadow phase: single-target attack. After 10 hits transforms for 5s — white laser fires every 0.5s hitting 5 enemies for 50% tower damage + 1% max HP (0.5% on bosses).",
+			"natures_wrath_buff":"Passively buffs all towers one tile away with +15 flat damage and +75% attack speed. Each hit has a 5% chance to generate 2 gold.",
+		}
+		var sp_eff_div := ColorRect.new()
+		sp_eff_div.color        = Color(1,1,1,0.08)
+		sp_eff_div.position     = Vector2(14, 388)
+		sp_eff_div.size         = Vector2(left_w - 18, 2)
+		sp_eff_div.mouse_filter = MOUSE_FILTER_IGNORE
+		stat_panel.add_child(sp_eff_div)
+		var sp_eff_hdr := _label("Special Effect", _font_bold, 14, C_GOLD)
+		sp_eff_hdr.position     = Vector2(14, 394)
+		sp_eff_hdr.size         = Vector2(left_w - 18, 18)
+		sp_eff_hdr.mouse_filter = MOUSE_FILTER_IGNORE
+		stat_panel.add_child(sp_eff_hdr)
+		var sp_desc := _label(sp_effect_map.get(sp_reff, result_def.get("desc", "")), _font_reg, 14, Color(0.92, 0.88, 0.72))
+		sp_desc.custom_minimum_size   = Vector2(left_w - 18, 0)
+		sp_desc.autowrap_mode         = TextServer.AUTOWRAP_WORD
+		sp_desc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		sp_desc.size_flags_vertical   = Control.SIZE_SHRINK_BEGIN
+		sp_desc.mouse_filter          = MOUSE_FILTER_PASS
+		var sp_eff_scroll := ScrollContainer.new()
+		sp_eff_scroll.position               = Vector2(14, 416)
+		sp_eff_scroll.size                   = Vector2(left_w - 18, SPH - 430)
+		sp_eff_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		sp_eff_scroll.vertical_scroll_mode   = ScrollContainer.SCROLL_MODE_AUTO
+		stat_panel.add_child(sp_eff_scroll)
+		sp_eff_scroll.add_child(sp_desc)
 
 		# Vertical divider
 		var vdiv := ColorRect.new()
@@ -3575,10 +5231,10 @@ func _build_recipe_modal() -> void:
 		var rrate2: float = result_def.get("fire_rate", 1.0)
 		var buff_rows := [
 			["Lv. 1", "Unlocked",                                              true],
-			["Lv. 2", "+15% DMG  (%.1f → %.1f)" % [rdmg, rdmg*1.15],         false],
+			["Lv. 2", "+15%% DMG  (%.1f → %.1f)" % [rdmg, rdmg*1.15],         false],
 			["Lv. 3", "Special: " + eff_map3.get(sp_reff, sp_reff.capitalize()) + " +50% radius", false],
-			["Lv. 4", "+20% Range  (%d → %d)" % [int(rrng), int(rrng*1.2)],  false],
-			["Lv. 5", "+25% Fire Rate  (%.1f → %.1f/s)" % [rrate2, rrate2*1.25], false],
+			["Lv. 4", "+20%% Range  (%d → %d)" % [int(rrng), int(rrng*1.2)],  false],
+			["Lv. 5", "+25%% Fire Rate  (%.1f → %.1f/s)" % [rrate2, rrate2*1.25], false],
 		]
 		for bi in range(buff_rows.size()):
 			var br      : Array = buff_rows[bi]
@@ -3878,8 +5534,8 @@ func _build_settings_gear() -> void:
 	var menu : Panel = _gear_menu
 	menu.visible  = false
 	menu.z_index  = 91
-	menu.position = Vector2(1280 - 200, 720 - 110)
-	menu.size     = Vector2(188, 96)
+	menu.position = Vector2(1280 - 200, 720 - 210)
+	menu.size     = Vector2(188, 196)
 	var ms := StyleBoxFlat.new()
 	ms.bg_color = Color(0.10, 0.10, 0.16, 0.97)
 	ms.corner_radius_top_left = 8; ms.corner_radius_top_right = 8
@@ -3903,9 +5559,29 @@ func _build_settings_gear() -> void:
 	hdiv2.mouse_filter = MOUSE_FILTER_IGNORE
 	menu.add_child(hdiv2)
 
+	# ── Toggle: Damage Numbers ────────────────────────────────────────────────
+	var dmg_row := _make_settings_toggle(
+		menu, "Damage Numbers", 36, GameData.show_damage_numbers,
+		func(on: bool): GameData.show_damage_numbers = on
+	)
+	menu.add_child(dmg_row)
+
+	# ── Toggle: Projectiles ───────────────────────────────────────────────────
+	var proj_row := _make_settings_toggle(
+		menu, "Projectiles", 76, GameData.show_projectiles,
+		func(on: bool): GameData.show_projectiles = on
+	)
+	menu.add_child(proj_row)
+
+	var hdiv3 := ColorRect.new()
+	hdiv3.color        = Color(1, 1, 1, 0.07)
+	hdiv3.position     = Vector2(8, 120); hdiv3.size = Vector2(172, 1)
+	hdiv3.mouse_filter = MOUSE_FILTER_IGNORE
+	menu.add_child(hdiv3)
+
 	var leave_btn := Button.new()
 	leave_btn.text         = "🚪  Leave Game"
-	leave_btn.position     = Vector2(8, 36)
+	leave_btn.position     = Vector2(8, 128)
 	leave_btn.size         = Vector2(172, 50)
 	leave_btn.focus_mode   = FOCUS_NONE
 	leave_btn.add_theme_font_override("font",           _font_bold)
@@ -3944,6 +5620,71 @@ func _build_settings_gear() -> void:
 	_game_over_screen.visibility_changed.connect(_update_gear_vis)
 	_upgrades_screen.visibility_changed.connect(_update_gear_vis)
 	_victory_screen.visibility_changed.connect(_update_gear_vis)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SETTINGS HELPERS
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Builds a labeled toggle row for the settings menu.
+# Returns the container node (already populated, caller must add_child to menu).
+func _make_settings_toggle(menu: Panel, label_text: String, y: float,
+		initial: bool, on_toggle: Callable) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.position      = Vector2(8, y)
+	row.size          = Vector2(172, 36)
+	row.mouse_filter  = MOUSE_FILTER_PASS
+
+	var lbl := Label.new()
+	lbl.text          = label_text
+	lbl.add_theme_font_override("font",           _font_bold)
+	lbl.add_theme_font_size_override("font_size", 13)
+	lbl.add_theme_color_override("font_color",    C_WHITE)
+	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	lbl.vertical_alignment    = VERTICAL_ALIGNMENT_CENTER
+	lbl.mouse_filter          = MOUSE_FILTER_IGNORE
+	row.add_child(lbl)
+
+	# Styled toggle button showing ON (green) / OFF (dark red)
+	var chk := Button.new()
+	chk.toggle_mode    = true
+	chk.button_pressed = initial
+	chk.focus_mode     = FOCUS_NONE
+	chk.text           = "ON" if initial else "OFF"
+	chk.size           = Vector2(52, 28)
+	chk.custom_minimum_size = Vector2(52, 28)
+	chk.add_theme_font_override("font",           _font_bold)
+	chk.add_theme_font_size_override("font_size", 12)
+
+	var _make_tog_style := func(bg: Color) -> StyleBoxFlat:
+		var s := StyleBoxFlat.new()
+		s.bg_color = bg
+		s.corner_radius_top_left     = 6
+		s.corner_radius_top_right    = 6
+		s.corner_radius_bottom_left  = 6
+		s.corner_radius_bottom_right = 6
+		s.border_width_left   = 1; s.border_width_right  = 1
+		s.border_width_top    = 1; s.border_width_bottom = 1
+		s.border_color = bg.lightened(0.25)
+		return s
+
+	var _refresh_chk := func(pressed: bool) -> void:
+		chk.text = "ON" if pressed else "OFF"
+		var col : Color = Color(0.15, 0.55, 0.20) if pressed else Color(0.40, 0.10, 0.10)
+		chk.add_theme_stylebox_override("normal",   _make_tog_style.call(col))
+		chk.add_theme_stylebox_override("hover",    _make_tog_style.call(col.lightened(0.15)))
+		chk.add_theme_stylebox_override("pressed",  _make_tog_style.call(col.darkened(0.10)))
+		chk.add_theme_stylebox_override("focus",    _make_tog_style.call(col))
+		chk.add_theme_color_override("font_color",  C_WHITE)
+
+	_refresh_chk.call(initial)
+	chk.toggled.connect(func(pressed: bool) -> void:
+		_refresh_chk.call(pressed)
+		on_toggle.call(pressed)
+	)
+	row.add_child(chk)
+
+	return row
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -4307,6 +6048,7 @@ class _TurretPreview extends Node2D:
 		match idx:
 			6, 7, 8, 10, 12:     sc = 0.67   # frost spire, poison, sniper, infernal core, arcane cannon
 			17, 18, 19, 20, 21, 22, 23, 24, 25:  sc = 0.60   # fusion turrets
+			30, 31, 32, 33:                       sc = 0.56   # melee epics/legendaries
 			_:                   sc = 0.56   # all others stay at original size
 		draw_set_transform(Vector2(cx, cy), 0.0, Vector2(sc, sc))
 		var tc := turret_data.get("color", Color(0.5, 0.5, 0.5)) as Color
@@ -4337,6 +6079,14 @@ class _TurretPreview extends Node2D:
 			23: _pv_shadow_weaver()
 			24: _pv_natures_wrath()
 			25: _pv_void_titan()
+			30: _pv_blade_assassin()
+			31: _pv_axe_warrior()
+			32: _pv_hercules()
+			33: _pv_taunt_tank()
+			26: _pv_spearman()
+			27: _pv_rogue()
+			28: _pv_elite_knight()
+			29: _pv_iron_guard()
 			50: _pv_hero_paladin(tc)
 			51: _pv_hero_rogue(tc)
 			52: _pv_hero_warlock(tc)
@@ -4856,6 +6606,172 @@ class _TurretPreview extends Node2D:
 		draw_polyline(PackedVector2Array([
 			Vector2(14, -16), Vector2(20, -10), Vector2(16, -4), Vector2(10, -10), Vector2(14, -16)
 		]), tc_l, 1.5)
+
+	func _pv_blade_assassin() -> void:
+		var dark  := Color(0.07, 0.05, 0.12); var cloak := Color(0.16, 0.10, 0.26)
+		var steel := Color(0.75, 0.80, 0.95); var edge  := Color(0.95, 0.97, 1.00)
+		var eye_c := Color(0.85, 0.15, 0.90)
+		draw_rect(Rect2(-12,14,24,10),dark); draw_rect(Rect2(-10,12,20,4),cloak.lightened(0.06))
+		draw_colored_polygon(PackedVector2Array([Vector2(0,-18),Vector2(-12,14),Vector2(12,14)]),cloak)
+		draw_colored_polygon(PackedVector2Array([Vector2(0,-12),Vector2(-4,10),Vector2(4,10)]),dark)
+		draw_circle(Vector2(0,-15),9,dark); draw_circle(Vector2(0,-16),8,cloak)
+		draw_circle(Vector2(-3,-16),2,eye_c); draw_circle(Vector2(3,-16),2,eye_c)
+		draw_circle(Vector2(-3,-16),0.9,Color(1,0.85,1,0.9)); draw_circle(Vector2(3,-16),0.9,Color(1,0.85,1,0.9))
+		# Left blade at rest
+		draw_colored_polygon(PackedVector2Array([Vector2(-7,4)+Vector2(2.5,0),Vector2(-7,4)+Vector2(-1,0),Vector2(-16,-26)+Vector2(-0.3,0),Vector2(-16,-26)+Vector2(0.3,0)]),steel)
+		draw_line(Vector2(-7,4)+Vector2(5.5,0),Vector2(-7,4)+Vector2(-4,0),steel,3.0)
+		# Right blade at rest
+		draw_colored_polygon(PackedVector2Array([Vector2(7,4)+Vector2(-2.5,0),Vector2(7,4)+Vector2(1,0),Vector2(16,-26)+Vector2(0.3,0),Vector2(16,-26)+Vector2(-0.3,0)]),steel)
+		draw_line(Vector2(7,4)+Vector2(-5.5,0),Vector2(7,4)+Vector2(4,0),steel,3.0)
+		draw_arc(Vector2(0,-16),10,0,TAU,20,Color(eye_c.r,eye_c.g,eye_c.b,0.20),2.0)
+
+	func _pv_axe_warrior() -> void:
+		var iron   := Color(0.42, 0.40, 0.45); var steel  := Color(0.70, 0.72, 0.80)
+		var wood   := Color(0.48, 0.28, 0.10); var skin   := Color(0.78, 0.55, 0.35)
+		var fur    := Color(0.55, 0.42, 0.28); var fur_d  := Color(0.38, 0.28, 0.16)
+		draw_rect(Rect2(-10,14,8,10),fur_d); draw_rect(Rect2(2,14,8,10),fur_d)
+		draw_rect(Rect2(-9,5,7,11),fur); draw_rect(Rect2(2,5,7,11),fur)
+		draw_rect(Rect2(-11,-8,22,14),skin)
+		draw_colored_polygon(PackedVector2Array([Vector2(-13,-8),Vector2(13,-8),Vector2(10,-14),Vector2(-10,-14)]),fur)
+		draw_colored_polygon(PackedVector2Array([Vector2(-11,-8),Vector2(11,-8),Vector2(8,-13),Vector2(-8,-13)]),fur_d)
+		draw_circle(Vector2(0,-18),9,iron); draw_circle(Vector2(0,-19),8,steel)
+		draw_line(Vector2(-9,-14),Vector2(9,-14),iron,3.0)
+		draw_colored_polygon(PackedVector2Array([Vector2(-9,-18),Vector2(-8,-25),Vector2(-14,-20)]),steel)
+		draw_colored_polygon(PackedVector2Array([Vector2(9,-18),Vector2(8,-25),Vector2(14,-20)]),steel)
+		# Axe at rest — held right side
+		draw_line(Vector2(14,10),Vector2(14,-24),wood,4.0)
+		draw_colored_polygon(PackedVector2Array([Vector2(10,-24),Vector2(22,-24),Vector2(24,-16),Vector2(10,-14)]),iron)
+		draw_colored_polygon(PackedVector2Array([Vector2(10,-24),Vector2(22,-24),Vector2(22,-20),Vector2(10,-18)]),steel)
+
+	func _pv_hercules() -> void:
+		var gold   := Color(0.85, 0.65, 0.10); var gold_d := Color(0.60, 0.44, 0.05)
+		var steel  := Color(0.70, 0.72, 0.80); var steel_d:= Color(0.42, 0.40, 0.45)
+		var skin   := Color(0.80, 0.58, 0.36); var tiger  := Color(0.85, 0.50, 0.10)
+		var tiger_s:= Color(0.15, 0.10, 0.05); var leather:= Color(0.38, 0.22, 0.08)
+		draw_rect(Rect2(-10,14,8,10),leather); draw_rect(Rect2(2,14,8,10),leather)
+		draw_rect(Rect2(-10,5,20,10),gold_d); draw_line(Vector2(-10,9),Vector2(10,9),gold,1.5)
+		draw_rect(Rect2(-12,-8,24,14),steel); draw_rect(Rect2(-10,-6,20,10),steel_d)
+		draw_line(Vector2(-12,-8),Vector2(12,-8),gold,2.5)
+		draw_circle(Vector2(0,-19),10,tiger); draw_circle(Vector2(0,-20),9,Color(tiger.r+0.05,tiger.g+0.03,tiger.b))
+		draw_line(Vector2(-10,-14),Vector2(10,-14),gold,3.0)
+		draw_line(Vector2(-6,-22),Vector2(-4,-16),tiger_s,1.5); draw_line(Vector2(6,-22),Vector2(4,-16),tiger_s,1.5)
+		draw_colored_polygon(PackedVector2Array([Vector2(-10,-23),Vector2(-6,-29),Vector2(-3,-22)]),tiger)
+		draw_colored_polygon(PackedVector2Array([Vector2(10,-23),Vector2(6,-29),Vector2(3,-22)]),tiger)
+		draw_circle(Vector2(-3.5,-17),2.5,skin); draw_circle(Vector2(3.5,-17),2.5,skin)
+		# Longsword at rest
+		draw_line(Vector2(6,-30),Vector2(2,10),steel_d,18.0)
+		draw_line(Vector2(6,-30),Vector2(2,10),steel,14.0)
+		draw_line(Vector2(6,-30),Vector2(2,10),Color(0.88,0.92,1.0,0.55),4.0)
+		draw_rect(Rect2(-4,-2,16,5),gold)
+
+	func _pv_taunt_tank() -> void:
+		var crimson  := Color(0.72, 0.10, 0.18); var crimson_d := Color(0.45, 0.05, 0.10)
+		var purple   := Color(0.55, 0.10, 0.72); var steel     := Color(0.65, 0.65, 0.75)
+		var gold     := Color(0.85, 0.65, 0.10)
+		draw_arc(Vector2(0,0),28,0,TAU,32,Color(0.55,0.05,0.40,0.20),2.5)
+		draw_rect(Rect2(-10,14,8,10),crimson_d); draw_rect(Rect2(2,14,8,10),crimson_d)
+		draw_rect(Rect2(-10,5,20,10),crimson); draw_line(Vector2(-10,9),Vector2(10,9),crimson_d,1.5)
+		draw_rect(Rect2(-13,-9,26,15),crimson); draw_rect(Rect2(-11,-7,22,11),crimson_d)
+		draw_line(Vector2(-13,-9),Vector2(13,-9),purple,3.0)
+		draw_line(Vector2(-13,-9),Vector2(-13,5),purple,2.0); draw_line(Vector2(13,-9),Vector2(13,5),purple,2.0)
+		draw_circle(Vector2(-14,-7),7,crimson); draw_circle(Vector2(14,-7),7,crimson)
+		draw_arc(Vector2(-14,-7),7,PI*0.5,PI*1.5,16,purple,2.0)
+		draw_arc(Vector2(14,-7),7,-PI*0.5,PI*0.5,16,purple,2.0)
+		draw_circle(Vector2(0,-19),11,crimson); draw_circle(Vector2(0,-20),10,crimson_d)
+		draw_rect(Rect2(-8,-22,16,4),purple); draw_rect(Rect2(-2,-22,4,8),purple)
+		draw_line(Vector2(-9,-26),Vector2(9,-26),gold,3.0)
+		draw_line(Vector2(-6,-29),Vector2(-6,-26),gold,2.5)
+		draw_line(Vector2(0,-31),Vector2(0,-26),gold,2.5)
+		draw_line(Vector2(6,-29),Vector2(6,-26),gold,2.5)
+		draw_circle(Vector2(-20,-4),5.5,crimson_d); draw_arc(Vector2(-20,-4),5.5,0,TAU,16,purple,1.5)
+		draw_circle(Vector2(20,-4),5.5,crimson_d);  draw_arc(Vector2(20,-4),5.5,0,TAU,16,purple,1.5)
+
+	func _pv_spearman() -> void:
+		var skin   := Color(0.94, 0.78, 0.60); var iron   := Color(0.55, 0.58, 0.65)
+		var iron_d := Color(0.32, 0.34, 0.40); var tunic  := Color(0.72, 0.18, 0.18)
+		var pants  := Color(0.28, 0.20, 0.10); var shaft  := Color(0.52, 0.33, 0.12)
+		draw_rect(Rect2(-9,4,8,14),pants); draw_rect(Rect2(1,4,8,14),pants)
+		draw_colored_polygon(PackedVector2Array([Vector2(-11,-8),Vector2(11,-8),Vector2(13,6),Vector2(-13,6)]),iron.darkened(0.1))
+		draw_colored_polygon(PackedVector2Array([Vector2(-8,-7),Vector2(8,-7),Vector2(9,5),Vector2(-9,5)]),tunic)
+		draw_circle(Vector2(-14,-5),6,iron); draw_circle(Vector2(-14,-5),6,iron_d,false,1.5)
+		draw_circle(Vector2(14,-5),6,iron);  draw_circle(Vector2(14,-5),6,iron_d,false,1.5)
+		draw_circle(Vector2(0,-17),8,skin)
+		draw_rect(Rect2(-9,-22,18,7),iron); draw_rect(Rect2(-2,-22,4,10),iron_d)
+		# Spear shaft + head
+		draw_line(Vector2(-6,22),Vector2(20,-28),shaft,3.5)
+		draw_line(Vector2(-6,22),Vector2(20,-28),shaft.lightened(0.2),1.0)
+		draw_colored_polygon(PackedVector2Array([Vector2(20,-28),Vector2(16,-20),Vector2(24,-20)]),iron)
+
+	func _pv_rogue() -> void:
+		var skin    := Color(0.94, 0.78, 0.60); var dark    := Color(0.14, 0.14, 0.18)
+		var dark_l  := Color(0.22, 0.22, 0.30); var leather := Color(0.30, 0.20, 0.10)
+		var bandana := Color(0.10, 0.10, 0.12); var blade   := Color(0.75, 0.80, 0.88)
+		draw_rect(Rect2(-9,4,8,12),dark); draw_rect(Rect2(1,4,8,12),dark)
+		draw_colored_polygon(PackedVector2Array([Vector2(-10,-8),Vector2(10,-8),Vector2(12,6),Vector2(-12,6)]),dark)
+		draw_colored_polygon(PackedVector2Array([Vector2(-10,-8),Vector2(10,-8),Vector2(9,-2),Vector2(-9,-2)]),dark_l)
+		draw_line(Vector2(-10,-4),Vector2(10,-2),leather,1.5)
+		draw_rect(Rect2(-12,4,24,4),leather)
+		draw_rect(Rect2(-16,-7,9,5),skin); draw_rect(Rect2(7,-7,9,5),skin)
+		draw_circle(Vector2(0,-17),8,skin)
+		draw_circle(Vector2(0,-24),7,dark); draw_rect(Rect2(-7,-24,14,8),dark)
+		draw_rect(Rect2(-9,-19,18,5),bandana)
+		draw_circle(Vector2(-3,-21),1.5,Color(0.20,0.12,0.08)); draw_circle(Vector2(3,-21),1.5,Color(0.20,0.12,0.08))
+		# Twin daggers at rest
+		draw_line(Vector2(-18,-6),Vector2(-10,-18),blade,3.0); draw_line(Vector2(-18,-6),Vector2(-10,-18),Color(1,1,1,0.4),1.0)
+		draw_line(Vector2(18,-6),Vector2(10,-18),blade,3.0);   draw_line(Vector2(18,-6),Vector2(10,-18),Color(1,1,1,0.4),1.0)
+
+	func _pv_elite_knight() -> void:
+		var steel   := Color(0.22, 0.38, 0.72); var steel_d := Color(0.12, 0.22, 0.48)
+		var gold    := Color(0.95, 0.82, 0.22); var crimson := Color(0.80, 0.12, 0.14)
+		var leather := Color(0.38, 0.22, 0.10)
+		# Cape
+		draw_colored_polygon(PackedVector2Array([Vector2(-10,-4),Vector2(10,-4),Vector2(14,22),Vector2(-14,22)]),crimson)
+		# Greaves
+		draw_rect(Rect2(-11,12,10,12),steel_d); draw_rect(Rect2(1,12,10,12),steel_d)
+		draw_rect(Rect2(-11,4,10,10),steel);    draw_rect(Rect2(1,4,10,10),steel)
+		# Breastplate
+		draw_colored_polygon(PackedVector2Array([Vector2(-13,-10),Vector2(13,-10),Vector2(11,6),Vector2(-11,6)]),steel)
+		draw_line(Vector2(-13,-10),Vector2(13,-10),gold,3.0)
+		# Pauldrons
+		draw_circle(Vector2(-17,-7),9,steel); draw_circle(Vector2(-17,-7),9,steel_d,false,2.5)
+		draw_circle(Vector2(17,-7),9,steel);  draw_circle(Vector2(17,-7),9,steel_d,false,2.5)
+		# Helmet + plume
+		draw_circle(Vector2(0,-20),10,steel); draw_circle(Vector2(0,-20),10,steel_d,false,2.0)
+		draw_rect(Rect2(-10,-24,20,6),steel_d)
+		draw_rect(Rect2(-8,-23,6,4),steel.darkened(0.6)); draw_rect(Rect2(2,-23,6,4),steel.darkened(0.6))
+		draw_rect(Rect2(-3,-32,6,14),steel); draw_rect(Rect2(-4,-38,8,10),crimson)
+		draw_line(Vector2(-10,-17),Vector2(10,-17),gold,2.5)
+		# Great-sword at rest
+		draw_rect(Rect2(14,-6,7,6),steel)
+		draw_rect(Rect2(16,-38,7,44),steel); draw_rect(Rect2(16,-38,7,44),steel_d,false,1.8)
+		draw_rect(Rect2(8,-4,22,6),gold); draw_rect(Rect2(18,2,6,14),leather)
+
+	func _pv_iron_guard() -> void:
+		var iron   := Color(0.52, 0.56, 0.66); var iron_d := Color(0.30, 0.32, 0.42)
+		var iron_l := Color(0.72, 0.76, 0.88); var tunic  := Color(0.18, 0.32, 0.72)
+		var boots  := Color(0.18, 0.12, 0.06); var gold   := Color(0.90, 0.76, 0.20)
+		draw_rect(Rect2(-10,16,9,8),boots); draw_rect(Rect2(1,16,9,8),boots)
+		draw_rect(Rect2(-10,4,9,14),iron.darkened(0.1)); draw_rect(Rect2(-10,4,9,14),iron_d,false,1.5)
+		draw_rect(Rect2(1,4,9,14),iron.darkened(0.1));   draw_rect(Rect2(1,4,9,14),iron_d,false,1.5)
+		draw_colored_polygon(PackedVector2Array([Vector2(-12,-10),Vector2(12,-10),Vector2(14,6),Vector2(-14,6)]),iron)
+		draw_polyline(PackedVector2Array([Vector2(-12,-10),Vector2(12,-10),Vector2(14,6),Vector2(-14,6),Vector2(-12,-10)]),iron_d,2.0)
+		draw_line(Vector2(-12,-10),Vector2(12,-10),gold,3.0)
+		draw_colored_polygon(PackedVector2Array([Vector2(-5,-10),Vector2(5,-10),Vector2(4,0),Vector2(-4,0)]),tunic)
+		draw_circle(Vector2(-16,-6),9,iron); draw_circle(Vector2(-16,-6),9,iron_d,false,2.5)
+		draw_circle(Vector2(16,-6),9,iron);  draw_circle(Vector2(16,-6),9,iron_d,false,2.5)
+		draw_circle(Vector2(0,-20),10,iron); draw_circle(Vector2(0,-20),10,iron_d,false,2.0)
+		draw_rect(Rect2(-10,-24,20,6),iron_d)
+		draw_rect(Rect2(-8,-23,6,4),Color(0.08,0.08,0.12,0.9))
+		draw_rect(Rect2(2,-23,6,4),Color(0.08,0.08,0.12,0.9))
+		draw_line(Vector2(-10,-17),Vector2(10,-17),gold,2.5)
+		# Left shield at rest
+		draw_colored_polygon(PackedVector2Array([Vector2(-28,-14),Vector2(-16,-14),Vector2(-14,6),Vector2(-21,14),Vector2(-28,6)]),iron)
+		draw_polyline(PackedVector2Array([Vector2(-28,-14),Vector2(-16,-14),Vector2(-14,6),Vector2(-21,14),Vector2(-28,6),Vector2(-28,-14)]),gold,2.0)
+		draw_circle(Vector2(-21,-4),3,gold)
+		# Right shield at rest
+		draw_colored_polygon(PackedVector2Array([Vector2(16,-14),Vector2(28,-14),Vector2(28,6),Vector2(21,14),Vector2(14,6)]),iron)
+		draw_polyline(PackedVector2Array([Vector2(16,-14),Vector2(28,-14),Vector2(28,6),Vector2(21,14),Vector2(14,6),Vector2(16,-14)]),gold,2.0)
+		draw_circle(Vector2(21,-4),3,gold)
 
 	func _pv_generic(tc: Color) -> void:
 		var rar := turret_data.get("rarity","common") as String

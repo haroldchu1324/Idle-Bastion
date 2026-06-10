@@ -1,7 +1,8 @@
 extends Node2D
 
-const ENEMY_SCENE : PackedScene = preload("res://scenes/Enemy.tscn")
-const TOWER_SCENE : PackedScene = preload("res://scenes/Tower.tscn")
+const ENEMY_SCENE   : PackedScene = preload("res://scenes/Enemy.tscn")
+const TOWER_SCENE   : PackedScene = preload("res://scenes/Tower.tscn")
+const SERPENT_SCENE : GDScript    = preload("res://scripts/InfernalSerpent.gd")
 
 # ── Turret catalogue ──────────────────────────────────────────────────────────
 const TURRET_TYPES : Array = [
@@ -182,6 +183,8 @@ var _stage             : int   = 1
 var _wave_in_stage     : int   = 0
 var _wave_active       : bool  = false
 var _enemies_alive     : int   = 0
+var _next_wave_id      : int   = 0
+var _wave_remaining    : Dictionary = {}   # wave_id → remaining enemy count
 var _enemies_killed    : int   = 0
 var _bosses_killed     : int   = 0
 var _gems_this_run     : int   = 0
@@ -195,6 +198,10 @@ var _spawning_done        : bool  = false
 var _pending_boss_reward  : bool  = false
 var _game_over     : bool  = false
 
+# ── Poison Cloud (Venom Drake) ────────────────────────────────────────────────
+var _poison_cloud : Node2D = null
+const POISON_CLOUD_SCENE := preload("res://scripts/PoisonCloud.gd")
+
 # ── Tower movement & selection ────────────────────────────────────────────────
 var _tower_map           : Dictionary = {}
 var _held_tower          : Node2D     = null
@@ -203,6 +210,7 @@ var _selected_tower      : Node2D     = null
 var _drag_pending_tile   : Vector2i   = Vector2i(-1, -1)
 var _press_position      : Vector2    = Vector2.ZERO
 const _CLICK_MAX_DIST    : float      = 6.0
+var _info_refresh_timer  : float      = 0.0
 
 
 func _ready() -> void:
@@ -216,6 +224,8 @@ func _ready() -> void:
 	_hud.recipe_fusion_requested.connect(_on_recipe_fusion_requested)
 	_hud.upgrade_merge_requested.connect(_on_upgrade_merge_requested)
 	_hud.debug_gold_requested.connect(func(): _gold += 10000; _refresh_hud())
+	_hud.sell_tower_requested.connect(_on_sell_tower_requested)
+	_hud.debug_summon_requested.connect(_on_debug_summon_requested)
 	GameData.current_run_highest_stage = 0
 	GameData.reset_run_buffs()
 	_hud.buff_chosen.connect(_on_buff_chosen)
@@ -237,6 +247,8 @@ func _spawn_knight() -> void:
 	h_data["range"]     = hero_base.get("range",  1500.0) * GameData.final_range_mult(h_idx)
 	h_data["fire_rate"] = hero_base.get("fire_rate", 0.9) * GameData.final_fire_rate_mult(h_idx)
 	tower.init_type(h_data)
+	tower.gold_proc.connect(func(amount: float): _gold += amount; _refresh_hud())
+	tower.serpent_summon.connect(func(dmg: float): _spawn_infernal_serpent(dmg))
 	tower.drop_from_sky(_build_grid.tile_center(tile), 2.0)
 	_tower_map[tile] = tower
 
@@ -253,6 +265,14 @@ func _process(delta: float) -> void:
 
 	if is_instance_valid(_held_tower):
 		_held_tower.position = mp + Vector2(0, -12)
+
+	# Refresh selected tower stats panel so World Tree buffs stay current
+	if is_instance_valid(_selected_tower):
+		_info_refresh_timer -= delta
+		if _info_refresh_timer <= 0.0:
+			_info_refresh_timer = 0.25
+			var _merge_cnt := _count_same_type_on_map(_selected_tower.tower_data.get("id", ""))
+			_hud.show_tower_info(_selected_tower, _merge_cnt)
 
 	if is_instance_valid(_held_tower) and _build_grid.is_in_grid(mp):
 		var t : Vector2i = _build_grid.world_to_tile(mp)
@@ -285,12 +305,20 @@ func start_wave() -> void:
 
 	if _wave_in_stage < total_waves:
 		_wave_in_stage += 1
+		# First wave of a new stage: start the Poison Cloud if a Venom Drake exists.
+		if _wave_in_stage == 1:
+			var vd_pos : Vector2 = _get_venom_drake_pos()
+			if vd_pos != Vector2.ZERO:
+				_spawn_or_reset_poison_cloud(vd_pos)
 		_wave_active = true
 		_spawning_done = false
 		_spawn_queue.clear()
 		var def : Array = stage_data["waves"][_wave_in_stage - 1]
+		var wid : int = _next_wave_id
+		_next_wave_id += 1
+		_wave_remaining[wid] = 0   # incremented as each enemy actually spawns
 		for _i in range(def[0]):
-			_spawn_queue.append(def)
+			_spawn_queue.append({"def": def, "wave_id": wid})
 		_spawn_timer = 0.0
 	else:
 		_start_boss_wave(stage_data["boss"])
@@ -316,15 +344,19 @@ func _start_boss_wave(boss_def: Array) -> void:
 func _spawn_next_enemy() -> void:
 	if _spawn_queue.is_empty():
 		return
-	var def   : Array  = _spawn_queue.pop_front()
+	var entry : Dictionary = _spawn_queue.pop_front()
+	var def   : Array      = entry["def"]
+	var wid   : int        = entry["wave_id"]
 	var enemy : Node2D = ENEMY_SCENE.instantiate()
 	add_child(enemy)
-	var etype : int = (_stage - 1) / 2
+	var etype : int = int((_stage - 1) / 2.0)
 	var spd  : float = def[2] * GameData.relic_enemy_slow_mult()
 	var gold : float = def[3] * GameData.total_gold_drop_mult()
 	enemy.setup(PATH, def[1], spd, gold, false, etype, _stage)
-	enemy.died.connect(_on_enemy_died)
-	enemy.reached_end.connect(_on_enemy_reached_end)
+	enemy.wave_id = wid
+	_wave_remaining[wid] = _wave_remaining.get(wid, 0) + 1   # safe: key may have been erased if tower one-shotted earlier spawns
+	enemy.died.connect(func(r: float): _on_enemy_died(r); _on_wave_enemy_removed(wid))
+	enemy.reached_end.connect(func(): _on_enemy_reached_end(); _on_wave_enemy_removed(wid))
 	_enemies_alive += 1
 	if _spawn_queue.is_empty():
 		_spawning_done = true
@@ -356,6 +388,58 @@ func _clear_ice_zones() -> void:
 	for z in get_tree().get_nodes_in_group("ice_zones"):
 		if is_instance_valid(z):
 			z.queue_free()
+
+
+func _spawn_or_reset_poison_cloud(tower_pos: Vector2) -> void:
+	if is_instance_valid(_poison_cloud):
+		_poison_cloud.reset_cloud()
+	else:
+		var cloud : Node2D = POISON_CLOUD_SCENE.new()
+		cloud.z_index = 0
+		add_child(cloud)
+		cloud.setup(PATH, tower_pos)
+		_poison_cloud = cloud
+
+
+func _check_venom_drake_exists() -> bool:
+	for tile in _tower_map:
+		var tw = _tower_map[tile]
+		if is_instance_valid(tw) and tw.tower_data.get("effect", "") == "poison_cloud":
+			return true
+	return false
+
+
+func _get_venom_drake_pos() -> Vector2:
+	for tile in _tower_map:
+		var tw = _tower_map[tile]
+		if is_instance_valid(tw) and tw.tower_data.get("effect", "") == "poison_cloud":
+			return _build_grid.tile_center(tile)
+	return Vector2.ZERO
+
+
+func _clear_poison_cloud() -> void:
+	if is_instance_valid(_poison_cloud):
+		_poison_cloud.queue_free()
+	_poison_cloud = null
+
+
+func _spawn_infernal_serpent(dmg: float) -> void:
+	var serpent : Node2D = SERPENT_SCENE.new()
+	add_child(serpent)
+	serpent.setup(dmg)
+
+
+func _on_wave_enemy_removed(wid: int) -> void:
+	if not _wave_remaining.has(wid):
+		return
+	_wave_remaining[wid] -= 1
+	if _wave_remaining[wid] <= 0:
+		_wave_remaining.erase(wid)
+		# Hercules: grant +5 damage for this wave being cleared
+		for tile in _tower_map:
+			var tw = _tower_map[tile]
+			if is_instance_valid(tw) and tw.tower_data.get("id", "") == "hercules":
+				tw._hercules_wave_bonus += 5.0
 
 
 func _check_wave_done() -> void:
@@ -401,11 +485,16 @@ func _try_show_boss_reward() -> void:
 	# Wait one frame so every queue_free() from this frame is flushed and no
 	# dying enemy is still visible on screen when the cards appear.
 	await get_tree().process_frame
+	_clear_poison_cloud()
 	_pre_reward_time_scale     = Engine.time_scale
 	Engine.time_scale          = 1.0
 	_cancel_hold()
 	_deselect_tower()
 	_hud.hide_wave_btn()
+	# Final stage — no buff cards, go straight to victory
+	if _stage >= STAGES.size():
+		_advance_stage()
+		return
 	var rarity : String = GameData.roll_rarity(_stage)
 	var buffs  : Array  = GameData.pick_buffs(rarity, 3)
 	_hud.show_boss_buff_cards(buffs, _stage)
@@ -419,9 +508,9 @@ func _on_buff_chosen(buff_id: String) -> void:
 		_lives += GameData.buff_pending_lives
 		GameData.buff_pending_lives = 0
 	if buff_id == "summon_cost_10g":
-		_turret_roll_cost = maxi(1, _turret_roll_cost - 10)
-		_rare_roll_cost   = maxi(1, _rare_roll_cost   - 10)
-		_epic_roll_cost   = maxi(1, _epic_roll_cost   - 10)
+		_turret_roll_cost = maxi(1, _turret_roll_cost - 5)
+		_rare_roll_cost   = maxi(1, _rare_roll_cost   - 5)
+		_epic_roll_cost   = maxi(1, _epic_roll_cost   - 5)
 		_hud.update_pull_cost(_turret_roll_cost)
 		_hud.update_rare_cost(_rare_roll_cost)
 		_hud.update_epic_cost(_epic_roll_cost)
@@ -710,7 +799,6 @@ func _on_roll_turret_requested() -> void:
 	_turret_roll_cost += 1
 	_hud.update_pull_cost(_turret_roll_cost)
 	var raw : Dictionary = SummonSystem.roll_by_pool("common")
-	var idx : int = raw.get("idx", 0)
 	_place_turret_random(raw)
 	_hud.show_turret_result(raw)
 	_refresh_hud()
@@ -768,8 +856,13 @@ func _place_turret_random(data: Dictionary) -> void:
 	var tower : Node2D = TOWER_SCENE.instantiate()
 	add_child(tower)
 	tower.init_type(data)
+	tower.gold_proc.connect(func(amount: float): _gold += amount; _refresh_hud())
+	tower.serpent_summon.connect(func(dmg: float): _spawn_infernal_serpent(dmg))
 	tower.drop_from_sky(_build_grid.tile_center(tile))
 	_tower_map[tile] = tower
+	# If a Venom Drake is placed mid-stage, start the cloud immediately.
+	if data.get("effect", "") == "poison_cloud" and _wave_in_stage > 0:
+		_spawn_or_reset_poison_cloud(_build_grid.tile_center(tile))
 
 
 func _get_free_tiles() -> Array:
@@ -788,6 +881,8 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed:
 		if not _hud.is_upgrade_popup_clicked(event.position):
 			_hud.hide_upgrade_popup()
+		if not _hud.is_sell_btn_clicked(event.position):
+			_hud.hide_sell_btn()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -830,6 +925,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		if is_instance_valid(_selected_tower) and mp.distance_to(_press_position) <= _CLICK_MAX_DIST:
 			var _merge_cnt := _count_same_type_on_map(_selected_tower.tower_data.get("id", ""))
 			_hud.show_tower_info(_selected_tower, _merge_cnt)
+			var _is_hero : bool = GameData.HERO_DEFS.has(_selected_tower.tower_data.get("id", ""))
+			if not _is_hero or _hud.DEBUG:
+				_hud.show_sell_btn(_selected_tower.position)
 			if _selected_tower.can_upgrade:
 				_hud.show_upgrade_popup(_selected_tower.position)
 		return
@@ -905,6 +1003,46 @@ func _deselect_tower() -> void:
 	_selected_tower = null
 	_hud.hide_tower_info()
 	_hud.hide_upgrade_popup()
+	_hud.hide_sell_btn()
+
+
+func _on_sell_tower_requested() -> void:
+	if not is_instance_valid(_selected_tower):
+		return
+	# Find the tile this tower occupies
+	var sell_tile := Vector2i(-1, -1)
+	for tile in _tower_map:
+		if _tower_map[tile] == _selected_tower:
+			sell_tile = tile
+			break
+	if sell_tile == Vector2i(-1, -1):
+		return
+	var sold_effect : String = _selected_tower.tower_data.get("effect", "")
+	_selected_tower.queue_free()
+	_tower_map.erase(sell_tile)
+	_build_grid.unplace(sell_tile)
+	_selected_tower = null
+	_gold += 25
+	if sold_effect == "poison_cloud" and not _check_venom_drake_exists():
+		_clear_poison_cloud()
+	_hud.hide_tower_info()
+	_hud.hide_upgrade_popup()
+	_hud.hide_sell_btn()
+	_refresh_hud()
+
+
+func _on_debug_summon_requested(tower_id: String) -> void:
+	var td : Dictionary = SummonSystem.TURRET_DEFS.get(tower_id, {})
+	if td.is_empty():
+		return
+	var raw := td.duplicate()
+	var tidx : int = raw.get("idx", 0)
+	raw["damage"]    = raw["damage"]    * GameData.final_damage_mult(tidx)
+	raw["range"]     = raw["range"]     * GameData.final_range_mult(tidx)
+	raw["fire_rate"] = raw["fire_rate"] * GameData.final_fire_rate_mult(tidx)
+	_place_turret_random(raw)
+	_hud.show_notification("🐛 Summoned %s" % raw.get("name", tower_id))
+	_refresh_hud()
 
 
 func _on_wave_btn_pressed() -> void:

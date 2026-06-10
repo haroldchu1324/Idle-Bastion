@@ -11,20 +11,35 @@ var is_boss    : bool  = false
 var enemy_type : int   = 0   # 0=slime 1=goblin 2=skeleton 3=orc 4=shadow
 var boss_stage : int   = 1   # 1-10
 
+var wave_id          : int   = -1
 var is_poisoned      : bool  = false
+var poison_stacks    : int   = 0
 var poison_timer     : float = 0.0
 var damage_taken_mult: float = 1.0
+var is_taunted       : bool  = false
+var _taunt_timer     : float = 0.0
 
 var _path          : Array   = []
 var _current_wp    : int     = 1
 var _anim_time     : float   = 0.0
-var _slow_timer    : float   = 0.0
+var _slow_timer      : float   = 0.0
+var _chrono_timer    : float   = 0.0   # chrono mage stackable 15% slow timer
+var _mild_slow_timer : float   = 0.0   # dual debuff: 10% slow, 1s
+var _frost_slow_timer: float   = 0.0   # frost herald: 5% slow, 2s
+
+var brittle_bonus       : float   = 0.0   # stone guardian: next hit deals +20 extra damage
+var _brittle_popin_t    : float   = 0.0   # 0→0.15 scale-in animation
+var _brittle_shatter_t  : float   = 0.0   # 0→0.3 shatter animation when consumed
+var _brittle_frags      : Array   = []    # [{x,y,vx,vy,t}] shatter fragments
 var _base_speed    : float   = 0.0
 var _travel_dir    : Vector2 = Vector2.RIGHT
 var _wobble_offset : Vector2 = Vector2.ZERO
 
 var _dot_timer          : float   = 0.0
 var _dead               : bool    = false
+var _dying              : bool    = false  # body hidden, waiting for floats to finish
+
+var _dmg_floats         : Array   = []   # [{val, x, y, timer}] floating damage numbers
 
 var is_bleeding         : bool    = false
 var _bleed_trail        : Array   = []   # Array of {pos: Vector2, age: float}
@@ -57,10 +72,59 @@ func setup(path: Array, enemy_hp: float, enemy_speed: float,
 	add_to_group("enemies")
 
 
+func apply_mild_slow(duration: float) -> void:
+	_mild_slow_timer = max(_mild_slow_timer, duration)
+	_recalc_speed()
+
+func apply_frost_slow(duration: float) -> void:
+	_frost_slow_timer = max(_frost_slow_timer, duration)
+	_recalc_speed()
+
+func is_slowed() -> bool:
+	return _slow_timer > 0.0 or _chrono_timer > 0.0 or _mild_slow_timer > 0.0 or _frost_slow_timer > 0.0
+
 func apply_slow(duration: float, factor: float = 0.5) -> void:
 	if _base_speed > 0.0:
-		speed       = _base_speed * factor
 		_slow_timer = max(_slow_timer, duration)
+		_recalc_speed()
+
+func apply_chrono_slow(duration: float) -> void:
+	# Chrono Mage: 15% slow, stacks multiplicatively with apply_slow
+	_chrono_timer = max(_chrono_timer, duration)
+	_recalc_speed()
+
+func _recalc_speed() -> void:
+	if _base_speed <= 0.0:
+		return
+	if is_taunted:
+		speed = 0.0
+		return
+	var s := _base_speed
+	if _slow_timer > 0.0:
+		s *= 0.75 if is_boss else 0.5    # regular slow: 50% (25% on bosses)
+	if _chrono_timer > 0.0:
+		s *= 0.925 if is_boss else 0.85  # chrono slow: 15% (7.5% on bosses)
+	if _mild_slow_timer > 0.0:
+		s *= 0.90                        # dual debuff: 10% slow (no boss resistance)
+	if _frost_slow_timer > 0.0:
+		s *= 0.95                        # frost herald: 5% slow
+	speed = s
+
+func _recalc_damage_mult() -> void:
+	var mult         := 1.0
+	var poison_bonus : float = 0.10 if not is_boss else 0.05
+	mult += poison_stacks * poison_bonus
+	var taunt_bonus  : float = 0.20 if not is_boss else 0.10
+	if is_taunted:
+		mult += taunt_bonus
+	damage_taken_mult = mult
+
+func apply_taunt(duration: float) -> void:
+	is_taunted   = true
+	var eff_dur  : float = duration * (0.5 if is_boss else 1.0)
+	_taunt_timer = max(_taunt_timer, eff_dur)
+	_recalc_speed()
+	_recalc_damage_mult()
 
 
 func apply_bleed() -> void:
@@ -69,9 +133,10 @@ func apply_bleed() -> void:
 
 
 func apply_poison(duration: float) -> void:
-	is_poisoned       = true
-	poison_timer      = duration
-	damage_taken_mult = 1.1
+	is_poisoned   = true
+	poison_timer  = max(poison_timer, duration)   # refresh duration, don't shorten
+	poison_stacks = min(poison_stacks + 1, 3)
+	_recalc_damage_mult()
 
 
 func pushback() -> void:
@@ -80,11 +145,23 @@ func pushback() -> void:
 	_knockback_active   = true
 	_knockback_timer    = 0.0
 	_knockback_start    = position
-	_knockback_end      = position - _travel_dir * 100.0
+	_knockback_end      = position - _travel_dir * 70.0
 	_knockback_arc_y    = 0.0
 
 
 func _process(delta: float) -> void:
+	# Dying: only tick floats, then free
+	if _dying:
+		if not _dmg_floats.is_empty():
+			for i in range(_dmg_floats.size() - 1, -1, -1):
+				_dmg_floats[i]["timer"] -= delta
+				_dmg_floats[i]["y"]     += delta * 38.0
+				if _dmg_floats[i]["timer"] <= 0.0:
+					_dmg_floats.remove_at(i)
+			queue_redraw()
+		else:
+			queue_free()
+		return
 	_anim_time += delta
 	if _knockback_active:
 		_knockback_timer += delta
@@ -112,15 +189,53 @@ func _process(delta: float) -> void:
 		if _bleed_trail[i]["age"] >= 1.5:
 			_bleed_trail.remove_at(i)
 
+	var _speed_changed := false
 	if _slow_timer > 0.0:
 		_slow_timer -= delta
-		if _slow_timer <= 0.0 and _base_speed > 0.0:
-			speed = _base_speed
+		if _slow_timer <= 0.0:
+			_slow_timer = 0.0
+			_speed_changed = true
+	if _chrono_timer > 0.0:
+		_chrono_timer -= delta
+		if _chrono_timer <= 0.0:
+			_chrono_timer = 0.0
+			_speed_changed = true
+	if _mild_slow_timer > 0.0:
+		_mild_slow_timer -= delta
+		if _mild_slow_timer <= 0.0:
+			_mild_slow_timer = 0.0
+			_speed_changed = true
+	if _frost_slow_timer > 0.0:
+		_frost_slow_timer -= delta
+		if _frost_slow_timer <= 0.0:
+			_frost_slow_timer = 0.0
+			_speed_changed = true
+	if _speed_changed:
+		_recalc_speed()
+	# Brittle icon pop-in
+	if _brittle_popin_t > 0.0:
+		_brittle_popin_t = max(0.0, _brittle_popin_t - delta)
+	# Brittle shatter animation
+	if _brittle_shatter_t > 0.0:
+		_brittle_shatter_t = max(0.0, _brittle_shatter_t - delta)
+		for _bf in _brittle_frags:
+			_bf["x"] += _bf["vx"] * delta
+			_bf["y"] += _bf["vy"] * delta
+			_bf["vy"] += 180.0 * delta   # gravity
+		if _brittle_shatter_t <= 0.0:
+			_brittle_frags.clear()
+	if _taunt_timer > 0.0:
+		_taunt_timer -= delta
+		if _taunt_timer <= 0.0:
+			is_taunted = false
+			_recalc_speed()
+			_recalc_damage_mult()
 	if poison_timer > 0.0:
 		poison_timer -= delta
 		if poison_timer <= 0.0:
-			is_poisoned       = false
-			damage_taken_mult = 1.0
+			is_poisoned   = false
+			poison_stacks = 0
+			_recalc_damage_mult()
 	if GameData.buff_dot_dps > 0.0:
 		_dot_timer += delta
 		if _dot_timer >= 1.0:
@@ -129,6 +244,7 @@ func _process(delta: float) -> void:
 	if _current_wp >= _path.size():
 		if not _dead:
 			_dead = true
+			remove_from_group("enemies")   # match the take_damage() path
 			reached_end.emit()
 			queue_free()
 		return
@@ -139,26 +255,76 @@ func _process(delta: float) -> void:
 	else:
 		var dir : Vector2 = to_target.normalized()
 		_travel_dir = dir
-		position += dir * speed * delta
+		position += dir * minf(speed * delta, to_target.length())
 	# Perpendicular wobble — oscillates sideways relative to travel direction
 	var perp : Vector2 = Vector2(-_travel_dir.y, _travel_dir.x)
 	var amp  : float   = 4.0 if not is_boss else 2.5
 	_wobble_offset = perp * sin(_anim_time * 5.5) * amp
+	# Tick floating damage numbers
+	if not _dmg_floats.is_empty():
+		for i in range(_dmg_floats.size() - 1, -1, -1):
+			_dmg_floats[i]["timer"] -= delta
+			_dmg_floats[i]["y"]     += delta * 38.0
+			if _dmg_floats[i]["timer"] <= 0.0:
+				_dmg_floats.remove_at(i)
 	queue_redraw()
 
 
 func take_damage(amount: float) -> void:
 	if _dead:
 		return
-	hp = max(0.0, hp - amount * damage_taken_mult)
+	var _brittle := brittle_bonus
+	if _brittle > 0.0:
+		brittle_bonus      = 0.0
+		_brittle_shatter_t = 0.3
+		_brittle_frags.clear()
+		# Spawn 6 small rock fragments flying outward from icon position
+		var _icon_x : float = (35.0 if not is_boss else 50.0)
+		var _icon_y : float = -46.0 if is_boss else -30.0
+		for _fi in range(6):
+			var _fa : float = _fi * TAU / 6.0 + randf_range(-0.3, 0.3)
+			var _fspd : float = randf_range(30.0, 70.0)
+			_brittle_frags.append({
+				"x": _icon_x, "y": _icon_y,
+				"vx": cos(_fa) * _fspd, "vy": sin(_fa) * _fspd - 20.0,
+				"t": randf_range(0.05, 0.12)
+			})
+	else:
+		brittle_bonus = 0.0
+	var _actual : float = (amount + _brittle) * damage_taken_mult
+	hp = max(0.0, hp - _actual)
+	# Spawn floating damage number (only if enabled in settings)
+	if GameData.show_damage_numbers:
+		var _x_jitter : float = randf_range(-6.0, 6.0)
+		_dmg_floats.append({"val": _actual, "x": _x_jitter, "y": 0.0, "timer": 1.0})
 	queue_redraw()
 	if hp <= 0.0:
-		_dead = true
+		_dead  = true
+		_dying = true
+		remove_from_group("enemies")   # stop towers targeting this enemy
 		died.emit(reward)
-		queue_free()
+		# Don't queue_free yet — let floats finish (_process will free when done)
 
 
 func _draw() -> void:
+	# Dying: only draw the floating numbers, nothing else
+	if _dying:
+		if not _dmg_floats.is_empty():
+			var _fnt  : Font  = ThemeDB.fallback_font
+			var _fnsz : int   = 14
+			var _by   : float = -38.0 if is_boss else -28.0
+			for _df in _dmg_floats:
+				var _t     : float   = _df["timer"] as float
+				var _alpha : float   = _t * _t
+				var _txt   : String  = "%.0f" % (_df["val"] as float)
+				var _tw    : float   = _fnt.get_string_size(_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, _fnsz).x
+				var _pos   : Vector2 = Vector2(_df["x"] - _tw * 0.5, _by - _df["y"])
+				draw_string(_fnt, _pos + Vector2(1, 1), _txt,
+					HORIZONTAL_ALIGNMENT_LEFT, -1, _fnsz, Color(0.0, 0.0, 0.0, _alpha * 0.80))
+				draw_string(_fnt, _pos, _txt,
+					HORIZONTAL_ALIGNMENT_LEFT, -1, _fnsz, Color(1.0, 0.95, 0.25, _alpha))
+		return
+
 	# Bleed trail — drawn in world-relative local coords before any transform
 	for entry in _bleed_trail:
 		var age_frac : float   = entry["age"]
@@ -182,11 +348,20 @@ func _draw() -> void:
 		_draw_boss()
 	else:
 		_draw_enemy()
-	if _slow_timer > 0.0:
-		var sa := clampf(_slow_timer, 0.0, 1.0)
-		var r   := 22.0 if is_boss else 16.0
+	if is_slowed():
+		# Use the longest remaining slow timer for alpha, so faint slows still show
+		var sa := clampf(maxf(maxf(_slow_timer, _chrono_timer), maxf(_mild_slow_timer, _frost_slow_timer)), 0.0, 1.0)
+		# Clamp to a visible minimum so short-duration slows (e.g. 5%) are always readable
+		sa = maxf(sa, 0.35)
+		var r  := 24.0 if is_boss else 18.0
 		draw_circle(Vector2.ZERO, r, Color(0.45, 0.82, 1.0, 0.18 * sa))
-		draw_arc(Vector2.ZERO, r, 0.0, TAU, 20, Color(0.55, 0.90, 1.0, 0.55 * sa), 1.5)
+		draw_arc(Vector2.ZERO, r, 0.0, TAU, 24, Color(0.55, 0.90, 1.0, 0.60 * sa), 2.0)
+		# Rotating accent tick marks so the ring looks like a frost effect
+		var tick_angle := fmod(_anim_time * 1.2, TAU)
+		for t in range(6):
+			var a : float = tick_angle + t * (TAU / 6.0)
+			var p : Vector2 = Vector2(cos(a), sin(a)) * r
+			draw_line(p * 0.82, p, Color(0.75, 0.95, 1.0, 0.70 * sa), 1.5)
 	if is_poisoned:
 		var pa := 0.18 + sin(_anim_time * 5.0) * 0.08
 		var pr  := 22.0 if is_boss else 16.0
@@ -195,6 +370,24 @@ func _draw() -> void:
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	# HP bar stays fixed (no wobble)
 	_draw_hp_bar()
+	# Floating damage numbers
+	if not _dmg_floats.is_empty():
+		var _fnt  : Font  = ThemeDB.fallback_font
+		var _fnsz : int   = 14
+		var _by   : float = -38.0 if is_boss else -28.0
+		for _df in _dmg_floats:
+			var _t     : float   = _df["timer"] as float
+			var _alpha : float   = _t * _t
+			var _txt   : String  = "%.0f" % (_df["val"] as float)
+			# Centre horizontally over the hit point
+			var _tw    : float   = _fnt.get_string_size(_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, _fnsz).x
+			var _pos   : Vector2 = Vector2(_df["x"] - _tw * 0.5, _by - _df["y"])
+			# Dark shadow for readability
+			draw_string(_fnt, _pos + Vector2(1, 1), _txt,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, _fnsz, Color(0.0, 0.0, 0.0, _alpha * 0.80))
+			# Bright yellow-white number
+			draw_string(_fnt, _pos, _txt,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, _fnsz, Color(1.0, 0.95, 0.25, _alpha))
 
 
 func _draw_hp_bar() -> void:
@@ -209,6 +402,31 @@ func _draw_hp_bar() -> void:
 	elif frac > 0.25: col = Color(0.95, 0.65, 0.10)
 	else:             col = Color(0.95, 0.15, 0.15)
 	draw_rect(Rect2(bx, by, bar_w * frac, bar_h), col)
+
+	# Brittle debuff icon — cracked earth, drawn to the right of the HP bar
+	var _icon_cx : float = bx + bar_w + 9.0
+	var _icon_cy : float = by + bar_h * 0.5
+	if brittle_bonus > 0.0:
+		# Pop-in scale: 0.15s → goes from 0 to 1 with slight overshoot
+		var _raw_t  : float = 1.0 - (_brittle_popin_t / 0.15)
+		var _scale  : float = 1.1 - 0.1 * cos(_raw_t * PI) if _brittle_popin_t > 0.0 else 1.0
+		var ir      : float = 5.0 * _scale
+		draw_set_transform(Vector2(_icon_cx, _icon_cy), 0.0, Vector2.ONE)
+		draw_circle(Vector2.ZERO, ir, Color(0.62, 0.42, 0.20))
+		draw_arc(Vector2.ZERO, ir, 0.0, TAU, 20, Color(0.82, 0.60, 0.28), 1.0)
+		for _ci in range(6):
+			var _ca  : float = _ci * TAU / 6.0
+			var _len : float = ir * (0.5 if _ci % 2 == 0 else 0.85)
+			draw_line(Vector2.ZERO,
+					  Vector2(cos(_ca) * _len, sin(_ca) * _len),
+					  Color(0.20, 0.12, 0.06), 1.0)
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	# Shatter fragments when brittle is consumed
+	if _brittle_shatter_t > 0.0:
+		var _sf_alpha : float = _brittle_shatter_t / 0.3
+		for _bf in _brittle_frags:
+			draw_circle(Vector2(_bf["x"], _bf["y"]), _bf["t"] * 6.0,
+						Color(0.58, 0.38, 0.18, _sf_alpha))
 
 
 func _draw_enemy() -> void:
