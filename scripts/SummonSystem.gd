@@ -210,7 +210,7 @@ const TURRET_DEFS : Dictionary = {
 	},
 	"hercules": {
 		"id": "hercules", "name": "Hercules", "rarity": "legendary", "idx": 32,
-		"desc": "Strikes 2 enemies at once.\nGains +5 permanent damage per wave cleared.",
+		"desc": "Strikes 2 enemies at once.\nGains +5 permanent damage when a full wave is cleared without losing any lives.",
 		"cost": 0, "damage": 50.0, "range": 130.0, "fire_rate": 0.8,
 		"color": Color(0.85, 0.65, 0.10), "effect": "hercules_cleave",
 	},

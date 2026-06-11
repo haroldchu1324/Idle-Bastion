@@ -10,6 +10,7 @@ signal start_battle_pressed
 signal buff_chosen(buff_id: String)
 signal upgrade_purchased(idx: int, cost: int)
 signal prestige_confirmed
+signal game_left
 signal roll_turret_requested
 signal roll_rare_requested
 signal roll_epic_requested
@@ -51,6 +52,7 @@ var _boss_lbl       : Label
 var _boss_hp_fill   : ColorRect
 var _boss_hp_lbl    : Label
 var _boss_timer_lbl : Label
+var _boss_timer_val : float = 0.0   # tracked each refresh for urgency animation
 var _notify_lbl     : Label
 var _notify_tween   : Tween = null
 
@@ -128,6 +130,18 @@ var _hero_det_eff       : Label    = null
 var _hero_det_desc      : Label    = null
 var _hero_det_ability   : Label    = null
 var _hero_det_select    : Button   = null
+var _hero_det_level_lbl      : Label     = null
+var _hero_det_copies_lbl     : Label     = null
+var _hero_det_xp_fill        : ColorRect = null
+var _hero_det_talent_avail   : Label     = null
+var _hero_det_talent_icons   : Control   = null
+var _hero_det_allocate_btn   : Button    = null
+var _hero_talent_panel       : Control   = null
+var _hero_talent_hero_id     : String    = ""
+var _hero_talent_dmg_count   : Label     = null
+var _hero_talent_rng_count   : Label     = null
+var _hero_talent_fr_count    : Label     = null
+var _hero_talent_avail_count : Label     = null
 var _hero_sel_preview   : Node2D   = null
 var _hero_sel_name      : Label    = null
 var _hero_sel_stats     : Label    = null
@@ -194,6 +208,11 @@ const GACHA_CARD_SLOT      : int   = 120
 const GACHA_STRIP_COUNT    : int   = 60
 const GACHA_WIN_IDX        : int   = 48
 
+const HERO_COMMON_IDS    : Array = ["knight", "ranger", "guardian"]
+const HERO_RARE_IDS      : Array = ["arcane_scholar", "shadow_blade", "frost_herald"]
+const HERO_EPIC_IDS      : Array = ["storm_knight", "blade_dancer", "venom_lord"]
+const HERO_LEGENDARY_IDS : Array = ["dragon_sovereign", "void_walker", "phoenix_archer"]
+
 var _gacha_spinning       : bool          = false
 var _gacha_is_multi       : bool          = false
 var _gacha_multi_results  : Array         = []
@@ -201,6 +220,10 @@ var _gacha_strip          : Control       = null
 var _gacha_summon_btn     : Button        = null
 var _gacha_summon_10_btn  : Button        = null
 var _gacha_gem_lbl        : Label         = null
+var _gacha_mode           : String        = "tower"
+var _gacha_title_lbl      : Label         = null
+var _gacha_tab_tower_btn  : Button        = null
+var _gacha_tab_hero_btn   : Button        = null
 var _gacha_result_panel   : Control       = null
 var _gacha_result_inner   : Control       = null
 var _gacha_result_title   : Label         = null
@@ -281,6 +304,7 @@ func refresh(gold: int, lives: int, stage: int, wave_in_stage: int, total_waves:
 	_wave_lbl.text  = "Wave %d / %d" % [wave_in_stage, total_waves]
 
 	if boss_active:
+		_boss_timer_val   = boss_timer
 		_boss_bar.visible = true
 		var frac : float = clampf(boss_hp / boss_max_hp, 0.0, 1.0)
 		_boss_hp_fill.size.x = 430.0 * frac
@@ -293,7 +317,8 @@ func refresh(gold: int, lives: int, stage: int, wave_in_stage: int, total_waves:
 			fill_col = Color(0.95, 0.15, 0.15)
 		_boss_hp_fill.color = fill_col
 		_boss_hp_lbl.text   = "%d / %d" % [int(boss_hp), int(boss_max_hp)]
-		_boss_timer_lbl.text = "⏱  %d s" % ceili(boss_timer)
+		if boss_timer > 10.0:
+			_boss_timer_lbl.text = "⏱  %d s" % ceili(boss_timer)
 		wave_btn.text = "⏳  Boss Active..."
 		_set_btn_color(C_BTN_OFF)
 	elif wave_active:
@@ -579,6 +604,7 @@ func _build_wave_label() -> void:
 	_boss_timer_lbl = _label("60 s", _font_bold, 14, Color(1.0, 0.65, 0.30))
 	_boss_timer_lbl.position             = Vector2(518, 0)
 	_boss_timer_lbl.size                 = Vector2(92, 40)
+	_boss_timer_lbl.pivot_offset         = Vector2(46, 20)
 	_boss_timer_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_boss_timer_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
 	_boss_timer_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
@@ -900,12 +926,44 @@ func _refresh_rarity_modal() -> void:
 				lbl.text = "%d%%" % val if val > 0 else "—"
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if is_instance_valid(_buff_tooltip) and _buff_tooltip.visible:
 		var mp : Vector2 = get_global_mouse_position()
 		var tx : float = clampf(mp.x + 14.0, 0.0, 1280.0 - _buff_tooltip.size.x)
 		var ty : float = clampf(mp.y - _buff_tooltip.size.y - 6.0, 0.0, 720.0 - _buff_tooltip.size.y)
 		_buff_tooltip.position = Vector2(tx, ty)
+
+	# Boss timer urgency animation + smooth decimal countdown
+	if is_instance_valid(_boss_timer_lbl) and _boss_bar.visible \
+			and _boss_timer_val > 0.0 and _boss_timer_val <= 10.0:
+		# Decrement locally each frame so the display is smooth between refresh() calls
+		_boss_timer_val = maxf(_boss_timer_val - delta, 0.0)
+		_boss_timer_lbl.text = "⏱  %.2f s" % _boss_timer_val
+
+		var ms   : float = float(Time.get_ticks_msec())
+		var t    : float = clampf(1.0 - _boss_timer_val / 10.0, 0.0, 1.0)
+		var t_sq : float = t * t
+
+		# Color: orange → intense red
+		_boss_timer_lbl.add_theme_color_override("font_color",
+				Color(1.0, 0.65, 0.30).lerp(Color(1.0, 0.10, 0.10), t))
+
+		# Scale: base grows 1.0 → 1.5 as timer approaches 0, small pulse on top
+		var pulse_raw  : float = sin(ms * lerp(0.0045, 0.0095, t))
+		var pulse_ease : float = 0.5 + 0.5 * (pulse_raw * abs(pulse_raw))
+		var pulse_s    : float = lerp(1.0, 1.5, t_sq) + lerp(0.0, 0.10, t_sq) * pulse_ease
+		_boss_timer_lbl.scale = Vector2(pulse_s, pulse_s)
+
+		# Shake: subtle, two overlapping sine waves, amplitude grows with t²
+		var shake_amp : float = t_sq * 2.0
+		var sx : float = sin(ms * 0.071) * shake_amp + sin(ms * 0.033) * shake_amp * 0.35
+		var sy : float = cos(ms * 0.089) * shake_amp * 0.55
+		_boss_timer_lbl.position = Vector2(518.0, 0.0) + Vector2(sx, sy)
+	elif is_instance_valid(_boss_timer_lbl):
+		_boss_timer_lbl.add_theme_color_override("font_color", Color(1.0, 0.65, 0.30))
+		_boss_timer_lbl.scale    = Vector2.ONE
+		_boss_timer_lbl.position = Vector2(518.0, 0.0)
+
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -1739,7 +1797,7 @@ func show_tower_info(tower, merge_count: int = 0) -> void:
 		"arcane_overload": "Every 5th attack triggers Arcane Overload — instant lasers hit ALL enemies in range (minimum 5 lasers). Counter never resets.",
 		"arcane_charge": "Persistent charge counter — every 15th hit fires a blue ray hitting all enemies in range. Counter never resets.",
 		"lock_beam":     "Locks onto one target until it dies or leaves range. Beam damage ramps from 1× to 1.5× over 5 seconds of continuous fire.",
-		"tempest_strike":         "Every 10th hit deals bonus damage equal to 5% of the target's total max HP.",
+		"tempest_strike":         "Every 10th hit launches a slash that deals base damage + 5% of the target's max HP on impact.",
 		"infernal_serpent_summon":"Each hit has a 10% chance to summon a living fire serpent (100 damage per bite) that races around the battlefield once.",
 		"lightning":     "Chains to the primary target and up to 3 additional enemies at 80% damage.",
 		"storm_chain":   "Strikes the primary target for full damage, then chains to the 4 nearest enemies globally for 150% damage. Chain targets can be outside the tower's range.",
@@ -1869,56 +1927,91 @@ func show_notification(msg: String) -> void:
 # GAME OVER SCREEN
 # ══════════════════════════════════════════════════════════════════════════════
 
-func show_run_results(stage: int, kills: int, bosses: int, gems: int, turrets: Array, victory: bool = false) -> void:
+func show_run_results(stage: int, kills: int, bosses: int, gems: int, turrets: Array, victory: bool = false, wave: int = 0) -> void:
 	_run_results_screen.visible = true
-	var title_lbl  : Label = _run_results_screen.get_node("title")
-	var stage_lbl  : Label = _run_results_screen.get_node("stage")
-	var kills_lbl  : Label = _run_results_screen.get_node("kills")
-	var gems_lbl   : Label = _run_results_screen.get_node("gems")
-	var loot_box   : Control = _run_results_screen.get_node("loot_box")
+
+	var title_lbl     : Label   = _run_results_screen.get_node("title")
+	var stage_lbl     : Label   = _run_results_screen.get_node("stage_info")
+	var wave_lbl      : Label   = _run_results_screen.get_node("wave_info")
+	var kills_lbl     : Label   = _run_results_screen.get_node("kills")
+	var gems_earn_lbl : Label   = _run_results_screen.get_node("gems_earned")
+	var gems_tot_lbl  : Label   = _run_results_screen.get_node("gems_total")
+	var tower_grid    : Control = _run_results_screen.get_node("tower_grid")
 
 	title_lbl.text = "🏆  Victory!" if victory else "💀  Defeated"
 	title_lbl.add_theme_color_override("font_color", C_GOLD if victory else C_RED)
-	stage_lbl.text = "Stage %d reached" % stage
-	kills_lbl.text = "⚔  Enemies slain:  %d  (%d bosses)" % [kills, bosses]
-	gems_lbl.text  = "🔷  Blue Gems earned:  +%d  (total: %d)" % [gems, GameData.blue_gems]
+	stage_lbl.text     = "Stage %d" % stage
+	wave_lbl.text      = "Wave %d" % wave if wave > 0 else ""
+	kills_lbl.text     = "⚔  %d enemies slain  (%d bosses)" % [kills, bosses]
+	gems_earn_lbl.text = "+%d  🔷  Blue Gems" % gems
+	gems_tot_lbl.text  = "Total: %d" % GameData.blue_gems
 
-	for child in loot_box.get_children():
+	for child in tower_grid.get_children():
 		child.queue_free()
+
+	# Group towers by idx so duplicates show as a count
+	var grouped : Dictionary = {}
+	for td in turrets:
+		var tidx : int = td.get("idx", -1)
+		if grouped.has(tidx):
+			grouped[tidx]["count"] += 1
+		else:
+			grouped[tidx] = {"data": td, "count": 1}
+
+	# Sort fusion → legendary → epic → rare → common, then by idx
+	var rarity_order := {"fusion": 0, "legendary": 1, "epic": 2, "rare": 3, "common": 4}
+	var sorted_keys  : Array = grouped.keys()
+	sorted_keys.sort_custom(func(a, b) -> bool:
+		var ra : int = rarity_order.get(grouped[a]["data"].get("rarity", "common"), 4)
+		var rb : int = rarity_order.get(grouped[b]["data"].get("rarity", "common"), 4)
+		if ra != rb:
+			return ra < rb
+		return a < b
+	)
 
 	var rarity_colors := {
 		"common": Color(0.75, 0.75, 0.75), "rare": Color(0.25, 0.55, 1.00),
 		"epic": Color(0.72, 0.25, 0.90), "legendary": Color(1.00, 0.72, 0.10),
 		"fusion": Color(0.20, 1.00, 0.85),
 	}
+	const CARD_W : int = 58
+	const CARD_H : int = 76
+	const GAP    : int = 4
+	const COLS   : int = 10
+
 	var col : int = 0
 	var row : int = 0
-	const COLS : int = 6
-	const CARD_W : int = 160
-	const CARD_H : int = 60
-	const GAP    : int = 10
-	for td in turrets:
-		var name   : String = td.get("name", "?")
-		var rarity : String = td.get("rarity", "common")
-		var rc     : Color  = rarity_colors.get(rarity, C_WHITE)
-		var card   := Panel.new()
+	for tidx in sorted_keys:
+		var entry  : Dictionary = grouped[tidx]
+		var td     : Dictionary = entry["data"]
+		var count  : int        = entry["count"]
+		var rarity : String     = td.get("rarity", "common")
+		var rc     : Color      = rarity_colors.get(rarity, C_WHITE)
+
+		var card := Panel.new()
 		card.position = Vector2(col * (CARD_W + GAP), row * (CARD_H + GAP))
 		card.size     = Vector2(CARD_W, CARD_H)
 		var cs := StyleBoxFlat.new()
-		cs.bg_color = Color(rc.r * 0.18, rc.g * 0.18, rc.b * 0.18, 1.0)
-		cs.corner_radius_top_left = 6; cs.corner_radius_top_right = 6
-		cs.corner_radius_bottom_left = 6; cs.corner_radius_bottom_right = 6
+		cs.bg_color = Color(rc.r * 0.14, rc.g * 0.14, rc.b * 0.14, 1.0)
+		cs.corner_radius_top_left = 5; cs.corner_radius_top_right = 5
+		cs.corner_radius_bottom_left = 5; cs.corner_radius_bottom_right = 5
 		cs.border_width_left = 2; cs.border_width_right = 2
 		cs.border_width_top  = 2; cs.border_width_bottom = 2
 		cs.border_color = rc
 		card.add_theme_stylebox_override("panel", cs)
-		loot_box.add_child(card)
-		var lbl := _label(name, _font_bold, 14, rc)
-		lbl.position             = Vector2(0, 0)
-		lbl.size                 = Vector2(CARD_W, CARD_H)
-		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-		card.add_child(lbl)
+		tower_grid.add_child(card)
+
+		var prev := _TurretPreview.new()
+		prev.turret_data = td
+		prev.position    = Vector2(1, 2)
+		card.add_child(prev)
+
+		var count_lbl := _label("×%d" % count, _font_bold, 11, rc)
+		count_lbl.position             = Vector2(0, CARD_H - 16)
+		count_lbl.size                 = Vector2(CARD_W, 16)
+		count_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		card.add_child(count_lbl)
+
 		col += 1
 		if col >= COLS:
 			col = 0
@@ -1926,6 +2019,11 @@ func show_run_results(stage: int, kills: int, bosses: int, gems: int, turrets: A
 
 
 func _build_run_results_screen() -> void:
+	const LW  : int = 640   # left column usable width
+	const RX  : int = 662   # right column start x
+	const RW  : int = 598   # right column width
+	const PAD : int = 20
+
 	var overlay := Panel.new()
 	var bg_s := StyleBoxFlat.new()
 	bg_s.bg_color = Color(0.04, 0.04, 0.10)
@@ -1939,48 +2037,107 @@ func _build_run_results_screen() -> void:
 	add_child(overlay)
 	_run_results_screen = overlay
 
-	var title := _label("", _font_bold, 36, C_GOLD)
+	# Vertical column divider
+	var vdiv := ColorRect.new()
+	vdiv.color        = Color(1, 1, 1, 0.07)
+	vdiv.position     = Vector2(LW + PAD, 16)
+	vdiv.size         = Vector2(2, 688)
+	vdiv.mouse_filter = MOUSE_FILTER_IGNORE
+	overlay.add_child(vdiv)
+
+	# ── Left column: tower grid ───────────────────────────────────────────────
+	var left_hdr := _label("🗼  Towers on Field", _font_bold, 17, C_DIM)
+	left_hdr.position             = Vector2(PAD, 16)
+	left_hdr.size                 = Vector2(LW - PAD, 26)
+	left_hdr.mouse_filter         = MOUSE_FILTER_IGNORE
+	overlay.add_child(left_hdr)
+
+	var hdiv_l := ColorRect.new()
+	hdiv_l.color        = Color(1, 1, 1, 0.07)
+	hdiv_l.position     = Vector2(PAD, 48)
+	hdiv_l.size         = Vector2(LW - PAD, 2)
+	hdiv_l.mouse_filter = MOUSE_FILTER_IGNORE
+	overlay.add_child(hdiv_l)
+
+	var tower_grid := Control.new()
+	tower_grid.name         = "tower_grid"
+	tower_grid.position     = Vector2(PAD, 58)
+	tower_grid.size         = Vector2(LW - PAD, 640)
+	tower_grid.mouse_filter = MOUSE_FILTER_IGNORE
+	overlay.add_child(tower_grid)
+
+	# ── Right column: stats ───────────────────────────────────────────────────
+	# Title
+	var title := _label("", _font_bold, 42, C_GOLD)
 	title.name                 = "title"
-	title.position             = Vector2(0, 30)
-	title.size                 = Vector2(1280, 60)
+	title.position             = Vector2(RX, 28)
+	title.size                 = Vector2(RW, 58)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.mouse_filter         = MOUSE_FILTER_IGNORE
 	overlay.add_child(title)
 
-	var stage_lbl := _label("", _font_bold, 22, C_WHITE)
-	stage_lbl.name                 = "stage"
-	stage_lbl.position             = Vector2(0, 100)
-	stage_lbl.size                 = Vector2(1280, 36)
+	# Stage reached
+	var stage_lbl := _label("", _font_bold, 34, C_WHITE)
+	stage_lbl.name                 = "stage_info"
+	stage_lbl.position             = Vector2(RX, 100)
+	stage_lbl.size                 = Vector2(RW, 48)
 	stage_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	stage_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
 	overlay.add_child(stage_lbl)
 
-	var kills_lbl := _label("", _font_bold, 20, C_DIM)
+	# Wave
+	var wave_lbl := _label("", _font_reg, 20, Color(0.72, 0.72, 0.85))
+	wave_lbl.name                 = "wave_info"
+	wave_lbl.position             = Vector2(RX, 152)
+	wave_lbl.size                 = Vector2(RW, 28)
+	wave_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	wave_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	overlay.add_child(wave_lbl)
+
+	# Kills
+	var kills_lbl := _label("", _font_bold, 17, C_DIM)
 	kills_lbl.name                 = "kills"
-	kills_lbl.position             = Vector2(0, 148)
-	kills_lbl.size                 = Vector2(1280, 32)
+	kills_lbl.position             = Vector2(RX, 190)
+	kills_lbl.size                 = Vector2(RW, 26)
 	kills_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	kills_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
 	overlay.add_child(kills_lbl)
 
-	var gems_lbl := _label("", _font_bold, 22, Color(0.45, 0.75, 1.0))
-	gems_lbl.name                 = "gems"
-	gems_lbl.position             = Vector2(0, 188)
-	gems_lbl.size                 = Vector2(1280, 32)
-	gems_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	overlay.add_child(gems_lbl)
+	# Divider
+	var hdiv_r := ColorRect.new()
+	hdiv_r.color        = Color(1, 1, 1, 0.07)
+	hdiv_r.position     = Vector2(RX, 232)
+	hdiv_r.size         = Vector2(RW - PAD, 2)
+	hdiv_r.mouse_filter = MOUSE_FILTER_IGNORE
+	overlay.add_child(hdiv_r)
 
-	var loot_title := _label("🗼  Turrets on Field", _font_bold, 18, C_DIM)
-	loot_title.position             = Vector2(80, 238)
-	loot_title.size                 = Vector2(400, 28)
-	overlay.add_child(loot_title)
+	# Rewards header
+	var rewards_hdr := _label("Rewards", _font_bold, 15, C_DIM)
+	rewards_hdr.position     = Vector2(RX + PAD, 246)
+	rewards_hdr.size         = Vector2(200, 22)
+	rewards_hdr.mouse_filter = MOUSE_FILTER_IGNORE
+	overlay.add_child(rewards_hdr)
 
-	var loot_box := Control.new()
-	loot_box.name     = "loot_box"
-	loot_box.position = Vector2(80, 272)
-	loot_box.size     = Vector2(1120, 340)
-	overlay.add_child(loot_box)
+	# Gems earned this run
+	var gems_earn_lbl := _label("", _font_bold, 26, Color(0.45, 0.75, 1.00))
+	gems_earn_lbl.name         = "gems_earned"
+	gems_earn_lbl.position     = Vector2(RX + PAD, 278)
+	gems_earn_lbl.size         = Vector2(RW - PAD * 2, 36)
+	gems_earn_lbl.mouse_filter = MOUSE_FILTER_IGNORE
+	overlay.add_child(gems_earn_lbl)
 
+	# Total gems
+	var gems_tot_lbl := _label("", _font_reg, 15, C_DIM)
+	gems_tot_lbl.name         = "gems_total"
+	gems_tot_lbl.position     = Vector2(RX + PAD, 320)
+	gems_tot_lbl.size         = Vector2(RW - PAD * 2, 22)
+	gems_tot_lbl.mouse_filter = MOUSE_FILTER_IGNORE
+	overlay.add_child(gems_tot_lbl)
+
+	# Continue button
 	var cont_btn := Button.new()
 	cont_btn.text         = "Continue  →"
-	cont_btn.position     = Vector2(1280 - 230, 720 - 75)
+	cont_btn.position     = Vector2(1280 - PAD - 200, 720 - 75)
 	cont_btn.size         = Vector2(200, 54)
 	cont_btn.focus_mode   = FOCUS_NONE
 	cont_btn.add_theme_font_override("font",           _font_bold)
@@ -1992,6 +2149,7 @@ func _build_run_results_screen() -> void:
 	cont_btn.add_theme_stylebox_override("focus",   _btn_style(C_BTN))
 	cont_btn.pressed.connect(func():
 		overlay.visible = false
+		Engine.time_scale = 1.0
 		_game_over_screen.visible = true
 	)
 	overlay.add_child(cont_btn)
@@ -2114,6 +2272,7 @@ func show_game_over(stage: int) -> void:
 
 
 func show_main_menu() -> void:
+	Engine.time_scale = 1.0
 	_go_title_lbl.text      = "🛡  IDLE BASTION"
 	_go_stage_lbl.visible   = false
 	_go_flavour_lbl.visible = false
@@ -2251,24 +2410,59 @@ func _build_shop_screen() -> void:
 
 	# ── Title ────────────────────────────────────────────────────────────────────
 	var title := _label("Tower  Gacha", _font_bold, 32, C_WHITE)
-	title.position             = Vector2(0, 18)
+	title.position             = Vector2(0, 10)
 	title.size                 = Vector2(1280, 46)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	overlay.add_child(title)
+	_gacha_title_lbl = title
 
 	var uline := ColorRect.new()
 	uline.color        = Color(0.55, 0.30, 0.90, 0.38)
-	uline.position     = Vector2(490, 64)
+	uline.position     = Vector2(490, 54)
 	uline.size         = Vector2(300, 2)
 	uline.mouse_filter = MOUSE_FILTER_IGNORE
 	overlay.add_child(uline)
 
 	# ── Gem display ──────────────────────────────────────────────────────────────
 	_gacha_gem_lbl = _label("🔷 0", _font_bold, 20, Color(0.50, 0.82, 1.0))
-	_gacha_gem_lbl.position             = Vector2(0, 72)
+	_gacha_gem_lbl.position             = Vector2(0, 62)
 	_gacha_gem_lbl.size                 = Vector2(1280, 28)
 	_gacha_gem_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	overlay.add_child(_gacha_gem_lbl)
+
+	# ── Mode tabs ─────────────────────────────────────────────────────────────────
+	const TAB_W : int = 180; const TAB_H : int = 32; const TAB_GAP : int = 12
+	var tab_x0  : int = (1280 - 2 * TAB_W - TAB_GAP) / 2
+
+	_gacha_tab_tower_btn = Button.new()
+	_gacha_tab_tower_btn.text       = "⚔  Towers"
+	_gacha_tab_tower_btn.position   = Vector2(tab_x0, 96)
+	_gacha_tab_tower_btn.size       = Vector2(TAB_W, TAB_H)
+	_gacha_tab_tower_btn.focus_mode = FOCUS_NONE
+	_gacha_tab_tower_btn.add_theme_font_override("font",           _font_bold)
+	_gacha_tab_tower_btn.add_theme_font_size_override("font_size", 15)
+	_gacha_tab_tower_btn.add_theme_color_override("font_color",    C_WHITE)
+	_gacha_tab_tower_btn.add_theme_stylebox_override("normal",  _btn_style(C_TAB_ACT))
+	_gacha_tab_tower_btn.add_theme_stylebox_override("hover",   _btn_style(C_TAB_ACT.lightened(0.1)))
+	_gacha_tab_tower_btn.add_theme_stylebox_override("pressed", _btn_style(C_TAB_ACT.darkened(0.15)))
+	_gacha_tab_tower_btn.add_theme_stylebox_override("focus",   _btn_style(C_TAB_ACT))
+	_gacha_tab_tower_btn.pressed.connect(func(): _gacha_switch_mode("tower"))
+	overlay.add_child(_gacha_tab_tower_btn)
+
+	_gacha_tab_hero_btn = Button.new()
+	_gacha_tab_hero_btn.text       = "✦  Heroes"
+	_gacha_tab_hero_btn.position   = Vector2(tab_x0 + TAB_W + TAB_GAP, 96)
+	_gacha_tab_hero_btn.size       = Vector2(TAB_W, TAB_H)
+	_gacha_tab_hero_btn.focus_mode = FOCUS_NONE
+	_gacha_tab_hero_btn.add_theme_font_override("font",           _font_bold)
+	_gacha_tab_hero_btn.add_theme_font_size_override("font_size", 15)
+	_gacha_tab_hero_btn.add_theme_color_override("font_color",    C_DIM)
+	_gacha_tab_hero_btn.add_theme_stylebox_override("normal",  _btn_style(C_TAB_IDLE))
+	_gacha_tab_hero_btn.add_theme_stylebox_override("hover",   _btn_style(C_TAB_IDLE.lightened(0.1)))
+	_gacha_tab_hero_btn.add_theme_stylebox_override("pressed", _btn_style(C_TAB_IDLE.darkened(0.15)))
+	_gacha_tab_hero_btn.add_theme_stylebox_override("focus",   _btn_style(C_TAB_IDLE))
+	_gacha_tab_hero_btn.pressed.connect(func(): _gacha_switch_mode("hero"))
+	overlay.add_child(_gacha_tab_hero_btn)
 
 	# ── Rarity odds pills ─────────────────────────────────────────────────────────
 	var odds_defs : Array = [
@@ -2292,7 +2486,7 @@ func _build_shop_screen() -> void:
 		ps2.border_width_top   = 1; ps2.border_width_bottom = 1
 		ps2.border_color = Color(pcol.r, pcol.g, pcol.b, 0.38)
 		pill.add_theme_stylebox_override("panel", ps2)
-		pill.position     = Vector2(pill_x0 + pi * (PILL_W + PILL_GAP), 106)
+		pill.position     = Vector2(pill_x0 + pi * (PILL_W + PILL_GAP), 138)
 		pill.size         = Vector2(PILL_W, PILL_H)
 		pill.mouse_filter = MOUSE_FILTER_IGNORE
 		overlay.add_child(pill)
@@ -2457,6 +2651,26 @@ func _build_shop_screen() -> void:
 # GACHA HELPERS
 # ─────────────────────────────────────────────────────────────────────────────
 
+func _gacha_switch_mode(mode: String) -> void:
+	if _gacha_spinning:
+		return
+	_gacha_mode = mode
+	var is_hero : bool = (mode == "hero")
+	if is_instance_valid(_gacha_title_lbl):
+		_gacha_title_lbl.text = "Hero  Gacha" if is_hero else "Tower  Gacha"
+	if is_instance_valid(_gacha_tab_tower_btn):
+		var tc : Color = C_TAB_IDLE if is_hero else C_TAB_ACT
+		_gacha_tab_tower_btn.add_theme_color_override("font_color", C_DIM if is_hero else C_WHITE)
+		_gacha_tab_tower_btn.add_theme_stylebox_override("normal", _btn_style(tc))
+		_gacha_tab_tower_btn.add_theme_stylebox_override("hover",  _btn_style(tc.lightened(0.1)))
+	if is_instance_valid(_gacha_tab_hero_btn):
+		var hc : Color = C_TAB_ACT if is_hero else C_TAB_IDLE
+		_gacha_tab_hero_btn.add_theme_color_override("font_color", C_WHITE if is_hero else C_DIM)
+		_gacha_tab_hero_btn.add_theme_stylebox_override("normal", _btn_style(hc))
+		_gacha_tab_hero_btn.add_theme_stylebox_override("hover",  _btn_style(hc.lightened(0.1)))
+	_gacha_rebuild_strip("")
+
+
 func _gacha_rebuild_strip(winning_id: String) -> void:
 	if not is_instance_valid(_gacha_strip):
 		return
@@ -2476,25 +2690,37 @@ func _gacha_rebuild_strip(winning_id: String) -> void:
 func _gacha_random_dummy() -> String:
 	var r : int = randi() % 100
 	var pool : Array
-	if r < 1:      pool = SummonSystem.LEGENDARY_IDS
-	elif r < 5:    pool = SummonSystem.EPIC_IDS
-	elif r < 25:   pool = SummonSystem.RARE_IDS
-	else:          pool = SummonSystem.COMMON_IDS
+	if _gacha_mode == "hero":
+		if r < 1:      pool = HERO_LEGENDARY_IDS
+		elif r < 5:    pool = HERO_EPIC_IDS
+		elif r < 25:   pool = HERO_RARE_IDS
+		else:          pool = HERO_COMMON_IDS
+	else:
+		if r < 1:      pool = SummonSystem.LEGENDARY_IDS
+		elif r < 5:    pool = SummonSystem.EPIC_IDS
+		elif r < 25:   pool = SummonSystem.RARE_IDS
+		else:          pool = SummonSystem.COMMON_IDS
 	return pool[randi() % pool.size()]
 
 
 func _gacha_roll_tower() -> String:
 	var r : int = randi() % 100
 	var pool : Array
-	if r < 1:      pool = SummonSystem.LEGENDARY_IDS
-	elif r < 5:    pool = SummonSystem.EPIC_IDS
-	elif r < 25:   pool = SummonSystem.RARE_IDS
-	else:          pool = SummonSystem.COMMON_IDS
+	if _gacha_mode == "hero":
+		if r < 1:      pool = HERO_LEGENDARY_IDS
+		elif r < 5:    pool = HERO_EPIC_IDS
+		elif r < 25:   pool = HERO_RARE_IDS
+		else:          pool = HERO_COMMON_IDS
+	else:
+		if r < 1:      pool = SummonSystem.LEGENDARY_IDS
+		elif r < 5:    pool = SummonSystem.EPIC_IDS
+		elif r < 25:   pool = SummonSystem.RARE_IDS
+		else:          pool = SummonSystem.COMMON_IDS
 	return pool[randi() % pool.size()]
 
 
 func _gacha_make_wheel_card(tower_id: String) -> Control:
-	var def    : Dictionary = SummonSystem.TURRET_DEFS.get(tower_id, {})
+	var def    : Dictionary = SummonSystem.TURRET_DEFS.get(tower_id, GameData.HERO_DEFS.get(tower_id, {}))
 	var rarity : String     = def.get("rarity", "common")
 	var rcol   : Color      = SummonSystem.RARITY_COLORS.get(rarity, C_WHITE)
 
@@ -2681,6 +2907,7 @@ func _gacha_build_result_popup(parent: Control) -> void:
 		_gacha_is_multi = false
 		_gacha_enable_summon_btns()
 		_refresh_tower_cards()
+		_refresh_hero_cards()
 	)
 	panel.add_child(ok_btn)
 
@@ -2785,13 +3012,14 @@ func _gacha_build_multi_panel(parent: Control) -> void:
 		_gacha_is_multi = false
 		_gacha_enable_summon_btns()
 		_refresh_tower_cards()
+		_refresh_hero_cards()
 	)
 	panel.add_child(collect_btn)
 
 
 func _gacha_make_mini_card(tower_id: String) -> Control:
 	const MCW : int = 180; const MCH : int = 104
-	var def    : Dictionary = SummonSystem.TURRET_DEFS.get(tower_id, {})
+	var def    : Dictionary = SummonSystem.TURRET_DEFS.get(tower_id, GameData.HERO_DEFS.get(tower_id, {}))
 	var rarity : String     = def.get("rarity", "common")
 	var rcol   : Color      = SummonSystem.RARITY_COLORS.get(rarity, C_WHITE)
 
@@ -3013,16 +3241,17 @@ func _gacha_award_and_show_multi() -> void:
 
 
 func _gacha_show_result(tower_id: String, old_level: int, new_level: int) -> void:
-	var def    : Dictionary = SummonSystem.TURRET_DEFS.get(tower_id, {})
+	var def    : Dictionary = SummonSystem.TURRET_DEFS.get(tower_id, GameData.HERO_DEFS.get(tower_id, {}))
 	var rarity : String     = def.get("rarity", "common")
 	var rcol   : Color      = SummonSystem.RARITY_COLORS.get(rarity, C_WHITE)
 
 	if is_instance_valid(_gacha_result_title):
+		var kind : String = "Hero" if _gacha_mode == "hero" else "Tower"
 		match rarity:
-			"legendary": _gacha_result_title.text = "** Legendary Tower! **"
-			"epic":      _gacha_result_title.text = "*  Epic Tower!"
-			"rare":      _gacha_result_title.text = "Rare Tower!"
-			_:           _gacha_result_title.text = "Tower  Received!"
+			"legendary": _gacha_result_title.text = "** Legendary %s! **" % kind
+			"epic":      _gacha_result_title.text = "*  Epic %s!" % kind
+			"rare":      _gacha_result_title.text = "Rare %s!" % kind
+			_:           _gacha_result_title.text = "%s  Received!" % kind
 
 	if _gacha_result_ps    != null: _gacha_result_ps.border_color    = Color(rcol.r, rcol.g, rcol.b, 0.65)
 	if _gacha_result_card_s != null: _gacha_result_card_s.border_color = Color(rcol.r, rcol.g, rcol.b, 0.80)
@@ -3083,7 +3312,7 @@ func _gacha_show_multi_result(level_ups: Array) -> void:
 
 	var counts : Dictionary = {"common": 0, "rare": 0, "epic": 0, "legendary": 0}
 	for tid in _gacha_multi_results:
-		var r : String = SummonSystem.TURRET_DEFS.get(tid, {}).get("rarity", "common")
+		var r : String = SummonSystem.TURRET_DEFS.get(tid, GameData.HERO_DEFS.get(tid, {})).get("rarity", "common")
 		if counts.has(r):
 			counts[r] += 1
 	var parts : Array = []
@@ -3096,7 +3325,7 @@ func _gacha_show_multi_result(level_ups: Array) -> void:
 	if level_ups.size() > 0:
 		var lup_parts : Array = []
 		for lu in level_ups:
-			var dname : String = SummonSystem.TURRET_DEFS.get(lu["id"], {}).get("name", lu["id"])
+			var dname : String = SummonSystem.TURRET_DEFS.get(lu["id"], GameData.HERO_DEFS.get(lu["id"], {})).get("name", lu["id"])
 			lup_parts.append("%s  Lv.%d->Lv.%d" % [dname, lu["old"], lu["new"]])
 		lvl_lbl.text = "   ·   ".join(lup_parts)
 	else:
@@ -3315,6 +3544,7 @@ func _build_world_map_screen() -> void:
 	sp_play.pressed.connect(func():
 		sp.visible      = false
 		overlay.visible = false
+		GameData.selected_world = _wm_selected_world
 		get_tree().reload_current_scene()
 	)
 	sp.add_child(sp_play)
@@ -3651,8 +3881,12 @@ func _hero_refresh_selected() -> void:
 	_hero_sel_name.text  = def.get("name", "")
 	var rcol : Color = _hero_rarity_color(def.get("rarity", "common"))
 	_hero_sel_name.add_theme_color_override("font_color", rcol)
+	var _sel_alloc : Dictionary = GameData.get_hero_talent_alloc(GameData.selected_hero_id)
+	var _sel_dmg   : float = def.get("damage",    0.0) + float(_sel_alloc.get("dmg", 0))
+	var _sel_rng   : float = def.get("range",     0.0) + float(_sel_alloc.get("rng", 0)) * 15.0
+	var _sel_fr    : float = def.get("fire_rate", 0.0) * (1.0 + float(_sel_alloc.get("fr", 0)) * 0.05)
 	_hero_sel_stats.text = "⚔ %.0f  ·  🎯 %.0f px  ·  🏹 %.1f/s  ·  %s" % [
-		def.get("damage", 0.0), def.get("range", 0.0), def.get("fire_rate", 0.0),
+		_sel_dmg, _sel_rng, _sel_fr,
 		def.get("effect", "none").replace("_", " ").capitalize()
 	]
 
@@ -3702,18 +3936,43 @@ func _hero_make_card(parent: Control, def: Dictionary,
 	rar_lbl.mouse_filter = MOUSE_FILTER_IGNORE
 	card.add_child(rar_lbl)
 
-	# Stat line
-	var stat_str := "⚔ %.0f  ·  🎯 %.0f  ·  🏹 %.1f/s" % [
-		def.get("damage", 0.0), def.get("range", 0.0), def.get("fire_rate", 0.0)]
+	# Stat line — show talent-boosted totals
+	var _alloc   : Dictionary = GameData.get_hero_talent_alloc(hero_id)
+	var _t_dmg   : float = def.get("damage",    0.0) + float(_alloc.get("dmg", 0))
+	var _t_rng   : float = def.get("range",     0.0) + float(_alloc.get("rng", 0)) * 15.0
+	var _t_fr    : float = def.get("fire_rate", 0.0) * (1.0 + float(_alloc.get("fr", 0)) * 0.05)
+	var stat_str := "⚔ %.0f  ·  🎯 %.0f  ·  🏹 %.1f/s" % [_t_dmg, _t_rng, _t_fr]
 	var stat_lbl := _label(stat_str, _font_reg, 13, C_DIM)
 	stat_lbl.position     = Vector2(66, 52)
 	stat_lbl.size         = Vector2(cw - 84, 18)
 	stat_lbl.mouse_filter = MOUSE_FILTER_IGNORE
 	card.add_child(stat_lbl)
 
+	# Level badge (top-right)
+	var lvl      : int = GameData.get_tower_level(hero_id)
+	var lvl_lbl  := _label("Lv.%d" % lvl, _font_bold, 14, C_GOLD)
+	lvl_lbl.position             = Vector2(cw - 54, 8)
+	lvl_lbl.size                 = Vector2(48, 18)
+	lvl_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	lvl_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	card.add_child(lvl_lbl)
+
+	# Copies badge (below level badge)
+	var copies_str : String
+	if lvl >= GameData.TOWER_MAX_LEVEL:
+		copies_str = "MAX"
+	else:
+		copies_str = "%d/%d" % [GameData.get_tower_xp(hero_id), GameData.copies_needed_for_level(lvl)]
+	var copies_lbl := _label(copies_str, _font_reg, 12, C_DIM)
+	copies_lbl.position             = Vector2(cw - 54, 28)
+	copies_lbl.size                 = Vector2(48, 16)
+	copies_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	copies_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	card.add_child(copies_lbl)
+
 	# ✓ badge (always present, visibility toggled on select)
 	var badge := _label("✓", _font_bold, 16, Color(0.30, 0.90, 0.45))
-	badge.position             = Vector2(cw - 28, 8)
+	badge.position             = Vector2(cw - 28, ch - 28)
 	badge.size                 = Vector2(22, 22)
 	badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	badge.mouse_filter         = MOUSE_FILTER_IGNORE
@@ -3721,7 +3980,9 @@ func _hero_make_card(parent: Control, def: Dictionary,
 	card.add_child(badge)
 
 	# Store ref for live highlight updates
-	_hero_card_refs.append({"id": hero_id, "style": cs, "badge": badge, "rcol": rcol})
+	_hero_card_refs.append({"id": hero_id, "style": cs, "badge": badge, "rcol": rcol,
+							"lvl_lbl": lvl_lbl, "copies_lbl": copies_lbl, "stat_lbl": stat_lbl,
+							"def": def})
 
 	# Click → open detail
 	var cap_def := def
@@ -3732,8 +3993,11 @@ func _hero_make_card(parent: Control, def: Dictionary,
 
 
 func _hero_build_detail_panel(parent: Control) -> void:
-	const PW : int = 580
-	const PH : int = 430
+	const PW : int = 680
+	const PH : int = 520
+	const LW : int = 296
+	const RX : int = 308
+	const RW : int = PW - RX - 12   # = 360
 
 	var panel := Panel.new()
 	var ps := StyleBoxFlat.new()
@@ -3751,8 +4015,8 @@ func _hero_build_detail_panel(parent: Control) -> void:
 	panel.visible      = false
 	panel.z_index      = 20
 	parent.add_child(panel)
-	_hero_det_panel  = panel
-	_hero_det_style  = ps
+	_hero_det_panel = panel
+	_hero_det_style = ps
 
 	# Dim backdrop
 	var dim := ColorRect.new()
@@ -3802,80 +4066,168 @@ func _hero_build_detail_panel(parent: Control) -> void:
 	panel.add_child(close_btn)
 
 	# Vertical divider
-	const LW : int = 268
-	const RX : int = 280
-	const RW : int = PW - RX - 12
 	var vdiv := ColorRect.new()
-	vdiv.color = Color(1,1,1,0.10); vdiv.position = Vector2(LW, 56); vdiv.size = Vector2(2, PH - 64)
+	vdiv.color = Color(1,1,1,0.10); vdiv.position = Vector2(LW, 52); vdiv.size = Vector2(2, PH - 60)
 	vdiv.mouse_filter = MOUSE_FILTER_IGNORE
 	panel.add_child(vdiv)
 
-	# ── LEFT COLUMN ────────────────────────────────────────────────────────────
-	# Preview
+	# ── LEFT COLUMN — preview + stats + special effect ──────────────────────────
+	const PREV_SZ : int = 80
+	var prev_bx : int = (LW - PREV_SZ) / 2
+	var prev_bg := Panel.new()
+	var pbs := StyleBoxFlat.new()
+	pbs.bg_color = Color(0.04, 0.04, 0.10)
+	pbs.corner_radius_top_left = 8; pbs.corner_radius_top_right = 8
+	pbs.corner_radius_bottom_left = 8; pbs.corner_radius_bottom_right = 8
+	prev_bg.add_theme_stylebox_override("panel", pbs)
+	prev_bg.position     = Vector2(prev_bx, 62); prev_bg.size = Vector2(PREV_SZ, PREV_SZ)
+	prev_bg.mouse_filter = MOUSE_FILTER_IGNORE
+	panel.add_child(prev_bg)
+
 	_hero_det_preview = _TurretPreview.new()
-	_hero_det_preview.position = Vector2((LW - 56) / 2, 62)
+	_hero_det_preview.scale    = Vector2(1.3, 1.3)
+	_hero_det_preview.position = Vector2(prev_bx + PREV_SZ / 2 - 36, 62 + PREV_SZ / 2 - 42)
 	panel.add_child(_hero_det_preview)
 
-	# Rarity
 	_hero_det_rarity = _label("", _font_bold, 14, C_DIM)
-	_hero_det_rarity.position             = Vector2(0, 156)
+	_hero_det_rarity.position             = Vector2(0, 150)
 	_hero_det_rarity.size                 = Vector2(LW, 20)
 	_hero_det_rarity.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_hero_det_rarity.mouse_filter         = MOUSE_FILTER_IGNORE
 	panel.add_child(_hero_det_rarity)
 
 	var div1 := ColorRect.new()
-	div1.color = Color(1,1,1,0.08); div1.position = Vector2(12,180); div1.size = Vector2(LW-20,1)
+	div1.color = Color(1,1,1,0.08); div1.position = Vector2(12,174); div1.size = Vector2(LW-20,1)
 	div1.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(div1)
 
-	# Stat rows
-	for sr in [["⚔ Damage", 188, "_hero_det_dmg"], ["🎯 Range", 212, "_hero_det_rng"],
-			   ["🏹 Fire Rate", 236, "_hero_det_rate"], ["Effect", 260, "_hero_det_eff"]]:
+	for sr in [["⚔ Damage", 182, "d"], ["🎯 Range", 206, "r"], ["🏹 Fire Rate", 230, "f"], ["Effect", 254, "e"]]:
 		var kl := _label(sr[0], _font_reg, 14, C_DIM)
 		kl.position = Vector2(12, sr[1]); kl.size = Vector2(112, 20)
 		kl.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(kl)
 
 	_hero_det_dmg = _label("", _font_bold, 14, C_WHITE)
-	_hero_det_dmg.position = Vector2(128, 188); _hero_det_dmg.size = Vector2(LW - 136, 20)
+	_hero_det_dmg.position = Vector2(128, 182); _hero_det_dmg.size = Vector2(LW - 136, 20)
 	_hero_det_dmg.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(_hero_det_dmg)
 
 	_hero_det_rng = _label("", _font_bold, 14, C_WHITE)
-	_hero_det_rng.position = Vector2(128, 212); _hero_det_rng.size = Vector2(LW - 136, 20)
+	_hero_det_rng.position = Vector2(128, 206); _hero_det_rng.size = Vector2(LW - 136, 20)
 	_hero_det_rng.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(_hero_det_rng)
 
 	_hero_det_rate = _label("", _font_bold, 14, C_WHITE)
-	_hero_det_rate.position = Vector2(128, 236); _hero_det_rate.size = Vector2(LW - 136, 20)
+	_hero_det_rate.position = Vector2(128, 230); _hero_det_rate.size = Vector2(LW - 136, 20)
 	_hero_det_rate.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(_hero_det_rate)
 
 	_hero_det_eff = _label("", _font_bold, 14, C_WHITE)
-	_hero_det_eff.position = Vector2(128, 260); _hero_det_eff.size = Vector2(LW - 136, 20)
+	_hero_det_eff.position = Vector2(128, 254); _hero_det_eff.size = Vector2(LW - 136, 20)
 	_hero_det_eff.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(_hero_det_eff)
 
-	_hero_det_desc = _label("", _font_reg, 14, C_DIM)  # kept for data flow, not displayed
+	_hero_det_desc = _label("", _font_reg, 14, C_DIM)  # kept for data flow
 
-	# ── RIGHT COLUMN ───────────────────────────────────────────────────────────
-	var eff_hdr := _label("Special Ability", _font_bold, 14, C_GOLD)
-	eff_hdr.position = Vector2(RX, 62); eff_hdr.size = Vector2(RW, 18)
-	eff_hdr.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(eff_hdr)
+	var div2 := ColorRect.new()
+	div2.color = Color(1,1,1,0.08); div2.position = Vector2(12,278); div2.size = Vector2(LW-20,1)
+	div2.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(div2)
+
+	var eff_hdr_l := _label("Special Effect", _font_bold, 14, C_GOLD)
+	eff_hdr_l.position = Vector2(12, 286); eff_hdr_l.size = Vector2(LW - 20, 18)
+	eff_hdr_l.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(eff_hdr_l)
 
 	var abil_scroll := ScrollContainer.new()
-	abil_scroll.position               = Vector2(RX, 84)
-	abil_scroll.size                   = Vector2(RW, 220)
+	abil_scroll.position               = Vector2(12, 308)
+	abil_scroll.size                   = Vector2(LW - 20, PH - 316)
 	abil_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	abil_scroll.vertical_scroll_mode   = ScrollContainer.SCROLL_MODE_AUTO
 	panel.add_child(abil_scroll)
 	_hero_det_ability = _label("", _font_reg, 14, Color(0.92, 0.88, 0.72))
-	_hero_det_ability.custom_minimum_size   = Vector2(RW, 0)
+	_hero_det_ability.custom_minimum_size   = Vector2(LW - 20, 0)
 	_hero_det_ability.autowrap_mode         = TextServer.AUTOWRAP_WORD
 	_hero_det_ability.mouse_filter          = MOUSE_FILTER_PASS
 	_hero_det_ability.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_hero_det_ability.size_flags_vertical   = Control.SIZE_SHRINK_BEGIN
 	abil_scroll.add_child(_hero_det_ability)
 
-	# Select Hero button
+	# ── RIGHT COLUMN — level + copies + talents + select ───────────────────────
+	var lvl_hdr := _label("Hero Level", _font_reg, 14, C_DIM)
+	lvl_hdr.position = Vector2(RX, 62); lvl_hdr.size = Vector2(RW, 20)
+	lvl_hdr.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(lvl_hdr)
+
+	_hero_det_level_lbl = _label("Lv. 1", _font_bold, 32, C_GOLD)
+	_hero_det_level_lbl.position     = Vector2(RX, 82); _hero_det_level_lbl.size = Vector2(RW, 44)
+	_hero_det_level_lbl.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(_hero_det_level_lbl)
+
+	_hero_det_copies_lbl = _label("0 / 2 copies", _font_bold, 12, Color(0.70, 0.85, 1.00))
+	_hero_det_copies_lbl.position             = Vector2(RX, 116)
+	_hero_det_copies_lbl.size                 = Vector2(RW, 14)
+	_hero_det_copies_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_hero_det_copies_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	panel.add_child(_hero_det_copies_lbl)
+
+	var xp_bg := ColorRect.new()
+	xp_bg.color    = Color(0.12, 0.12, 0.20)
+	xp_bg.position = Vector2(RX, 134); xp_bg.size = Vector2(RW, 10)
+	xp_bg.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(xp_bg)
+
+	_hero_det_xp_fill = ColorRect.new()
+	_hero_det_xp_fill.color    = Color(0.30, 0.70, 1.00)
+	_hero_det_xp_fill.position = Vector2(RX, 134); _hero_det_xp_fill.size = Vector2(0, 10)
+	_hero_det_xp_fill.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(_hero_det_xp_fill)
+
+	var div3 := ColorRect.new()
+	div3.color = Color(1,1,1,0.08); div3.position = Vector2(RX, 152); div3.size = Vector2(RW, 1)
+	div3.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(div3)
+
+	var tal_hdr := _label("Talents", _font_bold, 14, C_WHITE)
+	tal_hdr.position = Vector2(RX, 160); tal_hdr.size = Vector2(RW, 22)
+	tal_hdr.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(tal_hdr)
+
+	_hero_det_talent_avail = _label("0 available", _font_reg, 13, Color(0.60, 1.00, 0.60))
+	_hero_det_talent_avail.position     = Vector2(RX, 185)
+	_hero_det_talent_avail.size         = Vector2(RW, 18)
+	_hero_det_talent_avail.mouse_filter = MOUSE_FILTER_IGNORE
+	panel.add_child(_hero_det_talent_avail)
+
+	_hero_det_allocate_btn = Button.new()
+	_hero_det_allocate_btn.text       = "⚡  Allocate Talents  ►"
+	_hero_det_allocate_btn.position   = Vector2(RX, 208)
+	_hero_det_allocate_btn.size       = Vector2(RW, 36)
+	_hero_det_allocate_btn.focus_mode = FOCUS_NONE
+	_hero_det_allocate_btn.add_theme_font_override("font",           _font_bold)
+	_hero_det_allocate_btn.add_theme_font_size_override("font_size", 14)
+	_hero_det_allocate_btn.add_theme_color_override("font_color",    C_WHITE)
+	_hero_det_allocate_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.20, 0.34, 0.52)))
+	_hero_det_allocate_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.28, 0.44, 0.66)))
+	_hero_det_allocate_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.14, 0.24, 0.38)))
+	_hero_det_allocate_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.20, 0.34, 0.52)))
+	_hero_det_allocate_btn.pressed.connect(func():
+		if is_instance_valid(_hero_talent_panel):
+			_hero_talent_panel.visible = true
+	)
+	panel.add_child(_hero_det_allocate_btn)
+
+	var div4 := ColorRect.new()
+	div4.color = Color(1,1,1,0.08); div4.position = Vector2(RX, 252); div4.size = Vector2(RW, 1)
+	div4.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(div4)
+
+	var inv_hdr := _label("Invested Talents", _font_bold, 13, C_DIM)
+	inv_hdr.position = Vector2(RX, 260); inv_hdr.size = Vector2(RW, 18)
+	inv_hdr.mouse_filter = MOUSE_FILTER_IGNORE; panel.add_child(inv_hdr)
+
+	var icons_scroll := ScrollContainer.new()
+	icons_scroll.position               = Vector2(RX, 282)
+	icons_scroll.size                   = Vector2(RW, 136)
+	icons_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	icons_scroll.vertical_scroll_mode   = ScrollContainer.SCROLL_MODE_AUTO
+	panel.add_child(icons_scroll)
+	var icons_grid := GridContainer.new()
+	icons_grid.columns = 10
+	icons_grid.add_theme_constant_override("h_separation", 4)
+	icons_grid.add_theme_constant_override("v_separation", 4)
+	icons_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	icons_scroll.add_child(icons_grid)
+	_hero_det_talent_icons = icons_grid
+
 	_hero_det_select = Button.new()
-	_hero_det_select.position   = Vector2(RX, 324)
-	_hero_det_select.size       = Vector2(RW, 52)
+	_hero_det_select.position   = Vector2(RX, 434)
+	_hero_det_select.size       = Vector2(RW, 50)
 	_hero_det_select.focus_mode = FOCUS_NONE
 	_hero_det_select.add_theme_font_override("font",           _font_bold)
 	_hero_det_select.add_theme_font_size_override("font_size", 16)
@@ -3887,39 +4239,36 @@ func _hero_build_detail_panel(parent: Control) -> void:
 	panel.add_child(_hero_det_select)
 
 	var note_lbl := _label("Takes effect on next game start", _font_reg, 12, C_DIM)
-	note_lbl.position             = Vector2(RX, 382)
+	note_lbl.position             = Vector2(RX, 492)
 	note_lbl.size                 = Vector2(RW, 18)
 	note_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	note_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
 	panel.add_child(note_lbl)
 
+	# Talent allocation sub-panel (sits on top of detail panel, hidden until opened)
+	_hero_build_talent_panel(panel, PW, PH)
+
 
 func _hero_show_detail(def: Dictionary) -> void:
 	if not is_instance_valid(_hero_det_panel):
 		return
+	# Always close the talent panel when opening a new hero detail
+	if is_instance_valid(_hero_talent_panel):
+		_hero_talent_panel.visible = false
 	var eff_map : Dictionary = {
-		"none":          "Standard single-target shot. No bonus effect.",
-		"focused_shot":  "Consecutive hits on the same target deal +50% damage.",
-		"dual_shot":     "Fires at 2 separate enemies simultaneously.",
-		"chain":         "Hits primary at full damage, then chains to 2 nearby enemies at 50% damage.",
-		"aoe":           "Hits all enemies currently in range.",
-		"aoe_burst":     "Explosive shot hits up to 5 enemies in range.",
-		"melee_cleave":  "Every 3rd hit strikes all enemies in range.",
-		"bleed_aoe":     "Hits all in range; applies bleed (max 3 stacks, 1 dmg/s each).",
-		"slow_zone":     "Every 4th shot drops an ice zone slowing enemies 55% for 3s.",
-		"poison_debuff": "Poisons targets — +10% damage taken for 5s.",
-		"execute_shot":  "Up to 2× damage based on enemy current HP%.",
-		"knight_slam":   "Every 3rd hit throws 2 swords and knocks enemies back.",
-		"ranger_fire_aura": "Every 5th hit: towers 1 tile away get +10% fire rate for 3s.",
-		"rock_drop":           "Every 3rd hit drops a brittle zone (2s). Enemies entering take +20 bonus damage on their next hit from any source (once per enemy per zone).",
-		"dual_debuff":         "Hits 2 enemies per attack. Every other attack inflicts a random debuff on each target for 1 second. (Bleed, 10% Slow, or +10% damage taken — 5s cooldown per debuff per target.)",
-		"shadow_blade_combo":  "Every 3rd hit strikes with both blades at 2× damage + bleed (2× dmg/s, 3s, max 1 stack).",
-		"frost_shatter":       "2 shots per attack. Every hit slows by 5% for 2s. Gains +3% attack speed per slowed enemy on map (max +30%). Resets after 3s without attacking.",
-		"hp_strike":     "Deals base dmg + 1% of target's current HP.",
-		"arcane_charge": "Every 15th hit fires a blue laser for 2× damage to all in range.",
-		"lightning":     "Chains to primary + 3 more at 80% damage.",
-		"pierce":        "Bolt pierces up to 3 enemies in a line.",
-		"shadow_weaver_phase": "Shadow phase: single-target attack. After 10 hits transforms for 5s — white laser fires every 0.5s hitting 5 enemies for 50% tower damage + 1% max HP (0.5% on bosses).",
+		"none":               "Standard single-target shot. No bonus effect.",
+		"knight_slam":        "Every 3rd hit throws up to 3 swords at different enemies and knocks them back. Fewer swords are thrown if fewer enemies are in range. Knockback has no effect on bosses.",
+		"ranger_fire_aura":   "Every 5th hit: towers 1 tile away get +10% fire rate for 3s.",
+		"rock_drop":          "Every 3rd hit drops a brittle zone (2s). Enemies entering take +20 bonus damage on their next hit from any source (once per enemy per zone).",
+		"dual_debuff":        "Hits 2 enemies per attack. Every other attack inflicts a random debuff on each target for 1 second. (Bleed, 10% Slow, or +10% damage taken — 5s cooldown per debuff per target.)",
+		"shadow_blade_combo": "Every 3rd hit strikes with both blades at 2× damage and applies a bleed stack dealing 2× damage/s for 3s. Max 1 bleed stack per target.",
+		"frost_shatter":      "Fires 2 projectiles per attack. Every hit slows the target by 5% for 2s. Gains +3% attack speed for each slowed enemy currently on the map (max +30%). Resets after 3s without attacking.",
+		"lightning":          "Each strike chains to the primary target, then arcs to 3 additional enemies at 80% damage.",
+		"pierce":             "Each shot pierces through up to 3 enemies in a line at full damage.",
+		"poison_debuff":      "Poisons targets on hit — each stack increases damage taken by 10% for 5s. Stacks up to 3 times per target.",
+		"aoe_burst":          "An ancient dragon lord who unleashes explosive bursts that devastate up to 5 nearby enemies.",
+		"arcane_charge":      "Accumulates arcane power and unleashes devastating lasers every 15th hit.",
+		"execute_shot":       "Burning arrows scale with the target's current HP — 2× damage at full HP, down to 1× at 0 HP.",
 	}
 
 	var hero_id : String = def.get("id", "")
@@ -3934,29 +4283,55 @@ func _hero_show_detail(def: Dictionary) -> void:
 	_hero_det_preview.turret_data = def
 	_hero_det_preview.queue_redraw()
 
-	_hero_det_dmg.text  = "%.0f" % def.get("damage", 0.0)
-	_hero_det_rng.text  = "%d px" % int(def.get("range", 0.0))
-	_hero_det_rate.text = "%.1f / s" % def.get("fire_rate", 0.0)
 	var eff_key : String = def.get("effect", "none")
-	_hero_det_eff.text  = eff_key.replace("_", " ").capitalize()
+	_hero_det_eff.text     = eff_key.replace("_", " ").capitalize()
 	_hero_det_desc.text    = def.get("desc", "")
-	_hero_det_ability.text = eff_map.get(eff_key, "No special effect.")
+	_hero_det_ability.text = eff_map.get(eff_key, def.get("desc", "No special effect."))
 
-	var is_selected : bool = (hero_id == GameData.selected_hero_id)
-	if is_selected:
-		_hero_det_select.text = "✓  Already Selected"
-		_hero_det_select.add_theme_stylebox_override("normal",  _btn_style(Color(0.12, 0.26, 0.14)))
-		_hero_det_select.add_theme_stylebox_override("hover",   _btn_style(Color(0.12, 0.26, 0.14)))
+	# Right column — level & copies
+	const RW : int = 360
+	var lvl    : int   = GameData.get_tower_level(hero_id)
+	var copies : int   = GameData.get_tower_xp(hero_id)
+	var needed : int   = GameData.copies_needed_for_level(lvl)
+	var max_lv : int   = GameData.TOWER_MAX_LEVEL
+	_hero_det_level_lbl.text = "Lv. %d" % lvl
+	if lvl >= max_lv:
+		_hero_det_xp_fill.size  = Vector2(RW, 10)
+		_hero_det_xp_fill.color = C_GOLD
+		_hero_det_copies_lbl.text = "MAX"
 	else:
-		_hero_det_select.text = "⚔  Select Hero"
-		_hero_det_select.add_theme_stylebox_override("normal",  _btn_style(Color(0.12, 0.42, 0.18)))
-		_hero_det_select.add_theme_stylebox_override("hover",   _btn_style(Color(0.18, 0.58, 0.25)))
+		var frac : float = clampf(float(copies) / needed, 0.0, 1.0)
+		_hero_det_xp_fill.size  = Vector2(int(RW * frac), 10)
+		_hero_det_xp_fill.color = Color(0.30, 0.70, 1.00)
+		_hero_det_copies_lbl.text = "%d / %d copies" % [copies, needed]
 
-	# Disconnect all previous connections then reconnect
+	# Talent display
+	_hero_talent_hero_id = hero_id
+	_hero_refresh_talent_display(hero_id)
+
+	# Select button
+	var is_selected : bool = (hero_id == GameData.selected_hero_id)
 	for conn in _hero_det_select.pressed.get_connections():
 		_hero_det_select.pressed.disconnect(conn["callable"])
-	var cap_id := hero_id
-	_hero_det_select.pressed.connect(_hero_on_select.bind(cap_id))
+	if lvl == 0:
+		_hero_det_select.text     = "🔒  Get 1 Copy to Unlock"
+		_hero_det_select.disabled = true
+		_hero_det_select.add_theme_stylebox_override("normal",   _btn_style(Color(0.16, 0.16, 0.20)))
+		_hero_det_select.add_theme_stylebox_override("hover",    _btn_style(Color(0.16, 0.16, 0.20)))
+		_hero_det_select.add_theme_stylebox_override("disabled", _btn_style(Color(0.16, 0.16, 0.20)))
+	elif is_selected:
+		_hero_det_select.text     = "✓  Already Selected"
+		_hero_det_select.disabled = false
+		_hero_det_select.add_theme_stylebox_override("normal",   _btn_style(Color(0.12, 0.26, 0.14)))
+		_hero_det_select.add_theme_stylebox_override("hover",    _btn_style(Color(0.12, 0.26, 0.14)))
+		_hero_det_select.add_theme_stylebox_override("disabled", _btn_style(Color(0.12, 0.26, 0.14)))
+	else:
+		_hero_det_select.text     = "⚔  Select Hero"
+		_hero_det_select.disabled = false
+		_hero_det_select.add_theme_stylebox_override("normal",   _btn_style(Color(0.12, 0.42, 0.18)))
+		_hero_det_select.add_theme_stylebox_override("hover",    _btn_style(Color(0.18, 0.58, 0.25)))
+		_hero_det_select.add_theme_stylebox_override("disabled", _btn_style(Color(0.12, 0.42, 0.18)))
+		_hero_det_select.pressed.connect(_hero_on_select.bind(hero_id))
 
 	_hero_det_panel.visible = true
 
@@ -3965,17 +4340,247 @@ func _hero_on_select(hero_id: String) -> void:
 	GameData.set_selected_hero(hero_id)
 	_hero_det_panel.visible = false
 	_hero_refresh_selected()
-	# Update all card highlights without rebuilding the screen
 	for ref in _hero_card_refs:
 		var sel : bool = (ref["id"] == hero_id)
 		var cs  : StyleBoxFlat = ref["style"]
 		cs.bg_color    = Color(0.10, 0.18, 0.10) if sel else Color(0.10, 0.10, 0.18)
 		cs.border_color = Color(0.30, 0.90, 0.45) if sel else ref["rcol"]
 		(ref["badge"] as Label).visible = sel
-	# Re-open detail with updated button state
 	var def : Dictionary = GameData.HERO_DEFS.get(hero_id, {})
 	if not def.is_empty():
 		_hero_show_detail(def)
+
+
+func _hero_build_talent_panel(parent: Control, parent_pw: int, parent_ph: int) -> void:
+	const TPW : int = 460
+	const TPH : int = 284
+
+	var dim := ColorRect.new()
+	dim.color        = Color(0, 0, 0, 0.72)
+	dim.position     = Vector2.ZERO
+	dim.size         = Vector2(parent_pw, parent_ph)
+	dim.mouse_filter = MOUSE_FILTER_STOP
+	dim.z_index      = 25
+	dim.visible      = false
+	parent.add_child(dim)
+	_hero_talent_panel = dim
+
+	var panel := Panel.new()
+	var ps := StyleBoxFlat.new()
+	ps.bg_color                   = Color(0.08, 0.07, 0.16, 0.98)
+	ps.corner_radius_top_left     = 12; ps.corner_radius_top_right    = 12
+	ps.corner_radius_bottom_left  = 12; ps.corner_radius_bottom_right = 12
+	ps.border_width_left = 2; ps.border_width_right  = 2
+	ps.border_width_top  = 2; ps.border_width_bottom = 2
+	ps.border_color = Color(0.40, 0.30, 0.80, 0.60)
+	ps.shadow_color = Color(0, 0, 0, 0.70); ps.shadow_size = 12
+	panel.add_theme_stylebox_override("panel", ps)
+	panel.position     = Vector2((parent_pw - TPW) / 2, (parent_ph - TPH) / 2)
+	panel.size         = Vector2(TPW, TPH)
+	panel.mouse_filter = MOUSE_FILTER_STOP
+	dim.add_child(panel)
+
+	var title := _label("Allocate Talents", _font_bold, 18, C_WHITE)
+	title.position             = Vector2(0, 12)
+	title.size                 = Vector2(TPW, 28)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.mouse_filter         = MOUSE_FILTER_IGNORE
+	panel.add_child(title)
+
+	_hero_talent_avail_count = _label("0 points remaining", _font_reg, 13, Color(0.60, 1.00, 0.60))
+	_hero_talent_avail_count.position             = Vector2(0, 44)
+	_hero_talent_avail_count.size                 = Vector2(TPW, 20)
+	_hero_talent_avail_count.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_hero_talent_avail_count.mouse_filter         = MOUSE_FILTER_IGNORE
+	panel.add_child(_hero_talent_avail_count)
+
+	var note := _label("Each point:  ⚔ +1 damage  ·  🎯 +15 range  ·  🏹 +5% fire rate",
+						_font_reg, 11, C_DIM)
+	note.position             = Vector2(0, 66)
+	note.size                 = Vector2(TPW, 18)
+	note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	note.mouse_filter         = MOUSE_FILTER_IGNORE
+	panel.add_child(note)
+
+	const COL_W  : int = 126; const COL_H  : int = 118; const COL_GAP : int = 10
+	var cols_x0  : int = (TPW - 3 * COL_W - 2 * COL_GAP) / 2
+
+	var col_defs : Array = [
+		{"stat": "dmg", "icon": "⚔",  "label": "Damage",    "color": Color(1.0, 0.50, 0.30)},
+		{"stat": "rng", "icon": "🎯", "label": "Range",     "color": Color(0.30, 0.80, 1.00)},
+		{"stat": "fr",  "icon": "🏹", "label": "Fire Rate", "color": Color(0.40, 1.00, 0.50)},
+	]
+
+	for ci in range(3):
+		var cd  : Dictionary = col_defs[ci]
+		var cx  : int = cols_x0 + ci * (COL_W + COL_GAP)
+		var bcol : Color = cd["color"]
+
+		var col_panel := Panel.new()
+		var col_s := StyleBoxFlat.new()
+		col_s.bg_color                   = Color(0.10, 0.10, 0.20)
+		col_s.corner_radius_top_left     = 8; col_s.corner_radius_top_right    = 8
+		col_s.corner_radius_bottom_left  = 8; col_s.corner_radius_bottom_right = 8
+		col_s.border_width_left = 1; col_s.border_width_right  = 1
+		col_s.border_width_top  = 1; col_s.border_width_bottom = 1
+		col_s.border_color = Color(bcol.r, bcol.g, bcol.b, 0.40)
+		col_panel.add_theme_stylebox_override("panel", col_s)
+		col_panel.position     = Vector2(cx, 90)
+		col_panel.size         = Vector2(COL_W, COL_H)
+		col_panel.mouse_filter = MOUSE_FILTER_IGNORE
+		panel.add_child(col_panel)
+
+		var icon_lbl := _label(cd["icon"], _font_bold, 22, bcol)
+		icon_lbl.position             = Vector2(0, 6)
+		icon_lbl.size                 = Vector2(COL_W, 30)
+		icon_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		icon_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+		col_panel.add_child(icon_lbl)
+
+		var stat_name := _label(cd["label"], _font_bold, 12, C_WHITE)
+		stat_name.position             = Vector2(0, 36)
+		stat_name.size                 = Vector2(COL_W, 18)
+		stat_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		stat_name.mouse_filter         = MOUSE_FILTER_IGNORE
+		col_panel.add_child(stat_name)
+
+		var count_lbl := _label("+0", _font_bold, 15, bcol)
+		count_lbl.position             = Vector2(0, 54)
+		count_lbl.size                 = Vector2(COL_W, 22)
+		count_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		count_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+		col_panel.add_child(count_lbl)
+		match cd["stat"]:
+			"dmg": _hero_talent_dmg_count = count_lbl
+			"rng": _hero_talent_rng_count = count_lbl
+			"fr":  _hero_talent_fr_count  = count_lbl
+
+		var plus_btn := Button.new()
+		plus_btn.text       = "+"
+		plus_btn.position   = Vector2((COL_W - 58) / 2, 80)
+		plus_btn.size       = Vector2(58, 32)
+		plus_btn.focus_mode = FOCUS_NONE
+		plus_btn.add_theme_font_override("font",           _font_bold)
+		plus_btn.add_theme_font_size_override("font_size", 18)
+		plus_btn.add_theme_color_override("font_color",    C_WHITE)
+		plus_btn.add_theme_stylebox_override("normal",  _btn_style(Color(bcol.r*0.45, bcol.g*0.45, bcol.b*0.45)))
+		plus_btn.add_theme_stylebox_override("hover",   _btn_style(Color(bcol.r*0.65, bcol.g*0.65, bcol.b*0.65)))
+		plus_btn.add_theme_stylebox_override("pressed", _btn_style(Color(bcol.r*0.28, bcol.g*0.28, bcol.b*0.28)))
+		plus_btn.add_theme_stylebox_override("focus",   _btn_style(Color(bcol.r*0.45, bcol.g*0.45, bcol.b*0.45)))
+		var cap_stat : String = cd["stat"]
+		plus_btn.pressed.connect(func():
+			if GameData.spend_hero_talent(_hero_talent_hero_id, cap_stat):
+				_hero_refresh_talent_display(_hero_talent_hero_id)
+		)
+		col_panel.add_child(plus_btn)
+
+	var done_btn := Button.new()
+	done_btn.text       = "Done"
+	done_btn.position   = Vector2((TPW - 150) / 2, TPH - 46)
+	done_btn.size       = Vector2(150, 36)
+	done_btn.focus_mode = FOCUS_NONE
+	done_btn.add_theme_font_override("font",           _font_bold)
+	done_btn.add_theme_font_size_override("font_size", 15)
+	done_btn.add_theme_color_override("font_color",    C_WHITE)
+	done_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.22, 0.22, 0.28)))
+	done_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.30, 0.30, 0.38)))
+	done_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.16, 0.16, 0.20)))
+	done_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.22, 0.22, 0.28)))
+	done_btn.pressed.connect(func(): dim.visible = false)
+	panel.add_child(done_btn)
+
+
+func _hero_refresh_talent_display(hero_id: String) -> void:
+	var alloc : Dictionary = GameData.get_hero_talent_alloc(hero_id)
+	var avail : int        = GameData.get_hero_talent_points(hero_id)
+	var def   : Dictionary = GameData.HERO_DEFS.get(hero_id, {})
+
+	# Available count labels
+	if is_instance_valid(_hero_det_talent_avail):
+		_hero_det_talent_avail.text = "%d available" % avail
+	if is_instance_valid(_hero_talent_avail_count):
+		_hero_talent_avail_count.text = "%d points remaining" % avail
+
+	# Talent column counts
+	var dmg_pts : int = alloc.get("dmg", 0)
+	var rng_pts : int = alloc.get("rng", 0)
+	var fr_pts  : int = alloc.get("fr",  0)
+	if is_instance_valid(_hero_talent_dmg_count): _hero_talent_dmg_count.text = "+%d"  % dmg_pts
+	if is_instance_valid(_hero_talent_rng_count): _hero_talent_rng_count.text = "+%d"  % rng_pts
+	if is_instance_valid(_hero_talent_fr_count):  _hero_talent_fr_count.text  = "+%d%%" % (fr_pts * 5)
+
+	# Stat labels with talent bonuses applied
+	var base_dmg : float = def.get("damage",    0.0)
+	var base_rng : float = def.get("range",     0.0)
+	var base_fr  : float = def.get("fire_rate", 0.0)
+	var b_dmg    : float = base_dmg + float(dmg_pts)
+	var b_rng    : float = base_rng + float(rng_pts) * 15.0
+	var b_fr     : float = base_fr  * (1.0 + float(fr_pts) * 0.05)
+	if is_instance_valid(_hero_det_dmg):
+		_hero_det_dmg.text  = "%.0f%s"     % [b_dmg,     " (+%d)"   % dmg_pts      if dmg_pts > 0 else ""]
+	if is_instance_valid(_hero_det_rng):
+		_hero_det_rng.text  = "%d px%s"    % [int(b_rng), " (+%d)"  % (rng_pts*15) if rng_pts > 0 else ""]
+	if is_instance_valid(_hero_det_rate):
+		_hero_det_rate.text = "%.1f / s%s" % [b_fr,       " (+%d%%)" % (fr_pts*5)  if fr_pts  > 0 else ""]
+
+	# Rebuild talent icon chips
+	if not is_instance_valid(_hero_det_talent_icons):
+		return
+	for child in _hero_det_talent_icons.get_children():
+		child.queue_free()
+
+	var icon_defs : Array = [
+		["dmg", "⚔",  Color(1.0, 0.50, 0.30), "+1 damage per point"],
+		["rng", "🎯", Color(0.30, 0.80, 1.00), "+15 range per point"],
+		["fr",  "🏹", Color(0.40, 1.00, 0.50), "+5% fire rate per point"],
+	]
+	for idef in icon_defs:
+		var count : int = alloc.get(idef[0], 0)
+		var ccol  : Color = idef[2]
+		for _i in range(count):
+			var chip := Panel.new()
+			var chip_s := StyleBoxFlat.new()
+			chip_s.bg_color                   = Color(ccol.r*0.18, ccol.g*0.18, ccol.b*0.18)
+			chip_s.corner_radius_top_left     = 5; chip_s.corner_radius_top_right    = 5
+			chip_s.corner_radius_bottom_left  = 5; chip_s.corner_radius_bottom_right = 5
+			chip_s.border_width_left = 1; chip_s.border_width_right  = 1
+			chip_s.border_width_top  = 1; chip_s.border_width_bottom = 1
+			chip_s.border_color = Color(ccol.r, ccol.g, ccol.b, 0.55)
+			chip.add_theme_stylebox_override("panel", chip_s)
+			chip.custom_minimum_size = Vector2(30, 30)
+			chip.mouse_filter        = MOUSE_FILTER_PASS
+			chip.tooltip_text        = idef[3]
+			_hero_det_talent_icons.add_child(chip)
+			var chip_lbl := _label(idef[1], _font_bold, 14, ccol)
+			chip_lbl.position             = Vector2(0, 0)
+			chip_lbl.size                 = Vector2(30, 30)
+			chip_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			chip_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+			chip_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+			chip.add_child(chip_lbl)
+
+
+func _refresh_hero_cards() -> void:
+	for ref in _hero_card_refs:
+		var hero_id : String = ref.get("id", "")
+		if hero_id == "":
+			continue
+		var lvl    : int = GameData.get_tower_level(hero_id)
+		var copies : int = GameData.get_tower_xp(hero_id)
+		if is_instance_valid(ref.get("lvl_lbl")):
+			ref["lvl_lbl"].text = "Lv.%d" % lvl
+		if is_instance_valid(ref.get("copies_lbl")):
+			if lvl >= GameData.TOWER_MAX_LEVEL:
+				ref["copies_lbl"].text = "MAX"
+			else:
+				ref["copies_lbl"].text = "%d/%d" % [copies, GameData.copies_needed_for_level(lvl)]
+		if is_instance_valid(ref.get("stat_lbl")):
+			var d   : Dictionary = ref.get("def", {})
+			var al  : Dictionary = GameData.get_hero_talent_alloc(hero_id)
+			var td  : float = d.get("damage",    0.0) + float(al.get("dmg", 0))
+			var tr  : float = d.get("range",     0.0) + float(al.get("rng", 0)) * 15.0
+			var tf  : float = d.get("fire_rate", 0.0) * (1.0 + float(al.get("fr", 0)) * 0.05)
+			ref["stat_lbl"].text = "⚔ %.0f  ·  🎯 %.0f  ·  🏹 %.1f/s" % [td, tr, tf]
 
 
 func _build_towers_screen() -> void:
@@ -4053,7 +4658,7 @@ func _build_towers_screen() -> void:
 		"arcane_overload":  "Every 5th attack triggers Arcane Overload — instant lasers hit ALL enemies in range (minimum 5 lasers). Counter never resets.",
 		"arcane_charge": "Every 15th hit fires a blue laser for 2× damage to all in range.",
 		"lock_beam":     "Locks beam on one target; damage ramps to 1.5× over 5s.",
-		"tempest_strike":          "Every 10th hit deals bonus damage equal to 5% of the target's total max HP.",
+		"tempest_strike":          "Every 10th hit launches a slash that deals base damage + 5% of the target's max HP on impact.",
 		"infernal_serpent_summon": "Each hit has a 10% chance to summon a fire serpent (100 damage per bite) that laps the battlefield once.",
 		"lightning":     "Chains to primary + 3 more at 80% damage.",
 		"storm_chain":   "Strikes primary for full damage, then chains to 4 nearest enemies globally for 150% damage.",
@@ -4206,9 +4811,12 @@ func _tw_make_card(parent: Control, def: Dictionary, cw: int, ch: int,
 	rar_lbl.mouse_filter = MOUSE_FILTER_IGNORE
 	card.add_child(rar_lbl)
 
-	# Short stat line
+	# Short stat line — apply level + upgrade multipliers so cards match the detail panel
+	var tower_id  : String = def.get("id", "")
 	var stat_str := "⚔ %.0f  ·  🎯 %.0f  ·  🏹 %.1f/s" % [
-		def.get("damage", 0.0), def.get("range", 0.0), def.get("fire_rate", 0.0)]
+		def.get("damage",    0.0) * GameData.tower_total_damage_mult(tower_id),
+		def.get("range",     0.0) * GameData.tower_total_range_mult(tower_id),
+		def.get("fire_rate", 0.0) * GameData.tower_total_fire_rate_mult(tower_id)]
 	var stat_lbl := _label(stat_str, _font_reg, 13, C_DIM)
 	stat_lbl.position     = Vector2(76, 48)
 	stat_lbl.size         = Vector2(cw - 84, 18)
@@ -4216,7 +4824,6 @@ func _tw_make_card(parent: Control, def: Dictionary, cw: int, ch: int,
 	card.add_child(stat_lbl)
 
 	# Level badge (top-right corner)
-	var tower_id  : String = def.get("id", "")
 	var lvl       : int    = GameData.get_tower_level(tower_id)
 	var lvl_lbl   := _label("Lv.%d" % lvl, _font_bold, 14, C_GOLD)
 	lvl_lbl.position             = Vector2(cw - 52, 8)
@@ -5158,7 +5765,7 @@ func _build_recipe_modal() -> void:
 			"poison_cloud":      "Hits all enemies in range each shot. Spawns a persistent poison cloud that slowly expands along the path, dealing 2 damage/s to any enemy inside it.",
 			"frost_cannon_tri":  "Fires at up to 3 separate targets per shot. Boss targets take +50% damage and receive a 10% slow that refreshes on repeat hits.",
 			"arcane_overload":   "Every 5th attack triggers Arcane Overload — instant lasers hit ALL enemies in range (minimum 5 lasers). Counter never resets.",
-			"tempest_strike":          "Every 10th hit deals bonus damage equal to 5% of the target's total max HP.",
+			"tempest_strike":          "Every 10th hit launches a slash that deals base damage + 5% of the target's max HP on impact.",
 			"infernal_serpent_summon": "Each hit has a 10% chance to summon a living fire serpent (100 damage per bite) that races around the battlefield once.",
 			"storm_chain":       "Strikes the primary target for full damage, then chains to the 4 nearest enemies globally for 150% damage. Chain targets can be outside the tower's range.",
 			"lightning":         "Chains to the primary target and up to 3 additional enemies at 80% damage.",
@@ -5593,6 +6200,7 @@ func _build_settings_gear() -> void:
 	leave_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.45, 0.10, 0.10)))
 	leave_btn.pressed.connect(func():
 		menu.visible = false
+		game_left.emit()
 		show_main_menu()
 	)
 	menu.add_child(leave_btn)

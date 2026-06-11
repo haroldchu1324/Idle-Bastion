@@ -75,7 +75,10 @@ var _sw_beam_alpha     : float = 0.0      # shadow weaver: beam visual fade
 var _sw_base_color     : Color = Color(0.55, 0.20, 0.85)  # shadow weaver: original purple saved on init
 var _wt_passive_tick : float = 0.0   # world tree: timer for passive buff pulse
 var _chrono_pulse  : float = 0.0     # chrono mage: attack pulse visual timer
-var _tw_slash_target : Vector2 = Vector2.ZERO  # tempest warden: last special target (local space) for slash animation
+var _tw_slash_target   : Vector2 = Vector2.ZERO  # tempest warden: last special target direction (local space)
+var _tw_slash_primary  : Node2D  = null           # tempest warden: last special target node (for projectile)
+var _tw_slash_launched : bool    = false           # tempest warden: has the slash projectile been spawned this special
+var _tw_slash_dmg      : float   = 0.0            # tempest warden: damage to deal when slash projectile hits
 var _fc_impacts    : Array = []      # frost cannon: [{pos, t, max_t, boss}] impact flashes
 
 
@@ -485,6 +488,12 @@ func _process(delta: float) -> void:
 		queue_redraw()
 	if _chrono_pulse > 0.0:
 		_chrono_pulse -= delta
+		if tower_effect == "tempest_strike" and not _tw_slash_launched:
+			var _ct_now : float = 1.0 - (_chrono_pulse / 0.50)
+			if _ct_now >= 0.58:
+				_tw_slash_launched = true
+				if is_instance_valid(_tw_slash_primary):
+					_spawn_tw_slash(_tw_slash_primary, _tw_slash_dmg)
 		queue_redraw()
 	if not _fc_impacts.is_empty():
 		for _fci in range(_fc_impacts.size() - 1, -1, -1):
@@ -817,10 +826,11 @@ func _try_shoot() -> void:
 			_fire(primary, damage)
 			if _hit_counter >= 10:
 				_hit_counter = 0
-				var bonus_dmg : float = primary.max_hp * 0.05
-				primary.take_damage(bonus_dmg)
-				_tw_slash_target = primary.position - position
-				_chrono_pulse = 0.40
+				_tw_slash_dmg      = damage + primary.max_hp * 0.05
+				_tw_slash_target   = primary.position - position
+				_tw_slash_primary  = primary
+				_tw_slash_launched = false
+				_chrono_pulse = 0.50
 		"axe_warrior":
 			# AoE melee — hits up to 5 enemies; applies bleed + poison stacks to each
 			_shoot_anim = 0.35
@@ -987,7 +997,13 @@ func _try_shoot() -> void:
 
 func _fire(target: Node2D, dmg: float, p_pushback: bool = false, spawn_offset: Vector2 = Vector2.ZERO) -> void:
 	var tid       : String = tower_data.get("id", "")
-	var final_dmg := (dmg * GameData.tower_total_damage_mult(tid) + GameData.buff_damage_flat + _wt_dmg_bonus) * (GameData.relic_boss_dmg_mult() if target.is_boss else 1.0)
+	var boss_mult : float  = GameData.relic_boss_dmg_mult() if target.is_boss else 1.0
+	var final_dmg : float
+	if GameData.HERO_DEFS.has(tid):
+		# Heroes use the talent system — damage matches stat page exactly (base + talents only)
+		final_dmg = dmg * boss_mult
+	else:
+		final_dmg = (dmg * GameData.tower_total_damage_mult(tid) + GameData.buff_damage_flat + _wt_dmg_bonus) * boss_mult
 
 	# Melee towers — instant direct damage, no projectile
 	if tower_type in [26, 27, 28, 29, 30, 31, 32, 33]:
@@ -1103,6 +1119,15 @@ func _spawn_slash(world_pos: Vector2) -> void:
 	var fx : Node2D = _SLASH_SCRIPT.new()
 	get_parent().add_child(fx)
 	fx.init(world_pos)
+
+
+func _spawn_tw_slash(target: Node2D, dmg: float) -> void:
+	var b : Node2D = _bullet_scene.instantiate()
+	b.position = position + Vector2(0, -42)
+	b.setup(target, dmg)
+	b.bullet_type = "tw_slash"
+	b._speed      = 350.0
+	get_parent().add_child(b)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -5108,12 +5133,34 @@ func _draw_tempest_warden(b: float, s: bool) -> void:
 	var cape_wave   : float = sin(_anim_time * 4.2) * 3.5
 	var orb_rot     : float = _anim_time * 2.6
 	var charge_frac : float = float(_hit_counter) / 10.0
+	var _ct      : float = 0.0
+	var _swing_t : float = 0.0
+	var _jump_h  : float = 0.0
 	if _chrono_pulse > 0.0:
-		var _jt : float = 1.0 - (_chrono_pulse / 0.40)
-		b -= sin(_jt * PI) * 28.0
+		_ct = 1.0 - (_chrono_pulse / 0.50)
+		if _ct < 0.15:
+			b += sin((_ct / 0.15) * PI) * 5.0
+		else:
+			var _jt : float = clampf((_ct - 0.15) / 0.70, 0.0, 1.0)
+			_jump_h = sin(_jt * PI)
+			b -= _jump_h * 30.0
+		_swing_t = clampf((_ct - 0.22) / 0.50, 0.0, 1.0)
 
-	var sp_base := Vector2(20, 9 + b)
-	var sp_tip  := Vector2(-5, -28 + b)
+	var sp_base_rest := Vector2(20, 9 + b)
+	var sp_tip_rest  := Vector2(-5, -28 + b)
+	var sp_base      := sp_base_rest
+	var sp_tip       := sp_tip_rest
+	if _swing_t > 0.0:
+		var _pivot    := Vector2(11, -8 + b)
+		var _sw_angle : float = lerp(-PI * 0.50, PI * 0.60, _swing_t)
+		sp_base = _pivot + (sp_base_rest - _pivot).rotated(_sw_angle)
+		sp_tip  = _pivot + (sp_tip_rest  - _pivot).rotated(_sw_angle)
+	elif s and _chrono_pulse <= 0.0 and _shoot_anim > 0.0:
+		var _pivot  := Vector2(11, -8 + b)
+		var _ns_t   : float = 1.0 - (_shoot_anim / 0.35)
+		var _ns_ang : float = sin(_ns_t * PI) * (PI * 0.25)
+		sp_base = _pivot + (sp_base_rest - _pivot).rotated(_ns_ang)
+		sp_tip  = _pivot + (sp_tip_rest  - _pivot).rotated(_ns_ang)
 
 	# ── 1. Shadow ────────────────────────────────────────────────────────────────
 	draw_circle(Vector2(0, 24), 16, Color(0, 0, 0, 0.20))
@@ -5373,30 +5420,31 @@ func _draw_tempest_warden(b: float, s: bool) -> void:
 		draw_circle(sp_tip, 12, Color(elec.r, elec.g, elec.b, _ba * 0.38))
 		draw_circle(sp_tip,  6, Color(1, 1, 1, _ba * 0.55))
 
-	# ── 16. Special — jump + sword slash to target ────────────────────────────────
-	if _chrono_pulse > 0.0:
-		var _ct   : float = 1.0 - (_chrono_pulse / 0.40)
-		var _peak : float = sin(_ct * PI)
-		# Spear glow at apex of jump
-		draw_circle(sp_tip, 18.0 * _peak, Color(1.0, 1.0, 1.0, _peak * 0.50))
-		draw_circle(sp_tip,  9.0 * _peak, Color(0.70, 0.96, 1.00, _peak * 0.85))
-		# White slash beam toward target
-		var _slash_dir : Vector2 = _tw_slash_target.normalized() if _tw_slash_target.length() > 1.0 else Vector2(1.0, 0.0)
-		var _slash_len : float = minf(_tw_slash_target.length(), 130.0)
-		var _progress  : float = clampf(_ct * 2.2, 0.0, 1.0)
-		var _send      : Vector2 = _slash_dir * (_slash_len * _progress)
-		var _sa        : float = _peak * 0.90
-		draw_line(sp_tip, _send, Color(0.65, 0.95, 1.00, _sa * 0.50), 12.0)
-		draw_line(sp_tip, _send, Color(1.0, 1.0, 1.0, _sa), 4.5)
-		# Impact flash arcs at target
-		if _ct > 0.35:
-			var _ia : float = clampf((_ct - 0.35) / 0.30, 0.0, 1.0) * _peak
-			for _si in range(3):
-				var _sarc : float = PI * 0.20 * float(_si - 1)
-				draw_arc(_send, 14.0, _sarc - PI * 0.28, _sarc + PI * 0.28, 8,
-					Color(1.0, 1.0, 1.0, _ia * 0.90), 3.8)
-			draw_circle(_send, 16.0 * _ia, Color(1.0, 1.0, 1.0, _ia * 0.20))
-			draw_circle(_send,  9.0 * _ia, Color(0.70, 0.96, 1.00, _ia * 0.55))
+	# ── 16. Special — sword swing trail and energy flash ─────────────────────────
+	if _chrono_pulse > 0.0 and _swing_t > 0.0:
+		var _pivot      := Vector2(11, -8 + b)
+		var _swing_glow : float = sin(clampf(_swing_t, 0.0, 1.0) * PI)
+		# Onion-skin trail — ghost copies at earlier swing angles
+		for _ti in range(4):
+			var _trail_frac : float = _swing_t - float(_ti + 1) * 0.14
+			if _trail_frac < 0.0:
+				break
+			var _trail_ang : float = lerp(-PI * 0.50, PI * 0.60, _trail_frac)
+			var _trail_a   : float = (0.28 - float(_ti) * 0.05) * _swing_glow
+			var _tb        : Vector2 = _pivot + (sp_base_rest - _pivot).rotated(_trail_ang)
+			var _tt        : Vector2 = _pivot + (sp_tip_rest  - _pivot).rotated(_trail_ang)
+			draw_line(_tb, _tt, Color(0.65, 0.95, 1.00, _trail_a), 9.0 - float(_ti) * 1.8)
+		# Bright white glow on current blade
+		draw_line(sp_base, sp_tip, Color(0.80, 0.97, 1.00, _swing_glow * 0.55), 12.0)
+		draw_line(sp_base, sp_tip, Color(1.00, 1.00, 1.00, _swing_glow * 0.90),  4.0)
+		# Tip energy burst
+		draw_circle(sp_tip, 14.0 * _swing_glow, Color(1.00, 1.00, 1.00, _swing_glow * 0.55))
+		draw_circle(sp_tip,  7.0 * _swing_glow, Color(0.80, 0.97, 1.00, _swing_glow * 0.90))
+		# Slash launch flash (bright pop at ct ~0.42)
+		if _ct > 0.30 and _ct < 0.60:
+			var _flash_a : float = sin((_ct - 0.30) / 0.30 * PI) * _jump_h
+			draw_circle(sp_tip, 26.0 * _flash_a, Color(1.00, 1.00, 1.00, _flash_a * 0.22))
+			draw_circle(sp_tip, 15.0 * _flash_a, Color(0.80, 0.97, 1.00, _flash_a * 0.50))
 
 
 func _draw_infernal_serpent(b: float, s: bool) -> void:

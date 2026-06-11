@@ -6,11 +6,20 @@ extends Node2D
 var _life     : float = 0.30
 var _max_life : float = 0.30
 var _base_angle : float = 0.0   # randomised rotation per hit
+var _tw_mode    : bool  = false  # white sword-cut mark mode (Tempest Warden special)
 
 func init(world_pos: Vector2) -> void:
 	position    = world_pos
 	z_index     = 8
 	_base_angle = randf() * TAU
+
+func init_tw_cut(local_pos: Vector2) -> void:
+	position    = local_pos
+	z_index     = 10
+	_base_angle = randf_range(-PI * 0.25, PI * 0.25)
+	_life       = 0.50
+	_max_life   = 0.50
+	_tw_mode    = true
 
 func _process(delta: float) -> void:
 	_life -= delta
@@ -19,6 +28,9 @@ func _process(delta: float) -> void:
 		queue_free()
 
 func _draw() -> void:
+	if _tw_mode:
+		_draw_tw_cut_mark()
+		return
 	var t     : float = clampf(_life / _max_life, 0.0, 1.0)
 	# Quadratic ease-in fade — bright flash then quick fade
 	var alpha : float = t * t
@@ -54,3 +66,26 @@ func _draw() -> void:
 	draw_arc(Vector2.ZERO, R - 5, ga - AW * 0.7, ga + AW * 0.7, 14, grn_inner, 2.0)
 	var tip_g := Vector2(cos(ga + AW), sin(ga + AW)) * R
 	draw_circle(tip_g, 3.5 * g_alpha, Color(0.5, 1.0, 0.5, g_alpha * 0.80))
+
+
+func _draw_tw_cut_mark() -> void:
+	var t     : float = clampf(_life / _max_life, 0.0, 1.0)
+	var alpha : float = t * t
+	draw_set_transform(Vector2.ZERO, _base_angle)
+	# Diagonal wound lines across the enemy body
+	var A := Vector2(-17, -17)
+	var B := Vector2( 17,  17)
+	# Soft outer glow
+	draw_line(A, B, Color(0.75, 0.97, 1.00, alpha * 0.30), 12.0)
+	# Main white wound line
+	draw_line(A, B, Color(1.00, 1.00, 1.00, alpha * 0.85),  4.0)
+	# Bright core
+	draw_line(A, B, Color(1.00, 1.00, 1.00, alpha * 0.95),  1.5)
+	# Parallel nick for wound depth
+	var A2 := Vector2(-10, -19)
+	var B2 := Vector2( 19,  10)
+	draw_line(A2, B2, Color(0.80, 0.97, 1.00, alpha * 0.38), 2.0)
+	# Endpoint sparks
+	draw_circle(A, 2.5 * alpha, Color(1.00, 1.00, 1.00, alpha * 0.85))
+	draw_circle(B, 2.5 * alpha, Color(0.80, 0.97, 1.00, alpha * 0.65))
+	draw_set_transform(Vector2.ZERO, 0.0)

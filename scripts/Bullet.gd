@@ -4,6 +4,8 @@
 # ─────────────────────────────────────────────────────────────────────────────
 extends Node2D
 
+const _SLASH_SCRIPT : GDScript = preload("res://scripts/SlashEffect.gd")
+
 
 var _target      : Node2D = null
 var _damage      : float  = 3.0
@@ -68,6 +70,9 @@ func _process(delta: float) -> void:
 		return
 
 	if not is_instance_valid(_target):
+		if bullet_type == "tw_slash":
+			queue_free()
+			return
 		# Target died — redirect to nearest enemy, or vanish
 		var nearest : Node2D = null
 		var nearest_dist := INF
@@ -86,9 +91,15 @@ func _process(delta: float) -> void:
 
 	var dir  : Vector2 = _target.position - position
 	var dist : float   = dir.length()
-	var hit_r : float  = 30.0 if bullet_type == "sword" else 8.0
+	var hit_r : float  = 30.0 if bullet_type == "sword" else (25.0 if bullet_type == "tw_slash" else 8.0)
 	# Hit if close enough, or if we overshot (moving away after being very close)
 	if dist < hit_r or (dist > _prev_dist and _prev_dist < hit_r * 3.0):
+		if bullet_type == "tw_slash":
+			if is_instance_valid(_target):
+				_target.take_damage(_damage)
+			_spawn_tw_cut_mark(_target)
+			queue_free()
+			return
 		_target.take_damage(_damage)
 		if pushback_on_hit and is_instance_valid(_target) and not _target.is_boss:
 			_target.pushback()
@@ -153,6 +164,7 @@ func _draw() -> void:
 		"hero_venom_fang":    _draw_hero_venom_fang()
 		"hero_storm_spear":   _draw_hero_storm_spear()
 		"hero_phoenix_arrow": _draw_hero_phoenix_arrow()
+		"tw_slash":           _draw_tw_slash()
 		_:
 			match bullet_style:
 				"bolt":     _draw_bolt()
@@ -794,3 +806,44 @@ func _draw_hero_phoenix_arrow() -> void:
 	]), Color(0.98, 0.48, 0.10, 0.88))
 
 	draw_set_transform(Vector2.ZERO, 0.0)
+
+
+func _draw_tw_slash() -> void:
+	var dir : Vector2
+	if is_instance_valid(_target):
+		dir = (_target.position - position).normalized()
+	elif _direction != Vector2.ZERO:
+		dir = _direction.normalized()
+	else:
+		return
+	draw_set_transform(Vector2.ZERO, dir.angle() + PI * 0.5)
+	# Jagged zigzag slash — negative y points toward target
+	var pts := PackedVector2Array([
+		Vector2( 0, -30),
+		Vector2( 8, -19),
+		Vector2(-7, -10),
+		Vector2( 9,  -1),
+		Vector2(-5,   8),
+		Vector2( 3,  17),
+	])
+	# Soft outer glow
+	draw_polyline(pts, Color(0.65, 0.95, 1.00, 0.28), 14.0)
+	# Mid glow
+	draw_polyline(pts, Color(0.82, 0.97, 1.00, 0.65),  7.0)
+	# Bright white core
+	draw_polyline(pts, Color(1.00, 1.00, 1.00, 0.95),  2.5)
+	# Tip glow
+	draw_circle(Vector2(0, -30), 5.5, Color(1.00, 1.00, 1.00, 0.90))
+	draw_circle(Vector2(0, -30), 9.0, Color(0.75, 0.97, 1.00, 0.40))
+	# Fading trail behind tail
+	draw_line(Vector2(3, 17), Vector2(1, 32), Color(0.65, 0.95, 1.00, 0.28), 5.0)
+	draw_line(Vector2(3, 17), Vector2(0, 46), Color(0.65, 0.95, 1.00, 0.10), 3.0)
+	draw_set_transform(Vector2.ZERO, 0.0)
+
+
+func _spawn_tw_cut_mark(enemy: Node2D) -> void:
+	if not is_instance_valid(enemy):
+		return
+	var fx : Node2D = _SLASH_SCRIPT.new()
+	enemy.add_child(fx)
+	fx.init_tw_cut(Vector2.ZERO)

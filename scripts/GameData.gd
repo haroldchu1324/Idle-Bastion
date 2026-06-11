@@ -17,7 +17,10 @@ var max_world_unlocked        : int = 1
 var blue_gems                 : int = 0
 var upgrade_purchases         : Dictionary = {}  # {node_id: tiers_bought}
 var tower_levels              : Dictionary = {}  # {tower_id: {level:int, xp:int}}
+var hero_talent_points        : Dictionary = {}  # {hero_id: int}  — unspent talent points
+var hero_talent_alloc         : Dictionary = {}  # {hero_id: {dmg:int, rng:int, fr:int}}
 var selected_hero_id          : String    = "knight"
+var selected_world            : int       = 1     # in-memory only; set by HUD before scene reload
 
 # ── Hero definitions ──────────────────────────────────────────────────────────
 const HERO_DEFS : Dictionary = {
@@ -108,7 +111,9 @@ const TOWER_MAX_LEVEL  : int = 10
 const TOWER_XP_PER_LVL : int = 100   # XP needed per level (flat for now)
 
 func get_tower_level(tower_id: String) -> int:
-	return int(tower_levels.get(tower_id, {}).get("level", 1))
+	if not tower_levels.has(tower_id):
+		return 0 if HERO_DEFS.has(tower_id) else 1
+	return int(tower_levels[tower_id].get("level", 1))
 
 func get_tower_xp(tower_id: String) -> int:
 	return int(tower_levels.get(tower_id, {}).get("xp", 0))
@@ -117,24 +122,46 @@ func get_tower_xp(tower_id: String) -> int:
 const COPIES_PER_LEVEL : Array = [2, 4, 6, 8, 12, 16, 20, 24, 30]
 
 func copies_needed_for_level(lvl: int) -> int:
+	if lvl == 0:
+		return 1   # 1 copy unlocks the hero (level 0 → 1)
 	var idx : int = clampi(lvl - 1, 0, COPIES_PER_LEVEL.size() - 1)
 	return COPIES_PER_LEVEL[idx]
 
 func add_tower_xp(tower_id: String, amount: int) -> void:
 	if not tower_levels.has(tower_id):
-		tower_levels[tower_id] = {"level": 1, "xp": 0}
+		var start_lv : int = 0 if HERO_DEFS.has(tower_id) else 1
+		tower_levels[tower_id] = {"level": start_lv, "xp": 0}
 	tower_levels[tower_id]["xp"] += amount
 	while tower_levels[tower_id]["level"] < TOWER_MAX_LEVEL:
 		var needed : int = copies_needed_for_level(tower_levels[tower_id]["level"])
 		if tower_levels[tower_id]["xp"] >= needed:
 			tower_levels[tower_id]["xp"] -= needed
 			tower_levels[tower_id]["level"] += 1
+			if HERO_DEFS.has(tower_id):
+				hero_talent_points[tower_id] = hero_talent_points.get(tower_id, 0) + 1
 		else:
 			break
 	save_game()
 
 func add_tower_copy(tower_id: String) -> void:
 	add_tower_xp(tower_id, 1)
+
+func get_hero_talent_points(hero_id: String) -> int:
+	return int(hero_talent_points.get(hero_id, 0))
+
+func get_hero_talent_alloc(hero_id: String) -> Dictionary:
+	var a : Dictionary = hero_talent_alloc.get(hero_id, {})
+	return {"dmg": int(a.get("dmg", 0)), "rng": int(a.get("rng", 0)), "fr": int(a.get("fr", 0))}
+
+func spend_hero_talent(hero_id: String, stat: String) -> bool:
+	if get_hero_talent_points(hero_id) <= 0:
+		return false
+	if not hero_talent_alloc.has(hero_id):
+		hero_talent_alloc[hero_id] = {"dmg": 0, "rng": 0, "fr": 0}
+	hero_talent_alloc[hero_id][stat] = int(hero_talent_alloc[hero_id].get(stat, 0)) + 1
+	hero_talent_points[hero_id] = get_hero_talent_points(hero_id) - 1
+	save_game()
+	return true
 
 # ── Stub multipliers (used for heroes, idx-based) — kept for compatibility ────
 func final_damage_mult(_tower_idx: int)    -> float: return 1.0
@@ -292,6 +319,8 @@ func save_game() -> void:
 		"blue_gems":              blue_gems,
 		"upgrade_purchases":      upgrade_purchases,
 		"tower_levels":           tower_levels,
+		"hero_talent_points":     hero_talent_points,
+		"hero_talent_alloc":      hero_talent_alloc,
 		"selected_hero_id":       selected_hero_id,
 	}
 	var file := FileAccess.open_encrypted_with_pass(SAVE_PATH, FileAccess.WRITE, SAVE_KEY)
@@ -321,6 +350,12 @@ func load_game() -> void:
 	var tl = d.get("tower_levels", {})
 	if tl is Dictionary:
 		tower_levels = tl
+	var htp = d.get("hero_talent_points", {})
+	if htp is Dictionary:
+		hero_talent_points = htp
+	var hta = d.get("hero_talent_alloc", {})
+	if hta is Dictionary:
+		hero_talent_alloc = hta
 		# Normalize: re-run the level-up loop on every entry so any accumulated XP
 		# from older save formats is correctly converted into levels.
 		for tid in tower_levels.keys():
@@ -328,6 +363,20 @@ func load_game() -> void:
 	var shi = d.get("selected_hero_id", "knight")
 	if shi is String and HERO_DEFS.has(shi):
 		selected_hero_id = shi
+	_reconcile_hero_talents()
+
+func _reconcile_hero_talents() -> void:
+	for hero_id in tower_levels:
+		if not HERO_DEFS.has(hero_id):
+			continue
+		var hero_lv       : int = int(tower_levels[hero_id].get("level", 0))
+		var expected      : int = hero_lv
+		var alloc         := get_hero_talent_alloc(hero_id)
+		var spent         : int = alloc.dmg + alloc.rng + alloc.fr
+		var available     : int = int(hero_talent_points.get(hero_id, 0))
+		var missing       : int = expected - (available + spent)
+		if missing > 0:
+			hero_talent_points[hero_id] = available + missing
 
 func get_upgrade_tiers(node_id: String) -> int:
 	return int(upgrade_purchases.get(node_id, 0))
@@ -352,6 +401,67 @@ func turret_fire_rate_mult(turret_id: String) -> float:
 func turret_has_special(turret_id: String) -> bool:
 	return get_upgrade_tiers(turret_id + "_special") > 0
 
+static func get_world_path(world: int) -> Array:
+	match world:
+		1: return [
+			Vector2(-40,140),Vector2(850,140),Vector2(850,500),Vector2(250,500),Vector2(250,140),
+			Vector2(850,140),Vector2(850,500),Vector2(250,500),Vector2(250,140),Vector2(-40,140),
+		]
+		2: return [  # Deep Forest — enter bottom, right-side zigzag × 2
+			Vector2(-40,500),Vector2(250,500),Vector2(250,140),Vector2(850,140),
+			Vector2(980,230),Vector2(850,320),Vector2(980,420),Vector2(850,500),
+			Vector2(250,500),Vector2(250,140),Vector2(850,140),
+			Vector2(980,230),Vector2(850,320),Vector2(980,420),Vector2(850,500),Vector2(-40,500),
+		]
+		3: return [  # Desert Ruins — top pyramid peaks
+			Vector2(-40,140),Vector2(350,80),Vector2(640,140),Vector2(850,80),
+			Vector2(850,500),Vector2(250,500),Vector2(250,140),
+			Vector2(350,80),Vector2(640,140),Vector2(850,80),
+			Vector2(850,500),Vector2(-40,500),
+		]
+		4: return [  # Frost Peaks — icy spike tops × 2
+			Vector2(-40,140),Vector2(250,140),Vector2(370,52),Vector2(490,140),
+			Vector2(610,52),Vector2(730,140),Vector2(850,140),Vector2(850,500),
+			Vector2(250,500),Vector2(250,140),Vector2(370,52),Vector2(490,140),
+			Vector2(610,52),Vector2(730,140),Vector2(850,140),Vector2(-40,140),
+		]
+		5: return [  # Volcanic Wastes — bottom lava dips × 2
+			Vector2(-40,140),Vector2(850,140),Vector2(850,500),
+			Vector2(700,585),Vector2(540,500),Vector2(380,585),Vector2(250,500),
+			Vector2(250,140),Vector2(850,140),Vector2(850,500),
+			Vector2(700,585),Vector2(540,500),Vector2(380,585),Vector2(250,500),Vector2(-40,500),
+		]
+		6: return [  # Swamplands — left-side swamp zigzag × 2
+			Vector2(-40,140),Vector2(850,140),Vector2(850,500),Vector2(250,500),
+			Vector2(145,415),Vector2(250,310),Vector2(145,195),Vector2(250,140),
+			Vector2(850,140),Vector2(850,500),Vector2(250,500),
+			Vector2(145,415),Vector2(250,310),Vector2(145,195),Vector2(250,140),Vector2(-40,140),
+		]
+		7: return [  # Crystal Highlands — diamond oval corners
+			Vector2(-40,320),Vector2(250,140),Vector2(850,140),Vector2(980,320),
+			Vector2(850,500),Vector2(250,500),Vector2(-40,320),
+			Vector2(250,140),Vector2(850,140),Vector2(980,320),
+			Vector2(850,500),Vector2(250,500),Vector2(-40,320),
+		]
+		8: return [  # Shadow Realm — expanded perimeter loop × 1
+			Vector2(-40,140),Vector2(250,140),Vector2(250,72),Vector2(850,72),
+			Vector2(980,140),Vector2(980,500),Vector2(850,565),
+			Vector2(250,565),Vector2(-40,500),Vector2(-40,140),
+		]
+		9: return [  # Celestial Kingdom — grand symmetrical oval × 2
+			Vector2(-40,140),Vector2(850,140),Vector2(985,320),Vector2(850,500),
+			Vector2(250,500),Vector2(115,320),Vector2(250,140),
+			Vector2(850,140),Vector2(985,320),Vector2(850,500),
+			Vector2(250,500),Vector2(115,320),Vector2(-40,320),
+		]
+		10: return [  # Eternal Citadel — extended grand circuit
+			Vector2(-40,140),Vector2(850,140),Vector2(985,310),Vector2(850,500),
+			Vector2(250,500),Vector2(115,310),Vector2(250,140),
+			Vector2(540,140),Vector2(850,72),Vector2(985,310),
+			Vector2(850,565),Vector2(250,565),Vector2(115,310),Vector2(-40,310),
+		]
+		_: return get_world_path(1)
+
 func reset_save() -> void:
 	run_gold                  = 0
 	all_time_highest_stage    = 0
@@ -360,6 +470,8 @@ func reset_save() -> void:
 	blue_gems                 = 0
 	upgrade_purchases         = {}
 	tower_levels              = {}
+	hero_talent_points        = {}
+	hero_talent_alloc         = {}
 	reset_run_buffs()
 	if FileAccess.file_exists(SAVE_PATH):
 		DirAccess.remove_absolute(SAVE_PATH)

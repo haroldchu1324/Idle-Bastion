@@ -77,20 +77,8 @@ const RARITY_COSTS : Dictionary = {
 	"legendary": 600,
 }
 
-# ── Enemy path ────────────────────────────────────────────────────────────────
-# Road centerlines: CY_TOP=140, CY_BOT=500, CX_LEFT=250, CX_RIGHT=1030
-const PATH : Array = [
-	Vector2(-40, 140),
-	Vector2(850, 140),
-	Vector2(850, 500),
-	Vector2(250, 500),
-	Vector2(250, 140),
-	Vector2(850, 140),
-	Vector2(850, 500),
-	Vector2(250, 500),
-	Vector2(250, 140),
-	Vector2(-40, 140),
-]
+# ── Enemy path (set in _ready() based on selected world) ─────────────────────
+var PATH : Array = []
 
 # ── Stage definitions ─────────────────────────────────────────────────────────
 const STAGES : Array = [
@@ -190,6 +178,7 @@ var _bosses_killed     : int   = 0
 var _gems_this_run     : int   = 0
 var _spawn_queue   : Array = []
 var _spawn_timer   : float = 0.0
+var _wave_start_lives : Dictionary = {}  # wid → lives at wave start (for hercules perfect-clear check)
 
 var _boss_active          : bool  = false
 var _boss_timer           : float = 0.0
@@ -197,6 +186,7 @@ var _boss_ref             : Node2D = null
 var _spawning_done        : bool  = false
 var _pending_boss_reward  : bool  = false
 var _game_over     : bool  = false
+var _game_left     : bool  = false
 
 # ── Poison Cloud (Venom Drake) ────────────────────────────────────────────────
 var _poison_cloud : Node2D = null
@@ -214,6 +204,7 @@ var _info_refresh_timer  : float      = 0.0
 
 
 func _ready() -> void:
+	PATH = GameData.get_world_path(GameData.selected_world)
 	MapBuilder.new().build(_terrain)
 	_hud.setup(self)
 	_hud.wave_pressed.connect(_on_wave_btn_pressed)
@@ -229,6 +220,7 @@ func _ready() -> void:
 	GameData.current_run_highest_stage = 0
 	GameData.reset_run_buffs()
 	_hud.buff_chosen.connect(_on_buff_chosen)
+	_hud.game_left.connect(_on_game_left)
 	_gold  = 100
 	_lives = 20
 	_refresh_hud()
@@ -246,6 +238,10 @@ func _spawn_knight() -> void:
 	h_data["damage"]    = hero_base.get("damage",    20.0) * GameData.final_damage_mult(h_idx)
 	h_data["range"]     = hero_base.get("range",  1500.0) * GameData.final_range_mult(h_idx)
 	h_data["fire_rate"] = hero_base.get("fire_rate", 0.9) * GameData.final_fire_rate_mult(h_idx)
+	var _h_alloc := GameData.get_hero_talent_alloc(GameData.selected_hero_id)
+	h_data["damage"]    = h_data["damage"]    + float(_h_alloc.get("dmg", 0))
+	h_data["range"]     = h_data["range"]     + float(_h_alloc.get("rng", 0)) * 15.0
+	h_data["fire_rate"] = h_data["fire_rate"] * (1.0 + float(_h_alloc.get("fr", 0)) * 0.05)
 	tower.init_type(h_data)
 	tower.gold_proc.connect(func(amount: float): _gold += amount; _refresh_hud())
 	tower.serpent_summon.connect(func(dmg: float): _spawn_infernal_serpent(dmg))
@@ -254,7 +250,7 @@ func _spawn_knight() -> void:
 
 
 func _process(delta: float) -> void:
-	if _game_over:
+	if _game_over or _game_left:
 		return
 	var mp := get_viewport().get_mouse_position()
 
@@ -317,6 +313,7 @@ func start_wave() -> void:
 		var wid : int = _next_wave_id
 		_next_wave_id += 1
 		_wave_remaining[wid] = 0   # incremented as each enemy actually spawns
+		_wave_start_lives[wid] = _lives
 		for _i in range(def[0]):
 			_spawn_queue.append({"def": def, "wave_id": wid})
 		_spawn_timer = 0.0
@@ -435,11 +432,14 @@ func _on_wave_enemy_removed(wid: int) -> void:
 	_wave_remaining[wid] -= 1
 	if _wave_remaining[wid] <= 0:
 		_wave_remaining.erase(wid)
-		# Hercules: grant +5 damage for this wave being cleared
-		for tile in _tower_map:
-			var tw = _tower_map[tile]
-			if is_instance_valid(tw) and tw.tower_data.get("id", "") == "hercules":
-				tw._hercules_wave_bonus += 5.0
+		var no_lives_lost : bool = (_lives >= _wave_start_lives.get(wid, _lives))
+		_wave_start_lives.erase(wid)
+		# Hercules: +5 permanent damage only on a perfect wave clear (no lives lost)
+		if no_lives_lost:
+			for tile in _tower_map:
+				var tw = _tower_map[tile]
+				if is_instance_valid(tw) and tw.tower_data.get("id", "") == "hercules":
+					tw._hercules_wave_bonus += 5.0
 
 
 func _check_wave_done() -> void:
@@ -485,6 +485,8 @@ func _try_show_boss_reward() -> void:
 	# Wait one frame so every queue_free() from this frame is flushed and no
 	# dying enemy is still visible on screen when the cards appear.
 	await get_tree().process_frame
+	if _game_left or _game_over:
+		return
 	_clear_poison_cloud()
 	_pre_reward_time_scale     = Engine.time_scale
 	Engine.time_scale          = 1.0
@@ -498,6 +500,24 @@ func _try_show_boss_reward() -> void:
 	var rarity : String = GameData.roll_rarity(_stage)
 	var buffs  : Array  = GameData.pick_buffs(rarity, 3)
 	_hud.show_boss_buff_cards(buffs, _stage)
+
+
+func _on_game_left() -> void:
+	_game_left           = true
+	_pending_boss_reward = false
+	_boss_active         = false
+	_spawn_queue.clear()
+	_wave_start_lives.clear()
+	Engine.time_scale = 1.0
+	# Kill every enemy node so their processes stop and no signals fire late
+	for e in get_tree().get_nodes_in_group("enemies"):
+		if is_instance_valid(e):
+			e.queue_free()
+	if is_instance_valid(_boss_ref):
+		_boss_ref.queue_free()
+		_boss_ref = null
+	_clear_ice_zones()
+	_clear_poison_cloud()
 
 
 func _on_buff_chosen(buff_id: String) -> void:
@@ -551,7 +571,7 @@ func _on_boss_timer_expired() -> void:
 
 
 func _check_lives() -> void:
-	if _lives <= 0 and not _game_over:
+	if _lives <= 0 and not _game_over and not _game_left:
 		_trigger_game_over()
 
 
@@ -574,7 +594,7 @@ func _trigger_game_over() -> void:
 	for tower in _tower_map.values():
 		if is_instance_valid(tower) and not tower.tower_data.is_empty():
 			turrets.append(tower.tower_data)
-	_hud.show_run_results(_stage, _enemies_killed, _bosses_killed, gems_earned, turrets)
+	_hud.show_run_results(_stage, _enemies_killed, _bosses_killed, gems_earned, turrets, false, _wave_in_stage)
 
 
 func _on_start_battle_pressed() -> void:
@@ -595,7 +615,7 @@ func _trigger_victory() -> void:
 	for tower in _tower_map.values():
 		if is_instance_valid(tower) and not tower.tower_data.is_empty():
 			turrets.append(tower.tower_data)
-	_hud.show_run_results(_stage, _enemies_killed, _bosses_killed, gems_earned, turrets, true)
+	_hud.show_run_results(_stage, _enemies_killed, _bosses_killed, gems_earned, turrets, true, _wave_in_stage)
 
 
 func _advance_stage() -> void:
@@ -724,8 +744,11 @@ func _refresh_hud() -> void:
 	if _boss_active and is_instance_valid(_boss_ref):
 		boss_hp     = _boss_ref.hp
 		boss_max_hp = _boss_ref.max_hp
+	# Once the last wave's spawn queue empties, show the boss button immediately
+	# rather than waiting for every enemy to die.
+	var display_wave_active : bool = _wave_active and not (_spawning_done and _wave_in_stage >= total_waves)
 	_hud.refresh(int(_gold), _lives, _stage, _wave_in_stage, total_waves,
-				 _wave_active, _boss_active, _boss_timer, can_next,
+				 display_wave_active, _boss_active, _boss_timer, can_next,
 				 boss_hp, boss_max_hp)
 	_hud.update_recipe_notifications(SummonSystem.get_available_recipe_fusions(_tower_map), _get_all_owned_turret_ids())
 	_update_upgrade_indicators()
