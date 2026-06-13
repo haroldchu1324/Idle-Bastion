@@ -21,6 +21,7 @@ var hero_talent_points        : Dictionary = {}  # {hero_id: int}  — unspent t
 var hero_talent_alloc         : Dictionary = {}  # {hero_id: {dmg:int, rng:int, fr:int}}
 var selected_hero_id          : String    = "knight"
 var selected_world            : int       = 1     # in-memory only; set by HUD before scene reload
+var launching_into_game       : bool      = false # true only when Start World triggers reload
 
 # ── Hero definitions ──────────────────────────────────────────────────────────
 const HERO_DEFS : Dictionary = {
@@ -215,6 +216,20 @@ var buff_dot_dps           : float = 0.0   # damage per second on all enemies
 var buff_gold_pct          : float = 0.0   # stacks into total_gold_drop_mult
 var buff_pending_lives     : int   = 0     # consumed by Main after buff picked
 var chosen_buffs           : Array = []   # list of buff dicts picked this run
+var run_pending_cards      : Array = []   # [{type,id,rarity}] earned from boss drops this run
+
+func apply_run_cards() -> void:
+	for card in run_pending_cards:
+		add_tower_copy(card["id"])  # heroes use same XP/level system
+	run_pending_cards.clear()
+	save_game()
+
+func heroes_of_rarity(rarity: String) -> Array:
+	var result : Array = []
+	for hero_id in HERO_DEFS:
+		if HERO_DEFS[hero_id].get("rarity", "") == rarity:
+			result.append(hero_id)
+	return result
 
 func reset_run_buffs() -> void:
 	buff_damage_flat    = 0.0
@@ -225,6 +240,7 @@ func reset_run_buffs() -> void:
 	buff_gold_pct       = 0.0
 	buff_pending_lives  = 0
 	chosen_buffs        = []
+	run_pending_cards   = []
 
 # ── Boss buff definitions ─────────────────────────────────────────────────────
 const BOSS_BUFFS : Array = [
@@ -407,60 +423,159 @@ static func get_world_path(world: int) -> Array:
 			Vector2(-40,140),Vector2(850,140),Vector2(850,500),Vector2(250,500),Vector2(250,140),
 			Vector2(850,140),Vector2(850,500),Vector2(250,500),Vector2(250,140),Vector2(-40,140),
 		]
-		2: return [  # Deep Forest — enter bottom, right-side zigzag × 2
-			Vector2(-40,500),Vector2(250,500),Vector2(250,140),Vector2(850,140),
-			Vector2(980,230),Vector2(850,320),Vector2(980,420),Vector2(850,500),
-			Vector2(250,500),Vector2(250,140),Vector2(850,140),
-			Vector2(980,230),Vector2(850,320),Vector2(980,420),Vector2(850,500),Vector2(-40,500),
+		2: return [  # Deep Forest — Z-snake (3 horizontal rails)
+			Vector2(-10,140), Vector2(870,140),
+			Vector2(870,320), Vector2(120,320),
+			Vector2(120,500),  Vector2(870,500),
+			Vector2(870,600), Vector2(-10,600),
 		]
-		3: return [  # Desert Ruins — top pyramid peaks
-			Vector2(-40,140),Vector2(350,80),Vector2(640,140),Vector2(850,80),
-			Vector2(850,500),Vector2(250,500),Vector2(250,140),
-			Vector2(350,80),Vector2(640,140),Vector2(850,80),
-			Vector2(850,500),Vector2(-40,500),
+		3: return [  # Desert Ruins — figure-8 (two rectangular loops sharing a centre)
+			Vector2(-10,320),
+			Vector2(870,320), Vector2(870,140), Vector2(120,140),
+			Vector2(120,320),
+			Vector2(120,500),  Vector2(870,500), Vector2(870,320),
+			Vector2(-10,320),
 		]
-		4: return [  # Frost Peaks — icy spike tops × 2
-			Vector2(-40,140),Vector2(250,140),Vector2(370,52),Vector2(490,140),
-			Vector2(610,52),Vector2(730,140),Vector2(850,140),Vector2(850,500),
-			Vector2(250,500),Vector2(250,140),Vector2(370,52),Vector2(490,140),
-			Vector2(610,52),Vector2(730,140),Vector2(850,140),Vector2(-40,140),
+		4: return [  # Frost Peaks — inward two-ring spiral
+			Vector2(-10,140), Vector2(840,140),
+			Vector2(840,500), Vector2(150,500),
+			Vector2(150,200), Vector2(780,200),
+			Vector2(780,440), Vector2(-10,440),
 		]
-		5: return [  # Volcanic Wastes — bottom lava dips × 2
-			Vector2(-40,140),Vector2(850,140),Vector2(850,500),
-			Vector2(700,585),Vector2(540,500),Vector2(380,585),Vector2(250,500),
-			Vector2(250,140),Vector2(850,140),Vector2(850,500),
-			Vector2(700,585),Vector2(540,500),Vector2(380,585),Vector2(250,500),Vector2(-40,500),
+		5: return [  # Volcanic Wastes — wide hexagonal oval × 2
+			Vector2(-10,320),
+			Vector2(150,140), Vector2(870,140),
+			Vector2(990,320),
+			Vector2(870,500), Vector2(150,500),
+			Vector2(-10,320),
+			Vector2(150,140), Vector2(870,140),
+			Vector2(990,320),
+			Vector2(870,500), Vector2(150,500),
+			Vector2(-10,320),
 		]
-		6: return [  # Swamplands — left-side swamp zigzag × 2
-			Vector2(-40,140),Vector2(850,140),Vector2(850,500),Vector2(250,500),
-			Vector2(145,415),Vector2(250,310),Vector2(145,195),Vector2(250,140),
-			Vector2(850,140),Vector2(850,500),Vector2(250,500),
-			Vector2(145,415),Vector2(250,310),Vector2(145,195),Vector2(250,140),Vector2(-40,140),
+		6: return [  # Swamplands — X crossing × 2
+			Vector2(-10,320),
+			Vector2(150,140), Vector2(870,500),
+			Vector2(870,140), Vector2(150,500),
+			Vector2(-10,320),
+			Vector2(150,140), Vector2(870,500),
+			Vector2(870,140), Vector2(150,500),
+			Vector2(-10,320),
 		]
-		7: return [  # Crystal Highlands — diamond oval corners
-			Vector2(-40,320),Vector2(250,140),Vector2(850,140),Vector2(980,320),
-			Vector2(850,500),Vector2(250,500),Vector2(-40,320),
-			Vector2(250,140),Vector2(850,140),Vector2(980,320),
-			Vector2(850,500),Vector2(250,500),Vector2(-40,320),
+		7: return [  # Crystal Highlands — diamond loop × 2
+			Vector2(-10,320),
+			Vector2(510,110), Vector2(990,320),
+			Vector2(510,530), Vector2(-10,320),
+			Vector2(510,110), Vector2(990,320),
+			Vector2(510,530), Vector2(-10,320),
 		]
-		8: return [  # Shadow Realm — expanded perimeter loop × 1
-			Vector2(-40,140),Vector2(250,140),Vector2(250,72),Vector2(850,72),
-			Vector2(980,140),Vector2(980,500),Vector2(850,565),
-			Vector2(250,565),Vector2(-40,500),Vector2(-40,140),
+		8: return [  # Shadow Realm — figure-8 then large rectangle loop
+			Vector2(-10,320),
+			Vector2(780,320), Vector2(780,140), Vector2(210,140),
+			Vector2(210,320),
+			Vector2(210,500), Vector2(780,500), Vector2(780,320),
+			Vector2(780,140), Vector2(210,140),
+			Vector2(210,500), Vector2(780,500), Vector2(780,320),
+			Vector2(-10,320),
 		]
-		9: return [  # Celestial Kingdom — grand symmetrical oval × 2
-			Vector2(-40,140),Vector2(850,140),Vector2(985,320),Vector2(850,500),
-			Vector2(250,500),Vector2(115,320),Vector2(250,140),
-			Vector2(850,140),Vector2(985,320),Vector2(850,500),
-			Vector2(250,500),Vector2(115,320),Vector2(-40,320),
+		9: return [  # Celestial Kingdom — grand oval loop × 2
+			Vector2(-10,320),
+			Vector2(270,140), Vector2(750,140),
+			Vector2(900,320),
+			Vector2(750,500), Vector2(270,500),
+			Vector2(90,320),  Vector2(270,140),
+			Vector2(750,140), Vector2(900,320),
+			Vector2(750,500), Vector2(270,500),
+			Vector2(-10,320),
 		]
 		10: return [  # Eternal Citadel — extended grand circuit
-			Vector2(-40,140),Vector2(850,140),Vector2(985,310),Vector2(850,500),
-			Vector2(250,500),Vector2(115,310),Vector2(250,140),
-			Vector2(540,140),Vector2(850,72),Vector2(985,310),
-			Vector2(850,565),Vector2(250,565),Vector2(115,310),Vector2(-40,310),
+			Vector2(-10,140),Vector2(880,140),Vector2(985,310),Vector2(880,500),
+			Vector2(280,500),Vector2(145,310),Vector2(280,140),
+			Vector2(570,140),Vector2(880,72),Vector2(985,310),
+			Vector2(880,565),Vector2(280,565),Vector2(145,310),Vector2(-10,310),
 		]
 		_: return get_world_path(1)
+
+
+static func get_world_island(world: int) -> Rect2:
+	match world:
+		1:  return Rect2(280, 170, 540, 300)   # original 9×5 island
+		2:  return Rect2(120, 110, 780, 420)   # 13×7  Deep Forest
+		3:  return Rect2(120, 110, 780, 420)   # 13×7  Desert Ruins
+		4:  return Rect2(150, 110, 720, 420)   # 12×7  Frost Peaks
+		5:  return Rect2(150, 110, 720, 420)   # 12×7  Volcanic Wastes
+		6:  return Rect2(150, 110, 720, 420)   # 12×7  Swamplands
+		7:  return Rect2(150, 110, 720, 420)   # 12×7  Crystal Highlands
+		8:  return Rect2(210, 110, 600, 420)   # 10×7  Shadow Realm
+		9:  return Rect2( 90, 110, 840, 420)   # 14×7  Celestial Kingdom
+		10: return Rect2( 90, 110, 840, 420)   # 14×7  Eternal Citadel
+		_:  return get_world_island(1)
+
+# ── World modifiers ───────────────────────────────────────────────────────────
+# Each modifier: { type, value, label, color }
+# types: "hp_pct", "gold_pct", "spd_pct", "skeleton_pct", "melee_resist"
+static func get_world_modifiers(world: int) -> Array:
+	var data : Array = [
+		[],  # World 1 — no modifiers
+		[{"type":"hp_pct",      "value":5,  "label":"Enemies have +5% max health",         "color":Color(1.00,0.40,0.40)}],
+		[{"type":"hp_pct",      "value":5,  "label":"Enemies have +5% max health",         "color":Color(1.00,0.40,0.40)},
+		 {"type":"gold_pct",    "value":-5, "label":"Enemies drop 5% less gold",           "color":Color(1.00,0.72,0.12)}],
+		[{"type":"hp_pct",      "value":10, "label":"Enemies have +10% max health",        "color":Color(1.00,0.40,0.40)},
+		 {"type":"skeleton_pct","value":10, "label":"10% chance to respawn as a Skeleton", "color":Color(0.82,0.82,0.64)}],
+		[{"type":"hp_pct",      "value":10, "label":"Enemies have +10% max health",        "color":Color(1.00,0.40,0.40)},
+		 {"type":"gold_pct",    "value":-10,"label":"Enemies drop 10% less gold",          "color":Color(1.00,0.72,0.12)},
+		 {"type":"spd_pct",     "value":5,  "label":"Enemies move 5% faster",              "color":Color(1.00,0.55,0.15)}],
+		[{"type":"hp_pct",      "value":15, "label":"Enemies have +15% max health",        "color":Color(1.00,0.40,0.40)},
+		 {"type":"gold_pct",    "value":-10,"label":"Enemies drop 10% less gold",          "color":Color(1.00,0.72,0.12)},
+		 {"type":"skeleton_pct","value":15, "label":"15% chance to respawn as a Skeleton", "color":Color(0.82,0.82,0.64)}],
+		[{"type":"hp_pct",      "value":20, "label":"Enemies have +20% max health",        "color":Color(1.00,0.40,0.40)},
+		 {"type":"gold_pct",    "value":-15,"label":"Enemies drop 15% less gold",          "color":Color(1.00,0.72,0.12)},
+		 {"type":"spd_pct",     "value":10, "label":"Enemies move 10% faster",             "color":Color(1.00,0.55,0.15)},
+		 {"type":"melee_resist","value":25, "label":"Enemies take 25% less melee damage",  "color":Color(0.45,0.75,1.00)}],
+		[{"type":"hp_pct",      "value":25, "label":"Enemies have +25% max health",        "color":Color(1.00,0.40,0.40)},
+		 {"type":"gold_pct",    "value":-15,"label":"Enemies drop 15% less gold",          "color":Color(1.00,0.72,0.12)},
+		 {"type":"spd_pct",     "value":10, "label":"Enemies move 10% faster",             "color":Color(1.00,0.55,0.15)},
+		 {"type":"skeleton_pct","value":20, "label":"20% chance to respawn as a Skeleton", "color":Color(0.82,0.82,0.64)}],
+		[{"type":"hp_pct",      "value":30, "label":"Enemies have +30% max health",        "color":Color(1.00,0.40,0.40)},
+		 {"type":"gold_pct",    "value":-20,"label":"Enemies drop 20% less gold",          "color":Color(1.00,0.72,0.12)},
+		 {"type":"spd_pct",     "value":15, "label":"Enemies move 15% faster",             "color":Color(1.00,0.55,0.15)},
+		 {"type":"skeleton_pct","value":25, "label":"25% chance to respawn as a Skeleton", "color":Color(0.82,0.82,0.64)},
+		 {"type":"melee_resist","value":25, "label":"Enemies take 25% less melee damage",  "color":Color(0.45,0.75,1.00)}],
+		[{"type":"hp_pct",      "value":40, "label":"Enemies have +40% max health",        "color":Color(1.00,0.40,0.40)},
+		 {"type":"gold_pct",    "value":-25,"label":"Enemies drop 25% less gold",          "color":Color(1.00,0.72,0.12)},
+		 {"type":"spd_pct",     "value":20, "label":"Enemies move 20% faster",             "color":Color(1.00,0.55,0.15)},
+		 {"type":"skeleton_pct","value":30, "label":"30% chance to respawn as a Skeleton", "color":Color(0.82,0.82,0.64)},
+		 {"type":"melee_resist","value":50, "label":"Enemies take 50% less melee damage",  "color":Color(0.45,0.75,1.00)}],
+	]
+	if world < 1 or world > data.size():
+		return []
+	return data[world - 1]
+
+static func world_hp_mult(world: int) -> float:
+	for m in get_world_modifiers(world):
+		if m["type"] == "hp_pct": return 1.0 + float(m["value"]) / 100.0
+	return 1.0
+
+static func world_gold_mult(world: int) -> float:
+	for m in get_world_modifiers(world):
+		if m["type"] == "gold_pct": return 1.0 + float(m["value"]) / 100.0
+	return 1.0
+
+static func world_spd_mult(world: int) -> float:
+	for m in get_world_modifiers(world):
+		if m["type"] == "spd_pct": return 1.0 + float(m["value"]) / 100.0
+	return 1.0
+
+static func world_skeleton_chance(world: int) -> float:
+	for m in get_world_modifiers(world):
+		if m["type"] == "skeleton_pct": return float(m["value"]) / 100.0
+	return 0.0
+
+static func world_melee_resist(world: int) -> float:
+	for m in get_world_modifiers(world):
+		if m["type"] == "melee_resist": return float(m["value"]) / 100.0
+	return 0.0
+
 
 func reset_save() -> void:
 	run_gold                  = 0
@@ -472,9 +587,13 @@ func reset_save() -> void:
 	tower_levels              = {}
 	hero_talent_points        = {}
 	hero_talent_alloc         = {}
+	selected_hero_id          = "knight"
 	reset_run_buffs()
 	if FileAccess.file_exists(SAVE_PATH):
 		DirAccess.remove_absolute(SAVE_PATH)
+	add_tower_copy("knight")  # knight is always the starter hero
 
 func _ready() -> void:
 	load_game()
+	if get_tower_level("knight") == 0:
+		add_tower_copy("knight")  # unlock knight on first ever launch

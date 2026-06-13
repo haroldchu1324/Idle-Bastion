@@ -324,7 +324,7 @@ func _draw_node(nd: Dictionary) -> void:
 # ── Icon drawing ───────────────────────────────────────────────────────────────
 func _draw_node_icon(pos: Vector2, nd: Dictionary, col: Color) -> void:
 	var id : String = nd["id"]
-	var sc : float  = 13.0
+	var sc : float  = 10.0
 
 	if id == "core":
 		# Flame polygon
@@ -345,10 +345,16 @@ func _draw_node_icon(pos: Vector2, nd: Dictionary, col: Color) -> void:
 		return
 
 	if id.ends_with("_dmg"):
-		# Crossed swords (X)
-		draw_line(pos + Vector2(-sc, -sc), pos + Vector2(sc, sc), col, 3.5)
-		draw_line(pos + Vector2(sc, -sc),  pos + Vector2(-sc, sc), col, 3.5)
-		draw_circle(pos, 3.5, col)
+		# Upward sword: pointed blade tip, narrow body, crossguard, short handle
+		draw_colored_polygon(PackedVector2Array([
+			pos + Vector2(0,           -sc),
+			pos + Vector2(sc * 0.22,  -sc * 0.15),
+			pos + Vector2(-sc * 0.22, -sc * 0.15),
+		]), col)
+		draw_line(pos + Vector2(0, -sc * 0.15), pos + Vector2(0, sc * 0.45), col, 3.0)
+		draw_line(pos + Vector2(-sc * 0.6, sc * 0.15), pos + Vector2(sc * 0.6, sc * 0.15), col, 2.5)
+		draw_line(pos + Vector2(0, sc * 0.45), pos + Vector2(0, sc * 0.9), col, 2.5)
+		draw_circle(pos + Vector2(0, sc * 0.9), 2.5, col)
 		return
 
 	if id.ends_with("_spd"):
@@ -386,12 +392,21 @@ func _draw_turret_icon(pos: Vector2, tid: String, col: Color, sc: float) -> void
 			draw_line(pos + Vector2(-sc * 0.15, 0), pos + Vector2(sc * 0.85, 0),  Color(1, 1, 1, 0.65), 1.8)
 			draw_circle(pos + Vector2(sc * 0.85, 0), 3.0, col)
 		"mage":
-			_draw_star(pos, sc * 1.0, sc * 0.38, 5, col)
+			# Magic wand: diagonal handle + 4-point sparkle at tip
+			var tip  := pos + Vector2(sc * 0.55, -sc * 0.85)
+			var base := pos + Vector2(-sc * 0.55, sc * 0.85)
+			draw_line(base, tip, col, 3.0)
+			draw_circle(tip, 2.5, col)
+			var sr := sc * 0.38
+			draw_line(tip + Vector2(-sr, 0),   tip + Vector2(sr, 0),   col, 1.8)
+			draw_line(tip + Vector2(0, -sr),   tip + Vector2(0, sr),   col, 1.8)
+			draw_line(tip + Vector2(-sr * 0.7, -sr * 0.7), tip + Vector2(sr * 0.7, sr * 0.7), col, 1.2)
+			draw_line(tip + Vector2(sr * 0.7, -sr * 0.7),  tip + Vector2(-sr * 0.7, sr * 0.7), col, 1.2)
 		"catapult":
-			# Boulder + arm
-			draw_circle(pos + Vector2(0, -sc * 0.35), sc * 0.62, col)
-			draw_line(pos + Vector2(-sc * 0.55, sc * 0.55), pos + Vector2(sc * 0.55, sc * 0.55), col, 4.0)
-			draw_line(pos + Vector2(0, sc * 0.55), pos + Vector2(0, -sc * 0.1), col, 3.0)
+			# Boulder (circle) + launch arm + base
+			draw_circle(pos + Vector2(sc * 0.25, -sc * 0.6), sc * 0.52, col)
+			draw_line(pos + Vector2(-sc * 0.45, sc * 0.5), pos + Vector2(sc * 0.55, sc * 0.5), col, 3.5)
+			draw_line(pos + Vector2(-sc * 0.1, sc * 0.5), pos + Vector2(sc * 0.25, -sc * 0.2), col, 3.0)
 		"spearman":
 			# Spearhead triangle + handle
 			draw_colored_polygon(PackedVector2Array([
@@ -402,15 +417,16 @@ func _draw_turret_icon(pos: Vector2, tid: String, col: Color, sc: float) -> void
 			]), col)
 			draw_line(pos + Vector2(0, -sc * 0.15), pos + Vector2(0, sc), col, 2.8)
 		"rogue":
-			# Dagger diamond
+			# Dagger: blade + guard + wrapped handle
 			draw_colored_polygon(PackedVector2Array([
 				pos + Vector2(0,           -sc),
-				pos + Vector2(sc * 0.28,   -sc * 0.05),
-				pos + Vector2(0,            sc * 0.6),
-				pos + Vector2(-sc * 0.28,  -sc * 0.05),
+				pos + Vector2(sc * 0.22,  -sc * 0.05),
+				pos + Vector2(0,           sc * 0.45),
+				pos + Vector2(-sc * 0.22, -sc * 0.05),
 			]), col)
-			draw_line(pos + Vector2(0, sc * 0.6), pos + Vector2(0, sc), col, 2.5)
-			draw_line(pos + Vector2(-sc * 0.4, sc * 0.25), pos + Vector2(sc * 0.4, sc * 0.25), col, 2.0)
+			draw_line(pos + Vector2(-sc * 0.45, sc * 0.2), pos + Vector2(sc * 0.45, sc * 0.2), col, 2.2)
+			draw_line(pos + Vector2(0, sc * 0.45), pos + Vector2(0, sc * 0.9), col, 2.5)
+			draw_line(pos + Vector2(-sc * 0.22, sc * 0.65), pos + Vector2(sc * 0.22, sc * 0.65), col, 1.8)
 
 
 func _draw_star(center: Vector2, outer_r: float, inner_r: float, pts: int, col: Color) -> void:
