@@ -18,6 +18,7 @@ signal roll_upgrade_requested
 signal recipe_fusion_requested(result_id: String)
 signal upgrade_merge_requested
 signal debug_gold_requested
+signal debug_skip_stage_requested(stage: int)
 signal sell_tower_requested
 signal debug_summon_requested(tower_id: String)
 
@@ -45,6 +46,14 @@ var _speed_factor : float = 1.0
 var _gold_lbl       : Label
 var _lives_lbl      : Label
 var _gem_hud_lbl    : Label
+var _loot_items          : Array   = []
+var _loot_new_count      : int     = 0
+var _idle_card_chips     : Array   = []   # [{chip, card_data, idle_tw}]
+var _loot_badge_panel    : Control = null
+var _loot_badge_lbl      : Label   = null
+var _loot_panel          : Control = null
+var _loot_catcher        : Control = null
+var _loot_scroll_content : Control = null
 var _stage_lbl      : Label
 var _wave_lbl       : Label
 var _boss_bar       : Panel
@@ -102,8 +111,9 @@ var _info_counter_lbl   : Label
 var _info_counter_bg    : Panel
 
 # Screens
-var _game_over_screen   : Control
-var _run_results_screen : Control
+var _game_over_screen       : Control
+var _run_results_screen     : Control
+var _run_results_loot_grid  : Control = null
 var _upgrades_screen    : Control
 var _shop_screen        : Control
 var _world_map_screen   : Control
@@ -111,9 +121,16 @@ var _heroes_screen      : Control
 var _towers_screen      : Control
 # World Map page refs
 var _world_node_panels  : Array          = []
-var _wm_stage_panel     : Control        = null
-var _wm_sp_title        : Label          = null
-var _wm_sp_grid         : GridContainer  = null
+var _wm_detail_screen     : Control = null
+var _wm_detail_header     : ColorRect = null
+var _wm_detail_name       : Label = null
+var _wm_detail_status     : Label = null
+var _wm_detail_stages     : Label = null
+var _wm_detail_diff       : Label = null
+var _wm_detail_desc       : Label = null
+var _wm_detail_minimap    : Control = null
+var _wm_detail_mod_box    : Control = null
+var _wm_detail_start_btn  : Button = null
 var _wm_selected_world  : int            = 0
 var _wm_canvas          : Node2D          = null
 # Heroes page refs
@@ -178,8 +195,12 @@ var _font_bold  : FontFile
 
 # Floating in-world upgrade button
 var _upgrade_popup_btn : Button = null
-# Floating in-world sell button (debug)
+# Floating in-world sell button
 var _sell_btn          : Button = null
+# Floating in-world hero info button
+var _hero_info_btn        : Button = null
+var _pending_hero_tower              = null
+var _pending_hero_merge_cnt : int   = 0
 # Debug tower-list panel
 var _dbg_tower_panel   : Control = null
 
@@ -199,8 +220,10 @@ var _recipe_btn_badge    : Label   = null
 var _recipe_row_refs     : Array   = []   # [{result_id, badge_lbl, craft_btn, mat_refs:[{panel,id}]}]
 
 # ── Tower Gacha Shop ──────────────────────────────────────────────────────────
-const GACHA_SUMMON_COST    : int   = 100
-const GACHA_SUMMON_10_COST : int   = 950
+const GACHA_TOWER_SUMMON_COST    : int = 100
+const GACHA_TOWER_SUMMON_10_COST : int = 950
+const GACHA_HERO_SUMMON_COST     : int = 1000
+const GACHA_HERO_SUMMON_10_COST  : int = 9500
 const GACHA_SPIN_DURATION  : float = 2.5
 const GACHA_CARD_W         : int   = 112
 const GACHA_CARD_H         : int   = 160
@@ -491,6 +514,7 @@ func _build_ui() -> void:
 	_build_wave_label()
 	_build_hud_bar()
 	_build_gem_hud()
+	_build_loot_tab()
 	_build_tower_info_panel()
 	_build_notification()
 	_build_game_over_screen()
@@ -531,6 +555,364 @@ func _build_gem_hud() -> void:
 	_gem_hud_lbl.mouse_filter       = MOUSE_FILTER_IGNORE
 	bg.add_child(_gem_hud_lbl)
 	_gem_hud_lbl.text = "🔷  %d" % GameData.blue_gems
+
+
+func _build_loot_tab() -> void:
+	const C_LOOT := Color(0.38, 0.22, 0.56)
+	var btn := Button.new()
+	btn.text       = "🎒  Loot"
+	btn.position   = Vector2(1034, 602)
+	btn.size       = Vector2(232, 46)
+	btn.focus_mode = FOCUS_NONE
+	btn.add_theme_font_override("font",           _font_bold)
+	btn.add_theme_font_size_override("font_size", 18)
+	btn.add_theme_color_override("font_color",    C_WHITE)
+	btn.add_theme_stylebox_override("normal",  _btn_style(C_LOOT))
+	btn.add_theme_stylebox_override("hover",   _btn_style(C_LOOT.lightened(0.12)))
+	btn.add_theme_stylebox_override("pressed", _btn_style(C_LOOT.darkened(0.15)))
+	btn.add_theme_stylebox_override("focus",   _btn_style(C_LOOT))
+	btn.pressed.connect(_on_loot_btn_pressed)
+	add_child(btn)
+
+	# Red notification badge (top-right corner of the button)
+	var badge_s := StyleBoxFlat.new()
+	badge_s.bg_color = Color(0.90, 0.15, 0.15)
+	badge_s.set_corner_radius_all(12)
+	var badge_p := Panel.new()
+	badge_p.add_theme_stylebox_override("panel", badge_s)
+	badge_p.position     = Vector2(1034 + 232 - 13, 602 - 12)
+	badge_p.size         = Vector2(26, 26)
+	badge_p.mouse_filter = MOUSE_FILTER_IGNORE
+	badge_p.visible      = false
+	add_child(badge_p)
+	_loot_badge_panel = badge_p
+
+	var badge_lbl := _label("0", _font_bold, 13, C_WHITE)
+	badge_lbl.position             = Vector2(0, 0)
+	badge_lbl.size                 = Vector2(26, 26)
+	badge_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	badge_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	badge_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	badge_p.add_child(badge_lbl)
+	_loot_badge_lbl = badge_lbl
+
+	# Click-outside catcher — sits below the popup panel in z-order
+	var catcher := ColorRect.new()
+	catcher.color        = Color(0, 0, 0, 0)
+	catcher.position     = Vector2.ZERO
+	catcher.size         = Vector2(1280, 720)
+	catcher.z_index      = 39
+	catcher.mouse_filter = MOUSE_FILTER_STOP
+	catcher.visible      = false
+	add_child(catcher)
+	_loot_catcher = catcher
+
+	# Build the popup panel
+	const PW : int = 484
+	const PH : int = 566
+	var panel := Panel.new()
+	var ps    := StyleBoxFlat.new()
+	ps.bg_color     = Color(0.07, 0.06, 0.13, 0.97)
+	ps.border_color = Color(0.55, 0.35, 0.80, 0.65)
+	ps.set_border_width_all(1)
+	ps.set_corner_radius_all(12)
+	panel.add_theme_stylebox_override("panel", ps)
+	panel.position     = Vector2(1280 - PW - 8, 28)
+	panel.size         = Vector2(PW, PH)
+	panel.mouse_filter = MOUSE_FILTER_STOP
+	panel.visible      = false
+	panel.z_index      = 40
+	add_child(panel)
+	_loot_panel = panel
+
+	catcher.gui_input.connect(func(ev: InputEvent):
+		if ev is InputEventMouseButton and ev.pressed \
+				and ev.button_index not in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN,
+											MOUSE_BUTTON_WHEEL_LEFT, MOUSE_BUTTON_WHEEL_RIGHT]:
+			panel.visible  = false
+			catcher.visible = false
+	)
+
+	var hdr_s := StyleBoxFlat.new()
+	hdr_s.bg_color                   = Color(0.32, 0.16, 0.50)
+	hdr_s.corner_radius_top_left     = 11
+	hdr_s.corner_radius_top_right    = 11
+	var hdr := Panel.new()
+	hdr.add_theme_stylebox_override("panel", hdr_s)
+	hdr.position     = Vector2(0, 0)
+	hdr.size         = Vector2(PW, 52)
+	hdr.mouse_filter = MOUSE_FILTER_IGNORE
+	panel.add_child(hdr)
+
+	var title := _label("🎒  Loot Bag", _font_bold, 22, C_WHITE)
+	title.position             = Vector2(0, 10)
+	title.size                 = Vector2(PW, 34)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.mouse_filter         = MOUSE_FILTER_IGNORE
+	panel.add_child(title)
+
+	var close_btn := Button.new()
+	close_btn.text       = "✕"
+	close_btn.position   = Vector2(PW - 44, 8)
+	close_btn.size       = Vector2(36, 36)
+	close_btn.focus_mode = FOCUS_NONE
+	close_btn.add_theme_font_override("font",           _font_bold)
+	close_btn.add_theme_font_size_override("font_size", 18)
+	close_btn.add_theme_color_override("font_color",    C_WHITE)
+	close_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.28, 0.12, 0.42)))
+	close_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.48, 0.18, 0.62)))
+	close_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.18, 0.08, 0.28)))
+	close_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.28, 0.12, 0.42)))
+	close_btn.pressed.connect(func(): panel.visible = false)
+	panel.add_child(close_btn)
+
+	var empty_lbl := _label(
+		"No cards yet.\nDefeat bosses at stage 8, 9, and 10\nto earn cards.",
+		_font_reg, 15, Color(0.60, 0.58, 0.65))
+	empty_lbl.position             = Vector2(0, PH / 2 - 40)
+	empty_lbl.size                 = Vector2(PW, 80)
+	empty_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	empty_lbl.autowrap_mode        = TextServer.AUTOWRAP_WORD_SMART
+	empty_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	panel.add_child(empty_lbl)
+	panel.set_meta("empty_lbl", empty_lbl)
+
+	var scroll := ScrollContainer.new()
+	scroll.position     = Vector2(10, 60)
+	scroll.size         = Vector2(PW - 20, PH - 70)
+	scroll.mouse_filter = MOUSE_FILTER_STOP
+	scroll.visible      = false
+	panel.add_child(scroll)
+	panel.set_meta("scroll", scroll)
+
+	var content := VBoxContainer.new()
+	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	content.add_theme_constant_override("separation", 8)
+	scroll.add_child(content)
+	_loot_scroll_content = content
+
+
+func _on_loot_btn_pressed() -> void:
+	if not is_instance_valid(_loot_panel):
+		return
+	_loot_panel.visible = not _loot_panel.visible
+	if is_instance_valid(_loot_catcher):
+		_loot_catcher.visible = _loot_panel.visible
+	if _loot_panel.visible:
+		_loot_new_count = 0
+		if is_instance_valid(_loot_badge_panel):
+			_loot_badge_panel.visible = false
+
+
+func show_boss_card_idle(cards: Array, boss_screen_pos: Vector2) -> void:
+	const CHIP_W : float = 38.0
+	# Chips are Node2D in the game scene (behind enemies) rather than HUD children.
+	# get_parent() = CanvasLayer "UI", get_parent().get_parent() = Main scene root.
+	var game_root : Node  = get_parent().get_parent()
+	# Find the UI CanvasLayer index so chips can be inserted just before it —
+	# same z_index=0 as enemies, but earlier in the tree means drawn behind them.
+	var ui_node  : Node   = get_parent()           # the CanvasLayer "UI"
+	var ui_idx   : int    = ui_node.get_index()
+
+	var n := cards.size()
+	for i in n:
+		var card_data  : Dictionary = cards[i]
+		var rarity     : String     = card_data["rarity"]
+		var card_color : Color      = SummonSystem.RARITY_COLORS.get(rarity, Color.WHITE)
+
+		var sym : String
+		match rarity:
+			"legendary": sym = "★"
+			"epic":      sym = "✦"
+			"rare":      sym = "◆"
+			_:           sym = "●"
+
+		var chip := _BossChip.new()
+		chip.setup(card_color.darkened(0.55), card_color, sym, _font_bold)
+		var spread_x : float = float(i - (n - 1) * 0.5) * (CHIP_W + 8)
+		chip.position = boss_screen_pos + Vector2(spread_x, 0)
+		chip.z_index  = 0
+		game_root.add_child(chip)
+		game_root.move_child(chip, ui_idx)   # render before enemies (behind them)
+
+		# Idle float tween (gentle bob)
+		var base_y  : float = chip.position.y
+		var idle_tw := chip.create_tween().set_loops()
+		idle_tw.tween_property(chip, "position:y", base_y - 9.0, 0.65) \
+			.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+		idle_tw.tween_property(chip, "position:y", base_y, 0.65) \
+			.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+
+		# Orbiting stars for epic and legendary
+		var orbit_tws : Array = []
+		if rarity in ["epic", "legendary"]:
+			var num_stars : int    = 5 if rarity == "legendary" else 4
+			var star_char : String = "★" if rarity == "legendary" else "✦"
+			var star_clr  : Color  = Color(1.0, 0.95, 0.55, 0.95) if rarity == "legendary" \
+				else Color(0.88, 0.72, 1.00, 0.90)
+			var orbit_r : float = CHIP_W * 0.9
+			for si in num_stars:
+				var star := _StarNode.new()
+				star.setup(star_char, star_clr, _font_bold)
+				chip.add_child(star)
+				var phase    : float = float(si) / float(num_stars) * TAU
+				var star_ref := star
+				var orb_tw   := chip.create_tween().set_loops()
+				orb_tw.tween_method(func(a: float):
+					if is_instance_valid(star_ref):
+						star_ref.position = Vector2(cos(a) * orbit_r, sin(a) * orbit_r)
+				, phase, phase + TAU, 2.4)
+				orbit_tws.append(orb_tw)
+
+		_idle_card_chips.append({"chip": chip, "card_data": card_data, "idle_tw": idle_tw, "orbit_tws": orbit_tws})
+
+
+func fly_loot_cards_to_bag() -> void:
+	const LOOT_CENTER := Vector2(1150, 625)
+	var chips := _idle_card_chips.duplicate()
+	_idle_card_chips.clear()
+	for i in chips.size():
+		var entry     : Dictionary = chips[i]
+		var chip      : Node2D     = entry["chip"]
+		var card_data : Dictionary = entry["card_data"]
+		var idle_tw   : Tween      = entry["idle_tw"]
+		if not is_instance_valid(chip):
+			continue
+		# Kill all looping tweens before starting the fly
+		idle_tw.kill()
+		for otw in entry.get("orbit_tws", []):
+			if otw is Tween:
+				otw.kill()
+		var tw := create_tween()
+		tw.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+		tw.tween_interval(i * 0.15)
+		tw.tween_property(chip, "position", LOOT_CENTER, 1.0)
+		tw.tween_callback(func():
+			if is_instance_valid(chip):
+				chip.queue_free()
+			_loot_items.append(card_data)
+			_loot_new_count += 1
+			if is_instance_valid(_loot_badge_panel):
+				_loot_badge_panel.visible = true
+				_loot_badge_lbl.text      = str(_loot_new_count)
+			_refresh_loot_panel()
+		)
+
+
+# Called on game-over/victory to immediately add all floating chips to loot
+# without animation (process tweens are frozen when time_scale = 0).
+func flush_idle_chips_to_loot() -> void:
+	var chips := _idle_card_chips.duplicate()
+	_idle_card_chips.clear()
+	for entry in chips:
+		var chip      : Node2D     = entry["chip"]
+		var card_data : Dictionary = entry["card_data"]
+		var idle_tw   : Tween      = entry["idle_tw"]
+		idle_tw.kill()
+		for otw in entry.get("orbit_tws", []):
+			if otw is Tween:
+				otw.kill()
+		if is_instance_valid(chip):
+			chip.queue_free()
+		_loot_items.append(card_data)
+		_loot_new_count += 1
+	if _loot_new_count > 0 and is_instance_valid(_loot_badge_panel):
+		_loot_badge_panel.visible = true
+		_loot_badge_lbl.text      = str(_loot_new_count)
+	_refresh_loot_panel()
+
+
+func _refresh_loot_panel() -> void:
+	if not is_instance_valid(_loot_scroll_content):
+		return
+	for child in _loot_scroll_content.get_children():
+		child.queue_free()
+	# Group items by id, keeping track of rarity and type
+	var groups : Dictionary = {}
+	for item in _loot_items:
+		var id : String = item["id"]
+		if not groups.has(id):
+			groups[id] = {"type": item["type"], "id": id, "rarity": item["rarity"], "count": 0}
+		groups[id]["count"] += 1
+	var empty_lbl = _loot_panel.get_meta("empty_lbl") as Control
+	var scroll    = _loot_panel.get_meta("scroll")    as Control
+	if groups.is_empty():
+		empty_lbl.visible = true
+		scroll.visible    = false
+		return
+	empty_lbl.visible = false
+	scroll.visible    = true
+	for id in groups:
+		_loot_scroll_content.add_child(_make_loot_card(groups[id]))
+
+
+func _make_loot_card(entry: Dictionary) -> Control:
+	const CW : int = 454; const CH : int = 84
+	var id     : String     = entry["id"]
+	var rarity : String     = entry["rarity"]
+	var count  : int        = entry["count"]
+	var is_hero: bool       = entry["type"] == "hero"
+	var def    : Dictionary = SummonSystem.TURRET_DEFS.get(id, GameData.HERO_DEFS.get(id, {}))
+	var rcol   : Color      = SummonSystem.RARITY_COLORS.get(rarity, C_WHITE)
+
+	var card := Panel.new()
+	var cs   := StyleBoxFlat.new()
+	cs.bg_color     = Color(0.10, 0.09, 0.18)
+	cs.border_color = Color(rcol.r, rcol.g, rcol.b, 0.72)
+	cs.set_border_width_all(2)
+	cs.set_corner_radius_all(8)
+	card.add_theme_stylebox_override("panel", cs)
+	card.custom_minimum_size = Vector2(CW, CH)
+	card.mouse_filter        = MOUSE_FILTER_IGNORE
+
+	# Preview background + turret drawing
+	var pbg := Panel.new()
+	var pbs := StyleBoxFlat.new()
+	pbs.bg_color = Color(0.06, 0.06, 0.12)
+	pbs.set_corner_radius_all(6)
+	pbg.add_theme_stylebox_override("panel", pbs)
+	pbg.position     = Vector2(10, 10)
+	pbg.size         = Vector2(62, 62)
+	pbg.mouse_filter = MOUSE_FILTER_IGNORE
+	card.add_child(pbg)
+
+	var prev := _TurretPreview.new()
+	prev.turret_data = def
+	prev.position    = Vector2(12, 8)
+	card.add_child(prev)
+
+	# Name
+	var name_lbl := _label(def.get("name", id), _font_bold, 17, C_WHITE)
+	name_lbl.position     = Vector2(84, 10)
+	name_lbl.size         = Vector2(CW - 148, 26)
+	name_lbl.mouse_filter = MOUSE_FILTER_IGNORE
+	card.add_child(name_lbl)
+
+	# Rarity + type tag
+	var tag   : String = "  (Hero)" if is_hero else "  (Tower)"
+	var rar_lbl := _label(rarity.capitalize() + tag, _font_reg, 13, rcol)
+	rar_lbl.position     = Vector2(84, 38)
+	rar_lbl.size         = Vector2(CW - 148, 20)
+	rar_lbl.mouse_filter = MOUSE_FILTER_IGNORE
+	card.add_child(rar_lbl)
+
+	# Count badge (right side)
+	var count_lbl := _label("x%d" % count, _font_bold, 28, C_GOLD)
+	count_lbl.position             = Vector2(CW - 62, 22)
+	count_lbl.size                 = Vector2(54, 40)
+	count_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	count_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	card.add_child(count_lbl)
+
+	# Bottom color stripe
+	var stripe := ColorRect.new()
+	stripe.color        = Color(rcol.r, rcol.g, rcol.b, 0.20)
+	stripe.position     = Vector2(2, CH - 7)
+	stripe.size         = Vector2(CW - 4, 5)
+	stripe.mouse_filter = MOUSE_FILTER_IGNORE
+	card.add_child(stripe)
+
+	return card
 
 
 func _build_wave_label() -> void:
@@ -719,20 +1101,37 @@ func _build_hud_bar() -> void:
 
 
 func _build_upgrade_popup() -> void:
+	var _ms := func(bg: Color) -> StyleBoxFlat:
+		var s := StyleBoxFlat.new()
+		s.bg_color                    = bg
+		s.corner_radius_top_left      = 4
+		s.corner_radius_top_right     = 4
+		s.corner_radius_bottom_left   = 4
+		s.corner_radius_bottom_right  = 4
+		s.border_width_left           = 1
+		s.border_width_right          = 1
+		s.border_width_top            = 1
+		s.border_width_bottom         = 1
+		s.border_color                = Color(1.0, 1.0, 1.0, 0.18)
+		s.content_margin_left         = 4
+		s.content_margin_right        = 4
+		s.content_margin_top          = 2
+		s.content_margin_bottom       = 2
+		return s
 	var C_UPG := Color(0.42, 0.24, 0.06)
 	_upgrade_popup_btn = Button.new()
-	_upgrade_popup_btn.text       = "^  Upgrade"
-	_upgrade_popup_btn.size       = Vector2(88, 26)
+	_upgrade_popup_btn.text       = "^ Upgrade"
+	_upgrade_popup_btn.size       = Vector2(62, 20)
 	_upgrade_popup_btn.focus_mode = FOCUS_NONE
 	_upgrade_popup_btn.visible    = false
 	_upgrade_popup_btn.z_index    = 20
 	_upgrade_popup_btn.add_theme_font_override("font",           _font_bold)
-	_upgrade_popup_btn.add_theme_font_size_override("font_size", 14)
+	_upgrade_popup_btn.add_theme_font_size_override("font_size", 11)
 	_upgrade_popup_btn.add_theme_color_override("font_color",    C_WHITE)
-	_upgrade_popup_btn.add_theme_stylebox_override("normal",  _btn_style(C_UPG))
-	_upgrade_popup_btn.add_theme_stylebox_override("hover",   _btn_style(C_UPG.lightened(0.18)))
-	_upgrade_popup_btn.add_theme_stylebox_override("pressed", _btn_style(C_UPG.darkened(0.15)))
-	_upgrade_popup_btn.add_theme_stylebox_override("focus",   _btn_style(C_UPG))
+	_upgrade_popup_btn.add_theme_stylebox_override("normal",  _ms.call(C_UPG))
+	_upgrade_popup_btn.add_theme_stylebox_override("hover",   _ms.call(C_UPG.lightened(0.18)))
+	_upgrade_popup_btn.add_theme_stylebox_override("pressed", _ms.call(C_UPG.darkened(0.15)))
+	_upgrade_popup_btn.add_theme_stylebox_override("focus",   _ms.call(C_UPG))
 	_upgrade_popup_btn.pressed.connect(func(): upgrade_merge_requested.emit())
 	add_child(_upgrade_popup_btn)
 
@@ -740,7 +1139,7 @@ func _build_upgrade_popup() -> void:
 func show_upgrade_popup(world_pos: Vector2) -> void:
 	if not is_instance_valid(_upgrade_popup_btn):
 		return
-	_upgrade_popup_btn.position = world_pos + Vector2(-44, -52)
+	_upgrade_popup_btn.position = world_pos + Vector2(-43, -48)
 	_upgrade_popup_btn.visible  = true
 
 
@@ -756,21 +1155,81 @@ func is_upgrade_popup_clicked(click_pos: Vector2) -> bool:
 
 
 func _build_sell_btn() -> void:
+	var _ms := func(bg: Color) -> StyleBoxFlat:
+		var s := StyleBoxFlat.new()
+		s.bg_color                    = bg
+		s.corner_radius_top_left      = 4
+		s.corner_radius_top_right     = 4
+		s.corner_radius_bottom_left   = 4
+		s.corner_radius_bottom_right  = 4
+		s.border_width_left           = 1
+		s.border_width_right          = 1
+		s.border_width_top            = 1
+		s.border_width_bottom         = 1
+		s.border_color                = Color(1.0, 1.0, 1.0, 0.18)
+		s.content_margin_left         = 4
+		s.content_margin_right        = 4
+		s.content_margin_top          = 2
+		s.content_margin_bottom       = 2
+		return s
+
 	_sell_btn = Button.new()
-	_sell_btn.text       = "💰 Sell  +25g"
-	_sell_btn.size       = Vector2(120, 26)
+	_sell_btn.text       = "Sell +25g"
+	_sell_btn.size       = Vector2(62, 20)
 	_sell_btn.focus_mode = FOCUS_NONE
 	_sell_btn.visible    = false
 	_sell_btn.z_index    = 20
 	_sell_btn.add_theme_font_override("font",           _font_bold)
-	_sell_btn.add_theme_font_size_override("font_size", 13)
+	_sell_btn.add_theme_font_size_override("font_size", 11)
 	_sell_btn.add_theme_color_override("font_color",    Color(0.20, 0.90, 0.35))
-	_sell_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.08, 0.22, 0.10)))
-	_sell_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.12, 0.32, 0.14)))
-	_sell_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.05, 0.14, 0.07)))
-	_sell_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.08, 0.22, 0.10)))
+	_sell_btn.add_theme_stylebox_override("normal",  _ms.call(Color(0.08, 0.22, 0.10)))
+	_sell_btn.add_theme_stylebox_override("hover",   _ms.call(Color(0.14, 0.34, 0.16)))
+	_sell_btn.add_theme_stylebox_override("pressed", _ms.call(Color(0.05, 0.14, 0.07)))
+	_sell_btn.add_theme_stylebox_override("focus",   _ms.call(Color(0.08, 0.22, 0.10)))
 	_sell_btn.pressed.connect(func(): sell_tower_requested.emit())
 	add_child(_sell_btn)
+
+	_hero_info_btn = Button.new()
+	_hero_info_btn.text       = "i"
+	_hero_info_btn.size       = Vector2(20, 20)
+	_hero_info_btn.focus_mode = FOCUS_NONE
+	_hero_info_btn.visible    = false
+	_hero_info_btn.z_index    = 20
+	_hero_info_btn.add_theme_font_override("font",           _font_bold)
+	_hero_info_btn.add_theme_font_size_override("font_size", 11)
+	_hero_info_btn.add_theme_color_override("font_color",    Color(0.50, 0.85, 1.00))
+	_hero_info_btn.add_theme_stylebox_override("normal",  _ms.call(Color(0.06, 0.14, 0.28)))
+	_hero_info_btn.add_theme_stylebox_override("hover",   _ms.call(Color(0.12, 0.24, 0.42)))
+	_hero_info_btn.add_theme_stylebox_override("pressed", _ms.call(Color(0.03, 0.08, 0.18)))
+	_hero_info_btn.add_theme_stylebox_override("focus",   _ms.call(Color(0.06, 0.14, 0.28)))
+	_hero_info_btn.pressed.connect(func():
+		if is_instance_valid(_pending_hero_tower):
+			show_tower_info(_pending_hero_tower, _pending_hero_merge_cnt)
+	)
+	add_child(_hero_info_btn)
+
+
+func show_unit_btns(world_pos: Vector2, tower, merge_cnt: int) -> void:
+	if not is_instance_valid(_sell_btn) or not is_instance_valid(_hero_info_btn):
+		return
+	_pending_hero_tower     = tower
+	_pending_hero_merge_cnt = merge_cnt
+	const BH  : int = 20
+	const SW  : int = 62
+	const IW  : int = 20
+	const GAP : int = 4
+	var bx : float = world_pos.x - (SW + GAP + IW) / 2.0
+	var by : float = world_pos.y + 22.0
+	_sell_btn.size     = Vector2(SW, BH)
+	_sell_btn.position = Vector2(bx, by)
+	_sell_btn.visible  = true
+	_hero_info_btn.size     = Vector2(IW, BH)
+	_hero_info_btn.position = Vector2(bx + SW + GAP, by)
+	_hero_info_btn.visible  = true
+
+
+func is_tower_info_visible() -> bool:
+	return is_instance_valid(_info_panel) and _info_panel.visible
 
 
 func show_sell_btn(world_pos: Vector2) -> void:
@@ -783,12 +1242,18 @@ func show_sell_btn(world_pos: Vector2) -> void:
 func hide_sell_btn() -> void:
 	if is_instance_valid(_sell_btn):
 		_sell_btn.visible = false
+	if is_instance_valid(_hero_info_btn):
+		_hero_info_btn.visible = false
 
 
 func is_sell_btn_clicked(click_pos: Vector2) -> bool:
-	if not is_instance_valid(_sell_btn) or not _sell_btn.visible:
-		return false
-	return Rect2(_sell_btn.position, _sell_btn.size).has_point(click_pos)
+	if is_instance_valid(_sell_btn) and _sell_btn.visible:
+		if Rect2(_sell_btn.position, _sell_btn.size).has_point(click_pos):
+			return true
+	if is_instance_valid(_hero_info_btn) and _hero_info_btn.visible:
+		if Rect2(_hero_info_btn.position, _hero_info_btn.size).has_point(click_pos):
+			return true
+	return false
 
 
 func _build_rarity_modal() -> void:
@@ -1244,6 +1709,26 @@ func _fill_turrets_tab(page: Control) -> void:
 	summon_btn.pressed.connect(func(): _toggle_dbg_tower_panel())
 	summon_btn.visible = DEBUG
 	page.add_child(summon_btn)
+
+	# ── Debug: Skip to Stage 8 ────────────────────────────────────────────────
+	var skip_btn := Button.new()
+	skip_btn.text         = "🐛  Skip to Stage 8 (Debug)"
+	skip_btn.position     = Vector2(8, 436)
+	skip_btn.size         = Vector2(w - 16, 36)
+	skip_btn.focus_mode   = FOCUS_NONE
+	skip_btn.add_theme_font_override("font",           _font_reg)
+	skip_btn.add_theme_font_size_override("font_size", 14)
+	skip_btn.add_theme_color_override("font_color",    Color(1.00, 0.75, 0.30))
+	skip_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.24, 0.14, 0.04)))
+	skip_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.32, 0.20, 0.06)))
+	skip_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.18, 0.10, 0.02)))
+	skip_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.24, 0.14, 0.04)))
+	skip_btn.pressed.connect(func():
+		_tween_scale(skip_btn, Vector2(0.95, 0.95), 0.06)
+		debug_skip_stage_requested.emit(8)
+	)
+	skip_btn.visible = DEBUG
+	page.add_child(skip_btn)
 
 	# Connect ℹ to open the centered rarity modal
 	info_btn.gui_input.connect(func(ev: InputEvent):
@@ -1929,6 +2414,8 @@ func show_notification(msg: String) -> void:
 
 func show_run_results(stage: int, kills: int, bosses: int, gems: int, turrets: Array, victory: bool = false, wave: int = 0) -> void:
 	_run_results_screen.visible = true
+	if is_instance_valid(_gear_btn):
+		_gear_btn.visible = false
 
 	var title_lbl     : Label   = _run_results_screen.get_node("title")
 	var stage_lbl     : Label   = _run_results_screen.get_node("stage_info")
@@ -1938,10 +2425,16 @@ func show_run_results(stage: int, kills: int, bosses: int, gems: int, turrets: A
 	var gems_tot_lbl  : Label   = _run_results_screen.get_node("gems_total")
 	var tower_grid    : Control = _run_results_screen.get_node("tower_grid")
 
-	title_lbl.text = "🏆  Victory!" if victory else "💀  Defeated"
-	title_lbl.add_theme_color_override("font_color", C_GOLD if victory else C_RED)
-	stage_lbl.text     = "Stage %d" % stage
-	wave_lbl.text      = "Wave %d" % wave if wave > 0 else ""
+	if victory:
+		title_lbl.text = "🏆  Full Clear!"
+		title_lbl.add_theme_color_override("font_color", C_GOLD)
+		stage_lbl.text = ""
+		wave_lbl.text  = ""
+	else:
+		title_lbl.text = "💀  Defeated"
+		title_lbl.add_theme_color_override("font_color", C_RED)
+		stage_lbl.text = ("Stage %d Clear" % (stage - 1)) if stage > 1 else ""
+		wave_lbl.text  = "Wave %d" % wave if wave > 0 else ""
 	kills_lbl.text     = "⚔  %d enemies slain  (%d bosses)" % [kills, bosses]
 	gems_earn_lbl.text = "+%d  🔷  Blue Gems" % gems
 	gems_tot_lbl.text  = "Total: %d" % GameData.blue_gems
@@ -2017,6 +2510,60 @@ func show_run_results(stage: int, kills: int, bosses: int, gems: int, turrets: A
 			col = 0
 			row += 1
 
+	# ── Loot grid ────────────────────────────────────────────────────────────
+	if not is_instance_valid(_run_results_loot_grid):
+		return
+	for child in _run_results_loot_grid.get_children():
+		child.queue_free()
+
+	var loot_groups : Dictionary = {}
+	for item in _loot_items:
+		var lid : String = item["id"]
+		if not loot_groups.has(lid):
+			loot_groups[lid] = {"type": item["type"], "id": lid, "rarity": item["rarity"], "count": 0}
+		loot_groups[lid]["count"] += 1
+
+	var rarity_colors_loot := {
+		"common": Color(0.75, 0.75, 0.75), "rare": Color(0.25, 0.55, 1.00),
+		"epic": Color(0.72, 0.25, 0.90), "legendary": Color(1.00, 0.72, 0.10),
+	}
+	var lcol : int = 0; var lrow : int = 0
+	for lid in loot_groups:
+		var lentry : Dictionary = loot_groups[lid]
+		var lrarity : String    = lentry["rarity"]
+		var lcount  : int       = lentry["count"]
+		var ldef    : Dictionary = SummonSystem.TURRET_DEFS.get(lid, GameData.HERO_DEFS.get(lid, {}))
+		var lrc     : Color     = rarity_colors_loot.get(lrarity, C_WHITE)
+
+		var lcard := Panel.new()
+		lcard.position = Vector2(lcol * (CARD_W + GAP), lrow * (CARD_H + GAP))
+		lcard.size     = Vector2(CARD_W, CARD_H)
+		var lcs := StyleBoxFlat.new()
+		lcs.bg_color = Color(lrc.r * 0.14, lrc.g * 0.14, lrc.b * 0.14, 1.0)
+		lcs.corner_radius_top_left = 5; lcs.corner_radius_top_right = 5
+		lcs.corner_radius_bottom_left = 5; lcs.corner_radius_bottom_right = 5
+		lcs.border_width_left = 2; lcs.border_width_right = 2
+		lcs.border_width_top  = 2; lcs.border_width_bottom = 2
+		lcs.border_color = lrc
+		lcard.add_theme_stylebox_override("panel", lcs)
+		_run_results_loot_grid.add_child(lcard)
+
+		var lprev := _TurretPreview.new()
+		lprev.turret_data = ldef
+		lprev.position    = Vector2(1, 2)
+		lcard.add_child(lprev)
+
+		var lcount_lbl := _label("×%d" % lcount, _font_bold, 11, lrc)
+		lcount_lbl.position             = Vector2(0, CARD_H - 16)
+		lcount_lbl.size                 = Vector2(CARD_W, 16)
+		lcount_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		lcard.add_child(lcount_lbl)
+
+		lcol += 1
+		if lcol >= COLS:
+			lcol = 0
+			lrow += 1
+
 
 func _build_run_results_screen() -> void:
 	const LW  : int = 640   # left column usable width
@@ -2045,26 +2592,56 @@ func _build_run_results_screen() -> void:
 	vdiv.mouse_filter = MOUSE_FILTER_IGNORE
 	overlay.add_child(vdiv)
 
-	# ── Left column: tower grid ───────────────────────────────────────────────
+	# ── Left column top half: tower grid ─────────────────────────────────────
 	var left_hdr := _label("🗼  Towers on Field", _font_bold, 17, C_DIM)
-	left_hdr.position             = Vector2(PAD, 16)
-	left_hdr.size                 = Vector2(LW - PAD, 26)
+	left_hdr.position             = Vector2(PAD + 8, 22)
+	left_hdr.size                 = Vector2(LW - PAD - 8, 26)
 	left_hdr.mouse_filter         = MOUSE_FILTER_IGNORE
 	overlay.add_child(left_hdr)
 
 	var hdiv_l := ColorRect.new()
 	hdiv_l.color        = Color(1, 1, 1, 0.07)
-	hdiv_l.position     = Vector2(PAD, 48)
-	hdiv_l.size         = Vector2(LW - PAD, 2)
+	hdiv_l.position     = Vector2(PAD + 8, 52)
+	hdiv_l.size         = Vector2(LW - PAD - 8, 2)
 	hdiv_l.mouse_filter = MOUSE_FILTER_IGNORE
 	overlay.add_child(hdiv_l)
 
 	var tower_grid := Control.new()
 	tower_grid.name         = "tower_grid"
-	tower_grid.position     = Vector2(PAD, 58)
-	tower_grid.size         = Vector2(LW - PAD, 640)
+	tower_grid.position     = Vector2(PAD + 8, 62)
+	tower_grid.size         = Vector2(LW - PAD - 8, 278)
 	tower_grid.mouse_filter = MOUSE_FILTER_IGNORE
 	overlay.add_child(tower_grid)
+
+	# ── Mid divider ───────────────────────────────────────────────────────────
+	var hdiv_mid := ColorRect.new()
+	hdiv_mid.color        = Color(1, 1, 1, 0.07)
+	hdiv_mid.position     = Vector2(PAD, 352)
+	hdiv_mid.size         = Vector2(LW, 2)
+	hdiv_mid.mouse_filter = MOUSE_FILTER_IGNORE
+	overlay.add_child(hdiv_mid)
+
+	# ── Left column bottom half: loot grid ────────────────────────────────────
+	var loot_hdr := _label("🎒  Loot Earned", _font_bold, 17, C_DIM)
+	loot_hdr.position             = Vector2(PAD + 8, 364)
+	loot_hdr.size                 = Vector2(LW - PAD - 8, 26)
+	loot_hdr.mouse_filter         = MOUSE_FILTER_IGNORE
+	overlay.add_child(loot_hdr)
+
+	var hdiv_loot := ColorRect.new()
+	hdiv_loot.color        = Color(1, 1, 1, 0.07)
+	hdiv_loot.position     = Vector2(PAD + 8, 394)
+	hdiv_loot.size         = Vector2(LW - PAD - 8, 2)
+	hdiv_loot.mouse_filter = MOUSE_FILTER_IGNORE
+	overlay.add_child(hdiv_loot)
+
+	var loot_grid := Control.new()
+	loot_grid.name         = "loot_grid"
+	loot_grid.position     = Vector2(PAD + 8, 404)
+	loot_grid.size         = Vector2(LW - PAD - 8, 290)
+	loot_grid.mouse_filter = MOUSE_FILTER_IGNORE
+	overlay.add_child(loot_grid)
+	_run_results_loot_grid = loot_grid
 
 	# ── Right column: stats ───────────────────────────────────────────────────
 	# Title
@@ -2149,8 +2726,9 @@ func _build_run_results_screen() -> void:
 	cont_btn.add_theme_stylebox_override("focus",   _btn_style(C_BTN))
 	cont_btn.pressed.connect(func():
 		overlay.visible = false
-		Engine.time_scale = 1.0
-		_game_over_screen.visible = true
+		if is_instance_valid(_gear_btn):
+			_gear_btn.visible = true
+		show_main_menu()
 	)
 	overlay.add_child(cont_btn)
 
@@ -2258,8 +2836,36 @@ func _build_game_over_screen() -> void:
 	start_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.72, 0.30, 0.07)))
 	start_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.40, 0.16, 0.03)))
 	start_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.55, 0.22, 0.05)))
-	start_btn.pressed.connect(func(): Engine.time_scale = 1.0; get_tree().reload_current_scene())
+	start_btn.pressed.connect(func(): _on_main_nav_pressed(2))
 	overlay.add_child(start_btn)
+
+	# DEBUG — Reset all saved progress
+	var reset_btn := Button.new()
+	reset_btn.text       = "🗑  Reset Progress (Debug)"
+	reset_btn.position   = Vector2(14, 720 - 58 - 14)
+	reset_btn.size       = Vector2(260, 46)
+	reset_btn.focus_mode = FOCUS_NONE
+	reset_btn.add_theme_font_override("font",           _font_bold)
+	reset_btn.add_theme_font_size_override("font_size", 14)
+	reset_btn.add_theme_color_override("font_color",    Color(1, 0.6, 0.6))
+	reset_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.28, 0.10, 0.10)))
+	reset_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.40, 0.14, 0.14)))
+	reset_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.20, 0.07, 0.07)))
+	reset_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.28, 0.10, 0.10)))
+	var _reset_state := [false]  # array so lambda mutation persists across calls
+	reset_btn.pressed.connect(func():
+		if not _reset_state[0]:
+			_reset_state[0] = true
+			reset_btn.text = "⚠  CONFIRM RESET? (click again)"
+			reset_btn.add_theme_color_override("font_color", Color(1, 0.85, 0.2))
+			reset_btn.add_theme_stylebox_override("normal", _btn_style(Color(0.55, 0.28, 0.04)))
+			reset_btn.add_theme_stylebox_override("hover",  _btn_style(Color(0.72, 0.36, 0.06)))
+		else:
+			GameData.reset_save()
+			get_tree().reload_current_scene()
+	)
+	overlay.add_child(reset_btn)
+
 	call_deferred("_wire_hover_recursive", overlay)
 
 
@@ -2486,7 +3092,7 @@ func _build_shop_screen() -> void:
 		ps2.border_width_top   = 1; ps2.border_width_bottom = 1
 		ps2.border_color = Color(pcol.r, pcol.g, pcol.b, 0.38)
 		pill.add_theme_stylebox_override("panel", ps2)
-		pill.position     = Vector2(pill_x0 + pi * (PILL_W + PILL_GAP), 138)
+		pill.position     = Vector2(pill_x0 + pi * (PILL_W + PILL_GAP), 160)
 		pill.size         = Vector2(PILL_W, PILL_H)
 		pill.mouse_filter = MOUSE_FILTER_IGNORE
 		overlay.add_child(pill)
@@ -2587,7 +3193,7 @@ func _build_shop_screen() -> void:
 	var btn_x0    : int = (1280 - 2 * BTN_W - BTN_GAP) / 2
 
 	_gacha_summon_btn = Button.new()
-	_gacha_summon_btn.text       = "✦  Summon x1    🔷 %d" % GACHA_SUMMON_COST
+	_gacha_summon_btn.text       = "✦  Summon x1    🔷 %d" % GACHA_TOWER_SUMMON_COST
 	_gacha_summon_btn.position   = Vector2(btn_x0, btn_y)
 	_gacha_summon_btn.size       = Vector2(BTN_W, BTN_H)
 	_gacha_summon_btn.focus_mode = FOCUS_NONE
@@ -2603,7 +3209,7 @@ func _build_shop_screen() -> void:
 	overlay.add_child(_gacha_summon_btn)
 
 	_gacha_summon_10_btn = Button.new()
-	_gacha_summon_10_btn.text       = "✦✦  Summon x10  🔷 %d" % GACHA_SUMMON_10_COST
+	_gacha_summon_10_btn.text       = "✦✦  Summon x10  🔷 %d" % GACHA_TOWER_SUMMON_10_COST
 	_gacha_summon_10_btn.position   = Vector2(btn_x0 + BTN_W + BTN_GAP, btn_y)
 	_gacha_summon_10_btn.size       = Vector2(BTN_W, BTN_H)
 	_gacha_summon_10_btn.focus_mode = FOCUS_NONE
@@ -2668,6 +3274,12 @@ func _gacha_switch_mode(mode: String) -> void:
 		_gacha_tab_hero_btn.add_theme_color_override("font_color", C_WHITE if is_hero else C_DIM)
 		_gacha_tab_hero_btn.add_theme_stylebox_override("normal", _btn_style(hc))
 		_gacha_tab_hero_btn.add_theme_stylebox_override("hover",  _btn_style(hc.lightened(0.1)))
+	if is_instance_valid(_gacha_summon_btn):
+		var c1 : int = GACHA_HERO_SUMMON_COST if is_hero else GACHA_TOWER_SUMMON_COST
+		_gacha_summon_btn.text = "✦  Summon x1    🔷 %d" % c1
+	if is_instance_valid(_gacha_summon_10_btn):
+		var c10 : int = GACHA_HERO_SUMMON_10_COST if is_hero else GACHA_TOWER_SUMMON_10_COST
+		_gacha_summon_10_btn.text = "✦✦  Summon x10  🔷 %d" % c10
 	_gacha_rebuild_strip("")
 
 
@@ -3082,10 +3694,11 @@ func _gacha_make_mini_card(tower_id: String) -> Control:
 func _gacha_on_summon_pressed() -> void:
 	if _gacha_spinning:
 		return
-	if GameData.blue_gems < GACHA_SUMMON_COST:
+	var cost : int = GACHA_HERO_SUMMON_COST if _gacha_mode == "hero" else GACHA_TOWER_SUMMON_COST
+	if GameData.blue_gems < cost:
 		_gacha_flash_gems_red()
 		return
-	GameData.blue_gems -= GACHA_SUMMON_COST
+	GameData.blue_gems -= cost
 	GameData.save_game()
 	_gacha_refresh_gems()
 	_gacha_spinning = true
@@ -3099,10 +3712,11 @@ func _gacha_on_summon_pressed() -> void:
 func _gacha_on_summon_10_pressed() -> void:
 	if _gacha_spinning:
 		return
-	if GameData.blue_gems < GACHA_SUMMON_10_COST:
+	var cost : int = GACHA_HERO_SUMMON_10_COST if _gacha_mode == "hero" else GACHA_TOWER_SUMMON_10_COST
+	if GameData.blue_gems < cost:
 		_gacha_flash_gems_red()
 		return
-	GameData.blue_gems -= GACHA_SUMMON_10_COST
+	GameData.blue_gems -= cost
 	GameData.save_game()
 	_gacha_refresh_gems()
 	_gacha_spinning = true
@@ -3371,11 +3985,11 @@ func _build_world_map_screen() -> void:
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	overlay.add_child(title)
 
-	# ── Debug button ─────────────────────────────────────────────────────────
+	# ── Debug buttons ────────────────────────────────────────────────────────
 	if DEBUG:
 		var dbg_btn := Button.new()
 		dbg_btn.text       = "Unlock All (Debug)"
-		dbg_btn.position   = Vector2(1050, 12)
+		dbg_btn.position   = Vector2(840, 12)
 		dbg_btn.size       = Vector2(192, 30)
 		dbg_btn.focus_mode = FOCUS_NONE
 		dbg_btn.add_theme_font_override("font",           _font_bold)
@@ -3393,18 +4007,38 @@ func _build_world_map_screen() -> void:
 		)
 		overlay.add_child(dbg_btn)
 
+		var rst_btn := Button.new()
+		rst_btn.text       = "Reset Progress (Debug)"
+		rst_btn.position   = Vector2(1042, 12)
+		rst_btn.size       = Vector2(210, 30)
+		rst_btn.focus_mode = FOCUS_NONE
+		rst_btn.add_theme_font_override("font",           _font_bold)
+		rst_btn.add_theme_font_size_override("font_size", 11)
+		rst_btn.add_theme_color_override("font_color",    C_WHITE)
+		rst_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.14, 0.06, 0.40)))
+		rst_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.20, 0.08, 0.56)))
+		rst_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.10, 0.04, 0.30)))
+		rst_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.14, 0.06, 0.40)))
+		rst_btn.pressed.connect(func():
+			GameData.max_world_unlocked     = 1
+			GameData.all_time_highest_stage = 0
+			GameData.save_game()
+			_refresh_world_map()
+		)
+		overlay.add_child(rst_btn)
+
 	# ── Territory labels & click buttons ─────────────────────────────────────
 	var WM_DATA : Array = [
-		{"name": "Garden Plains",     "color": Color(0.22, 0.65, 0.16), "pos": Vector2(200, 558)},
-		{"name": "Deep Forest",       "color": Color(0.06, 0.38, 0.10), "pos": Vector2(118, 388)},
-		{"name": "Desert Ruins",      "color": Color(0.78, 0.58, 0.18), "pos": Vector2(268, 215)},
-		{"name": "Frost Peaks",       "color": Color(0.55, 0.78, 0.96), "pos": Vector2(468,  98)},
-		{"name": "Volcanic Wastes",   "color": Color(0.88, 0.18, 0.08), "pos": Vector2(718, 132)},
-		{"name": "Swamplands",        "color": Color(0.12, 0.48, 0.22), "pos": Vector2(948, 312)},
-		{"name": "Crystal Highlands", "color": Color(0.68, 0.22, 0.95), "pos": Vector2(858, 488)},
-		{"name": "Shadow Realm",      "color": Color(0.28, 0.08, 0.55), "pos": Vector2(618, 552)},
-		{"name": "Celestial Kingdom", "color": Color(0.95, 0.85, 0.28), "pos": Vector2(442, 432)},
-		{"name": "Eternal Citadel",   "color": Color(0.88, 0.88, 0.95), "pos": Vector2(588, 242)},
+		{"name": "Garden Plains",     "color": Color(0.22, 0.65, 0.16), "pos": Vector2(280, 583)},
+		{"name": "Deep Forest",       "color": Color(0.06, 0.38, 0.10), "pos": Vector2(198, 413)},
+		{"name": "Desert Ruins",      "color": Color(0.78, 0.58, 0.18), "pos": Vector2(348, 240)},
+		{"name": "Frost Peaks",       "color": Color(0.55, 0.78, 0.96), "pos": Vector2(548, 123)},
+		{"name": "Volcanic Wastes",   "color": Color(0.88, 0.18, 0.08), "pos": Vector2(798, 157)},
+		{"name": "Swamplands",        "color": Color(0.12, 0.48, 0.22), "pos": Vector2(1028, 337)},
+		{"name": "Crystal Highlands", "color": Color(0.68, 0.22, 0.95), "pos": Vector2(938, 513)},
+		{"name": "Shadow Realm",      "color": Color(0.28, 0.08, 0.55), "pos": Vector2(698, 577)},
+		{"name": "Celestial Kingdom", "color": Color(0.95, 0.85, 0.28), "pos": Vector2(522, 457)},
+		{"name": "Eternal Citadel",   "color": Color(0.88, 0.88, 0.95), "pos": Vector2(668, 267)},
 	]
 	_world_node_panels.clear()
 	for i in range(10):
@@ -3462,6 +4096,14 @@ func _build_world_map_screen() -> void:
 		btn.add_theme_stylebox_override("pressed", _bp)
 		btn.add_theme_stylebox_override("focus",   _bn)
 		btn.pressed.connect(_on_world_node_pressed.bind(w))
+		btn.mouse_entered.connect(func():
+			if is_instance_valid(_wm_canvas):
+				_wm_canvas.set_hovered(i)
+		)
+		btn.mouse_exited.connect(func():
+			if is_instance_valid(_wm_canvas) and _wm_canvas.hovered_world == i:
+				_wm_canvas.set_hovered(-1)
+		)
 		overlay.add_child(btn)
 
 		_world_node_panels.append({
@@ -3470,86 +4112,7 @@ func _build_world_map_screen() -> void:
 			"btn":      btn,
 		})
 
-	# ── Stage detail popup ───────────────────────────────────────────────────
-	var sp   := Panel.new()
-	var sp_s := StyleBoxFlat.new()
-	sp_s.bg_color     = Color(0.05, 0.06, 0.14, 0.98)
-	sp_s.border_color = Color(0.30, 0.42, 0.72)
-	sp_s.set_border_width_all(2)
-	sp_s.set_corner_radius_all(14)
-	sp.add_theme_stylebox_override("panel", sp_s)
-	sp.position     = Vector2(380, 110)
-	sp.size         = Vector2(520, 500)
-	sp.visible      = false
-	overlay.add_child(sp)
-	_wm_stage_panel = sp
-
-	var sp_close := Button.new()
-	sp_close.text       = "✕"
-	sp_close.position   = Vector2(480, 12)
-	sp_close.size       = Vector2(28, 28)
-	sp_close.flat       = true
-	sp_close.focus_mode = FOCUS_NONE
-	sp_close.add_theme_font_override("font",           _font_bold)
-	sp_close.add_theme_font_size_override("font_size", 16)
-	sp_close.add_theme_color_override("font_color",    C_WHITE)
-	sp_close.add_theme_stylebox_override("normal",  _btn_style(Color(0.30, 0.10, 0.10)))
-	sp_close.add_theme_stylebox_override("hover",   _btn_style(Color(0.50, 0.16, 0.10)))
-	sp_close.add_theme_stylebox_override("pressed", _btn_style(Color(0.22, 0.08, 0.08)))
-	sp_close.add_theme_stylebox_override("focus",   _btn_style(Color(0.30, 0.10, 0.10)))
-	sp_close.pressed.connect(func(): sp.visible = false)
-	sp.add_child(sp_close)
-
-	var sp_title := _label("", _font_bold, 20, C_GOLD)
-	sp_title.position             = Vector2(0, 14)
-	sp_title.size                 = Vector2(520, 34)
-	sp_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	sp.add_child(sp_title)
-	_wm_sp_title = sp_title
-
-	var sp_grid := GridContainer.new()
-	sp_grid.columns  = 2
-	sp_grid.position = Vector2(20, 58)
-	sp_grid.size     = Vector2(480, 360)
-	sp_grid.add_theme_constant_override("h_separation", 12)
-	sp_grid.add_theme_constant_override("v_separation",  8)
-	sp.add_child(sp_grid)
-	_wm_sp_grid = sp_grid
-
-	for _s_i in range(10):
-		var sb := Button.new()
-		sb.custom_minimum_size = Vector2(224, 50)
-		sb.focus_mode          = FOCUS_NONE
-		sb.add_theme_font_override("font",           _font_bold)
-		sb.add_theme_font_size_override("font_size", 13)
-		sb.add_theme_color_override("font_color",    C_WHITE)
-		sb.add_theme_stylebox_override("normal",  _btn_style(Color(0.14, 0.14, 0.24)))
-		sb.add_theme_stylebox_override("hover",   _btn_style(Color(0.20, 0.20, 0.34)))
-		sb.add_theme_stylebox_override("pressed", _btn_style(Color(0.10, 0.10, 0.18)))
-		sb.add_theme_stylebox_override("focus",   _btn_style(Color(0.14, 0.14, 0.24)))
-		sp_grid.add_child(sb)
-
-	var sp_play := Button.new()
-	sp_play.text       = "▶  Start World"
-	sp_play.position   = Vector2(135, 438)
-	sp_play.size       = Vector2(250, 44)
-	sp_play.focus_mode = FOCUS_NONE
-	sp_play.add_theme_font_override("font",           _font_bold)
-	sp_play.add_theme_font_size_override("font_size", 18)
-	sp_play.add_theme_color_override("font_color",    C_WHITE)
-	sp_play.add_theme_stylebox_override("normal",  _btn_style(C_BTN))
-	sp_play.add_theme_stylebox_override("hover",   _btn_style(C_BTN_HOV))
-	sp_play.add_theme_stylebox_override("pressed", _btn_style(C_BTN.darkened(0.25)))
-	sp_play.add_theme_stylebox_override("focus",   _btn_style(C_BTN))
-	sp_play.pressed.connect(func():
-		sp.visible      = false
-		overlay.visible = false
-		GameData.selected_world = _wm_selected_world
-		get_tree().reload_current_scene()
-	)
-	sp.add_child(sp_play)
-
-	# ── Back button ──────────────────────────────────────────────────────────
+	# ── Back button (world map → main menu) ─────────────────────────────────
 	var back_btn := Button.new()
 	back_btn.text       = "← Back"
 	back_btn.position   = Vector2(30, 666)
@@ -3563,86 +4126,344 @@ func _build_world_map_screen() -> void:
 	back_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.14, 0.14, 0.18)))
 	back_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.20, 0.20, 0.26)))
 	back_btn.pressed.connect(func():
-		sp.visible                = false
 		overlay.visible           = false
 		_game_over_screen.visible = true
 	)
 	overlay.add_child(back_btn)
 
+	_build_world_detail_screen()
+
 	_refresh_world_map()
+
+
+func _build_world_detail_screen() -> void:
+	# Full-screen dim backdrop — blocks input to world map behind it
+	var ds := ColorRect.new()
+	ds.color        = Color(0.0, 0.0, 0.0, 0.65)
+	ds.position     = Vector2.ZERO
+	ds.size         = Vector2(1280, 720)
+	ds.mouse_filter = MOUSE_FILTER_STOP
+	ds.visible      = false
+	add_child(ds)
+	_wm_detail_screen = ds
+
+	# Centered content panel (1100 × 580)
+	var cp   := Panel.new()
+	var cp_s := StyleBoxFlat.new()
+	cp_s.bg_color     = Color(0.04, 0.05, 0.12, 0.97)
+	cp_s.border_color = Color(0.30, 0.42, 0.72, 0.60)
+	cp_s.set_border_width_all(1)
+	cp_s.set_corner_radius_all(12)
+	cp.add_theme_stylebox_override("panel", cp_s)
+	cp.position     = Vector2(90, 50)
+	cp.size         = Vector2(1100, 640)
+	cp.mouse_filter = MOUSE_FILTER_STOP
+	ds.add_child(cp)
+
+	# Biome-colored header strip
+	var dh   := ColorRect.new()
+	var dh_s := StyleBoxFlat.new()
+	dh_s.bg_color = Color(0.1, 0.1, 0.2)
+	dh_s.set_corner_radius_all(12)
+	dh_s.corner_radius_bottom_left  = 0
+	dh_s.corner_radius_bottom_right = 0
+	dh.position = Vector2(0, 0)
+	dh.size     = Vector2(1100, 68)
+	cp.add_child(dh)
+	_wm_detail_header = dh
+
+	# World name (in header)
+	var dname := _label("", _font_bold, 28, Color(1.0, 0.98, 0.88))
+	dname.position             = Vector2(0, 14)
+	dname.size                 = Vector2(1100, 42)
+	dname.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	cp.add_child(dname)
+	_wm_detail_name = dname
+
+	# ── Left column: status + description ────────────────────────────────────
+	var dstatus := _label("", _font_bold, 15, C_WHITE)
+	dstatus.position = Vector2(60, 86)
+	dstatus.size     = Vector2(480, 26)
+	cp.add_child(dstatus)
+	_wm_detail_status = dstatus
+
+	var ddiff := _label("", _font_bold, 15, Color(1.0, 0.85, 0.25))
+	ddiff.position = Vector2(60, 116)
+	ddiff.size     = Vector2(480, 26)
+	cp.add_child(ddiff)
+	_wm_detail_diff = ddiff
+
+	var dstages := _label("", _font_reg, 13, Color(0.72, 0.88, 0.72))
+	dstages.position = Vector2(60, 148)
+	dstages.size     = Vector2(480, 22)
+	cp.add_child(dstages)
+	_wm_detail_stages = dstages
+
+	var sep1 := ColorRect.new()
+	sep1.color    = Color(0.30, 0.40, 0.68, 0.35)
+	sep1.position = Vector2(60, 182)
+	sep1.size     = Vector2(460, 1)
+	cp.add_child(sep1)
+
+	var ddesc := _label("", _font_reg, 13, Color(0.80, 0.78, 0.72))
+	ddesc.position      = Vector2(60, 194)
+	ddesc.size          = Vector2(460, 220)
+	ddesc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	cp.add_child(ddesc)
+	_wm_detail_desc = ddesc
+
+	# Vertical divider
+	var vdiv := ColorRect.new()
+	vdiv.color    = Color(0.30, 0.40, 0.68, 0.30)
+	vdiv.position = Vector2(560, 80)
+	vdiv.size     = Vector2(1, 476)
+	cp.add_child(vdiv)
+
+	# ── Right column: minimap + map modifiers ────────────────────────────────
+	var mm_script = load("res://ui/WorldMinimap.gd")
+	var mm : Control = mm_script.new()
+	mm.position = Vector2(600, 84)
+	mm.size     = Vector2(460, 185)
+	cp.add_child(mm)
+	_wm_detail_minimap = mm
+
+	var mod_hdr := _label("Map Modifiers", _font_bold, 15, Color(0.72, 0.82, 1.0))
+	mod_hdr.position = Vector2(600, 282)
+	mod_hdr.size     = Vector2(460, 26)
+	cp.add_child(mod_hdr)
+
+	var sep2 := ColorRect.new()
+	sep2.color    = Color(0.30, 0.40, 0.68, 0.35)
+	sep2.position = Vector2(600, 312)
+	sep2.size     = Vector2(460, 1)
+	cp.add_child(sep2)
+
+	var mod_box := Control.new()
+	mod_box.position = Vector2(600, 320)
+	mod_box.size     = Vector2(460, 180)
+	cp.add_child(mod_box)
+	_wm_detail_mod_box = mod_box
+
+	# ── Bottom bar ────────────────────────────────────────────────────────────
+	var bot := ColorRect.new()
+	bot.color    = Color(0.04, 0.04, 0.12, 0.95)
+	bot.position = Vector2(0, 568)
+	bot.size     = Vector2(1100, 72)
+	cp.add_child(bot)
+
+	var bot_sep := ColorRect.new()
+	bot_sep.color    = Color(0.30, 0.40, 0.68, 0.35)
+	bot_sep.position = Vector2(0, 568)
+	bot_sep.size     = Vector2(1100, 1)
+	cp.add_child(bot_sep)
+
+	# Back button (bottom left of panel)
+	var ds_back := Button.new()
+	ds_back.text       = "← Back"
+	ds_back.position   = Vector2(24, 582)
+	ds_back.size       = Vector2(148, 44)
+	ds_back.focus_mode = FOCUS_NONE
+	ds_back.add_theme_font_override("font",           _font_bold)
+	ds_back.add_theme_font_size_override("font_size", 17)
+	ds_back.add_theme_color_override("font_color",    C_WHITE)
+	ds_back.add_theme_stylebox_override("normal",  _btn_style(Color(0.20, 0.20, 0.26)))
+	ds_back.add_theme_stylebox_override("hover",   _btn_style(Color(0.28, 0.28, 0.36)))
+	ds_back.add_theme_stylebox_override("pressed", _btn_style(Color(0.14, 0.14, 0.18)))
+	ds_back.add_theme_stylebox_override("focus",   _btn_style(Color(0.20, 0.20, 0.26)))
+	ds_back.pressed.connect(func():
+		ds.visible = false
+	)
+	cp.add_child(ds_back)
+
+	# Start World button (bottom right of panel)
+	var ds_play := Button.new()
+	ds_play.text       = "▶  Start World"
+	ds_play.position   = Vector2(752, 580)
+	ds_play.size       = Vector2(300, 48)
+	ds_play.focus_mode = FOCUS_NONE
+	ds_play.add_theme_font_override("font",           _font_bold)
+	ds_play.add_theme_font_size_override("font_size", 20)
+	ds_play.add_theme_color_override("font_color",    C_WHITE)
+	ds_play.add_theme_stylebox_override("normal",  _btn_style(C_BTN))
+	ds_play.add_theme_stylebox_override("hover",   _btn_style(C_BTN_HOV))
+	ds_play.add_theme_stylebox_override("pressed", _btn_style(C_BTN.darkened(0.25)))
+	ds_play.add_theme_stylebox_override("focus",   _btn_style(C_BTN))
+	ds_play.pressed.connect(func():
+		ds.visible = false
+		var world_to_load : int = _wm_selected_world
+		_show_loading_screen(func():
+			GameData.selected_world      = world_to_load
+			GameData.launching_into_game = true
+			get_tree().reload_current_scene()
+		)
+	)
+	cp.add_child(ds_play)
+	_wm_detail_start_btn = ds_play
+
+
+func _show_loading_screen(callback: Callable) -> void:
+	var cl := CanvasLayer.new()
+	cl.layer = 100
+	get_tree().root.add_child(cl)
+	var ls : Node2D = load("res://ui/LoadingScreen.gd").new()
+	ls.setup(_font_bold,
+		func(): callback.call(),
+		func(): cl.queue_free()
+	)
+	cl.add_child(ls)
+
 
 func _on_world_node_pressed(world_num: int) -> void:
 	var unlocked := (world_num == 1) or (GameData.max_world_unlocked >= world_num)
 	if not unlocked:
 		return
+
+	# Restore previous selection's icon before changing
+	if _wm_selected_world > 0 and _wm_selected_world <= _world_node_panels.size():
+		var prev := _wm_selected_world - 1
+		var prev_w := _wm_selected_world
+		var prev_lbl : Label = _world_node_panels[prev]["icon_lbl"]
+		if GameData.max_world_unlocked > prev_w:
+			prev_lbl.text     = "★"
+			prev_lbl.modulate = Color(0.28, 0.96, 0.32)
+		elif GameData.max_world_unlocked == prev_w:
+			prev_lbl.text     = ""
+		else:
+			prev_lbl.text     = "🔒"
+			prev_lbl.modulate = Color(0.60, 0.58, 0.55)
+
 	_wm_selected_world = world_num
+	var idx := world_num - 1
+
+	# Show sword on newly clicked world
+	if idx < _world_node_panels.size():
+		var lbl : Label = _world_node_panels[idx]["icon_lbl"]
+		lbl.text     = "⚔"
+		lbl.modulate = Color(1.0, 1.0, 1.0, 0.95)
+
+	# Update canvas selection + click animation
+	if is_instance_valid(_wm_canvas):
+		_wm_canvas.selected_world = idx
+		_wm_canvas.do_click(idx)
+
+	# World metadata
 	var WORLD_NAMES : Array = [
 		"Garden Plains", "Deep Forest", "Desert Ruins", "Frost Peaks",
 		"Volcanic Wastes", "Swamplands", "Crystal Highlands",
 		"Shadow Realm", "Celestial Kingdom", "Eternal Citadel",
 	]
-	if world_num == 1:
-		_wm_sp_title.text = "World %d  —  %s" % [world_num, WORLD_NAMES[world_num - 1]]
+	var WORLD_DIFF : Array = [
+		"⭐", "⭐⭐", "⭐⭐⭐", "⭐⭐⭐", "⭐⭐⭐⭐",
+		"⭐⭐⭐⭐", "⭐⭐⭐⭐⭐", "⭐⭐⭐⭐⭐", "⭐⭐⭐⭐⭐", "⭐⭐⭐⭐⭐",
+	]
+	var WORLD_DESC : Array = [
+		"Rolling meadows dotted with ancient oaks and colorful wildflowers. The perfect proving ground for any aspiring defender.",
+		"A dense, fog-shrouded wilderness where the canopy swallows all light. Ancient creatures stir in the undergrowth.",
+		"Crumbling temples and half-buried obelisks rise from endless dunes. The desert guards its secrets jealously.",
+		"Jagged peaks crowned with eternal ice. Howling blizzards and freezing ambushes await the unprepared.",
+		"Ash-choked wastelands lit by rivers of molten rock. Every step burns — every wave burns harder.",
+		"Twisted mangroves and toxic bogs stretch without end. The mists conceal horrors that have never seen daylight.",
+		"Soaring crystal formations that refract light into lethal prisms. Reality feels thin here.",
+		"A realm beyond the veil, where shadow is substance and nothing casts a true shadow.",
+		"Floating citadels wreathed in golden clouds. The divine armies are vast — and wholly merciless.",
+		"The final bastion of an ancient evil. Every world's darkness converges here.",
+	]
+	var WORLD_COLORS : Array = [
+		Color(0.22, 0.65, 0.16), Color(0.06, 0.38, 0.10), Color(0.78, 0.58, 0.18),
+		Color(0.55, 0.78, 0.96), Color(0.88, 0.18, 0.08), Color(0.12, 0.48, 0.22),
+		Color(0.68, 0.22, 0.95), Color(0.28, 0.08, 0.55), Color(0.95, 0.85, 0.28),
+		Color(0.88, 0.88, 0.95),
+	]
+
+	var wclr  : Color  = WORLD_COLORS[idx]
+	var wname : String = WORLD_NAMES[idx]
+	var wdiff : String = WORLD_DIFF[idx]
+	var wdesc : String = WORLD_DESC[idx]
+
+	# State info
+	var state : String
+	if GameData.max_world_unlocked > world_num:
+		state = "cleared"
+	elif GameData.max_world_unlocked == world_num:
+		state = "active"
 	else:
-		_wm_sp_title.text = "World %d  —  %s  (Coming Soon)" % [world_num, WORLD_NAMES[world_num - 1]]
+		state = "locked"
 
-	for s_i in range(10):
-		var s_num    := s_i + 1
-		var sb : Button = _wm_sp_grid.get_child(s_i)
-		var cleared  := false
-		var unlk_stg := false
-		if world_num == 1:
-			cleared  = GameData.all_time_highest_stage >= s_num
-			unlk_stg = GameData.all_time_highest_stage >= s_num - 1
-		# Worlds 2-10: no content yet, all stages locked
+	# Populate detail screen
+	_wm_detail_header.color = Color(wclr.r * 0.45, wclr.g * 0.45, wclr.b * 0.45, 0.95)
+	_wm_detail_name.text    = "World %d  —  %s" % [world_num, wname]
+	_wm_detail_diff.text    = "Difficulty:  %s" % wdiff
 
-		if cleared:
-			sb.text = "Stage %d  ✓" % s_num
-			sb.add_theme_color_override("font_color", Color(0.28, 0.92, 0.28))
-			sb.add_theme_stylebox_override("normal",  _btn_style(Color(0.08, 0.28, 0.10)))
-			sb.add_theme_stylebox_override("hover",   _btn_style(Color(0.12, 0.36, 0.14)))
-			sb.add_theme_stylebox_override("pressed", _btn_style(Color(0.06, 0.20, 0.08)))
-			sb.add_theme_stylebox_override("focus",   _btn_style(Color(0.08, 0.28, 0.10)))
-			sb.disabled = false
-		elif unlk_stg:
-			sb.text = "Stage %d" % s_num
-			sb.add_theme_color_override("font_color", C_WHITE)
-			sb.add_theme_stylebox_override("normal",  _btn_style(Color(0.18, 0.18, 0.32)))
-			sb.add_theme_stylebox_override("hover",   _btn_style(Color(0.26, 0.26, 0.44)))
-			sb.add_theme_stylebox_override("pressed", _btn_style(Color(0.12, 0.12, 0.22)))
-			sb.add_theme_stylebox_override("focus",   _btn_style(Color(0.18, 0.18, 0.32)))
-			sb.disabled = false
-		else:
-			sb.text = "Stage %d  🔒" % s_num
-			sb.add_theme_color_override("font_color", C_DIM)
-			sb.add_theme_stylebox_override("normal",  _btn_style(Color(0.10, 0.10, 0.14)))
-			sb.add_theme_stylebox_override("hover",   _btn_style(Color(0.10, 0.10, 0.14)))
-			sb.add_theme_stylebox_override("pressed", _btn_style(Color(0.10, 0.10, 0.14)))
-			sb.add_theme_stylebox_override("focus",   _btn_style(Color(0.10, 0.10, 0.14)))
-			sb.disabled = true
+	match state:
+		"cleared":
+			_wm_detail_status.text     = "★  Cleared"
+			_wm_detail_status.modulate = Color(0.32, 1.0, 0.36)
+		"active":
+			_wm_detail_status.text     = "⚔  Active"
+			_wm_detail_status.modulate = Color(1.0, 0.92, 0.28)
+		_:
+			_wm_detail_status.text     = "🔒  Locked"
+			_wm_detail_status.modulate = Color(0.65, 0.62, 0.58)
 
-	_wm_stage_panel.visible = true
+	if world_num == 1:
+		var stg : int = GameData.all_time_highest_stage
+		_wm_detail_stages.text = "Stages cleared:  %d / 10" % mini(stg, 10)
+	else:
+		_wm_detail_stages.text = "10 stages"
+
+	_wm_detail_desc.text = wdesc
+
+	# Minimap
+	var wpath   : Array = GameData.get_world_path(world_num)
+	var wisland : Rect2 = GameData.get_world_island(world_num)
+	_wm_detail_minimap.call("setup", wpath, wclr, wisland)
+
+	# Modifier rows
+	for child in _wm_detail_mod_box.get_children():
+		child.queue_free()
+	var mods : Array = GameData.get_world_modifiers(world_num)
+	if mods.is_empty():
+		var no_mod := _label("No modifiers — standard difficulty", _font_reg, 13, Color(0.65, 0.70, 0.68))
+		no_mod.position = Vector2(0, 4)
+		no_mod.size     = Vector2(460, 24)
+		_wm_detail_mod_box.add_child(no_mod)
+	else:
+		for mi in range(mods.size()):
+			var m   : Dictionary = mods[mi]
+			var row := _label("• " + m["label"], _font_reg, 13, m["color"])
+			row.position = Vector2(0, mi * 26)
+			row.size     = Vector2(460, 24)
+			_wm_detail_mod_box.add_child(row)
+
+	_wm_detail_start_btn.disabled = not unlocked
+
+	# Show detail screen on top; world map stays visible (selection animation plays)
+	_wm_detail_screen.visible = true
 
 
 func _refresh_world_map() -> void:
 	if _world_node_panels.is_empty() or _wm_canvas == null:
 		return
+	# Reset selection state when the map is refreshed (e.g. after debug unlock)
+	if is_instance_valid(_wm_detail_screen) and _wm_detail_screen.visible:
+		_wm_detail_screen.visible = false
+	_wm_canvas.selected_world = -1
 	# Auto-unlock world 2 when the player clears all 10 stages of world 1
 	if GameData.all_time_highest_stage >= 10 and GameData.max_world_unlocked < 2:
 		GameData.max_world_unlocked = 2
 		GameData.save_game()
 
 	var WM_DATA : Array = [
-		{"color": Color(0.22, 0.65, 0.16), "pos": Vector2(200, 558)},
-		{"color": Color(0.06, 0.38, 0.10), "pos": Vector2(118, 388)},
-		{"color": Color(0.78, 0.58, 0.18), "pos": Vector2(268, 215)},
-		{"color": Color(0.55, 0.78, 0.96), "pos": Vector2(468,  98)},
-		{"color": Color(0.88, 0.18, 0.08), "pos": Vector2(718, 132)},
-		{"color": Color(0.12, 0.48, 0.22), "pos": Vector2(948, 312)},
-		{"color": Color(0.68, 0.22, 0.95), "pos": Vector2(858, 488)},
-		{"color": Color(0.28, 0.08, 0.55), "pos": Vector2(618, 552)},
-		{"color": Color(0.95, 0.85, 0.28), "pos": Vector2(442, 432)},
-		{"color": Color(0.88, 0.88, 0.95), "pos": Vector2(588, 242)},
+		{"color": Color(0.22, 0.65, 0.16), "pos": Vector2(280, 583)},
+		{"color": Color(0.06, 0.38, 0.10), "pos": Vector2(198, 413)},
+		{"color": Color(0.78, 0.58, 0.18), "pos": Vector2(348, 240)},
+		{"color": Color(0.55, 0.78, 0.96), "pos": Vector2(548, 123)},
+		{"color": Color(0.88, 0.18, 0.08), "pos": Vector2(798, 157)},
+		{"color": Color(0.12, 0.48, 0.22), "pos": Vector2(1028, 337)},
+		{"color": Color(0.68, 0.22, 0.95), "pos": Vector2(938, 513)},
+		{"color": Color(0.28, 0.08, 0.55), "pos": Vector2(698, 577)},
+		{"color": Color(0.95, 0.85, 0.28), "pos": Vector2(522, 457)},
+		{"color": Color(0.88, 0.88, 0.95), "pos": Vector2(668, 267)},
 	]
 
 	# Push territory states to the canvas node
@@ -3678,19 +4499,24 @@ func _refresh_world_map() -> void:
 		var prog_lbl : Label  = refs["prog_lbl"]
 		var btn      : Button = refs["btn"]
 
-		match state:
-			"active":
-				icon_lbl.text     = "⚔"
-				icon_lbl.modulate = Color(1.0, 0.92, 0.28)
-				btn.disabled      = false
-			"cleared":
-				icon_lbl.text     = "★"
-				icon_lbl.modulate = Color(0.28, 0.96, 0.32)
-				btn.disabled      = false
-			"locked":
-				icon_lbl.text     = "🔒"
-				icon_lbl.modulate = Color(0.60, 0.58, 0.55)
-				btn.disabled      = true
+		if w == _wm_selected_world:
+			icon_lbl.text     = "⚔"
+			icon_lbl.modulate = Color(1.0, 1.0, 1.0, 0.95)
+			btn.disabled      = state == "locked"
+		else:
+			match state:
+				"active":
+					icon_lbl.text     = ""
+					icon_lbl.modulate = Color(1.0, 0.92, 0.28)
+					btn.disabled      = false
+				"cleared":
+					icon_lbl.text     = "★"
+					icon_lbl.modulate = Color(0.28, 0.96, 0.32)
+					btn.disabled      = false
+				"locked":
+					icon_lbl.text     = "🔒"
+					icon_lbl.modulate = Color(0.60, 0.58, 0.55)
+					btn.disabled      = true
 
 		if w == 1 and state != "locked":
 			if GameData.all_time_highest_stage >= 10:
@@ -4471,6 +5297,7 @@ func _hero_build_talent_panel(parent: Control, parent_pw: int, parent_ph: int) -
 		plus_btn.pressed.connect(func():
 			if GameData.spend_hero_talent(_hero_talent_hero_id, cap_stat):
 				_hero_refresh_talent_display(_hero_talent_hero_id)
+				_refresh_hero_cards()
 		)
 		col_panel.add_child(plus_btn)
 
@@ -6200,6 +7027,10 @@ func _build_settings_gear() -> void:
 	leave_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.45, 0.10, 0.10)))
 	leave_btn.pressed.connect(func():
 		menu.visible = false
+		if is_instance_valid(_loot_panel) and _loot_panel.visible:
+			_loot_panel.visible = false
+		if is_instance_valid(_loot_catcher) and _loot_catcher.visible:
+			_loot_catcher.visible = false
 		game_left.emit()
 		show_main_menu()
 	)
@@ -7394,3 +8225,45 @@ class _TurretPreview extends Node2D:
 			"legendary": rc = Color(1.0,0.72,0.10)
 			"fusion":    rc = Color(0.20,1.00,0.85)
 		draw_circle(Vector2(0,-12),3,rc)
+
+
+# ── Boss-drop chip (Node2D placed in game scene, behind enemies) ──────────────
+
+class _BossChip extends Node2D:
+	const W : float = 38.0
+	const H : float = 54.0
+	var _bg  : Color = Color(0.15, 0.10, 0.22)
+	var _brd : Color = Color.WHITE
+	var _sym : String = "●"
+	var _fnt : Font   = null
+
+	func setup(bg_clr: Color, brd_clr: Color, sym: String, fnt: Font) -> void:
+		_bg  = bg_clr
+		_brd = brd_clr
+		_sym = sym
+		_fnt = fnt
+
+	func _draw() -> void:
+		var r := Rect2(-W * 0.5, -H * 0.5, W, H)
+		draw_rect(r, _bg)
+		draw_rect(r, _brd, false, 2.0)
+		# Tint strip at top
+		draw_rect(Rect2(-W * 0.5 + 2, -H * 0.5 + 2, W - 4, H * 0.40),
+			Color(_brd.r, _brd.g, _brd.b, 0.35))
+		if _fnt:
+			draw_string(_fnt, Vector2(-W * 0.5, H * 0.10), _sym,
+				HORIZONTAL_ALIGNMENT_CENTER, W, 18, _brd)
+
+
+class _StarNode extends Node2D:
+	var _char : String = "★"
+	var _clr  : Color  = Color.WHITE
+	var _fnt  : Font   = null
+
+	func setup(ch: String, clr: Color, fnt: Font) -> void:
+		_char = ch; _clr = clr; _fnt = fnt
+
+	func _draw() -> void:
+		if _fnt:
+			draw_string(_fnt, Vector2(-5, 5), _char,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 10, _clr)
