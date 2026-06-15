@@ -1,3 +1,4 @@
+Always lock dependencies and NPM to well established version (1 year old+) and don't use the latest build.
 Always create a backup of index.html as index_backup.html before making any edits to it. Overwrite the previous backup each time.
 ## Formula Source of Truth
 

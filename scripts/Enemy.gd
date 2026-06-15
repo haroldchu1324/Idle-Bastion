@@ -16,6 +16,8 @@ var is_poisoned      : bool  = false
 var poison_stacks    : int   = 0
 var poison_timer     : float = 0.0
 var damage_taken_mult: float = 1.0
+var melee_resist     : float = 0.0
+var hits_taken       : int   = 0
 var is_taunted       : bool  = false
 var _taunt_timer     : float = 0.0
 
@@ -270,6 +272,10 @@ func _process(delta: float) -> void:
 	queue_redraw()
 
 
+func take_melee_damage(amount: float) -> void:
+	take_damage(amount * (1.0 - melee_resist))
+
+
 func take_damage(amount: float) -> void:
 	if _dead:
 		return
@@ -292,6 +298,7 @@ func take_damage(amount: float) -> void:
 	else:
 		brittle_bonus = 0.0
 	var _actual : float = (amount + _brittle) * damage_taken_mult
+	hits_taken += 1
 	hp = max(0.0, hp - _actual)
 	# Spawn floating damage number (only if enabled in settings)
 	if GameData.show_damage_numbers:

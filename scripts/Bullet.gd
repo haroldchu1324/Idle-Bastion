@@ -91,7 +91,7 @@ func _process(delta: float) -> void:
 
 	var dir  : Vector2 = _target.position - position
 	var dist : float   = dir.length()
-	var hit_r : float  = 30.0 if bullet_type == "sword" else (25.0 if bullet_type == "tw_slash" else 8.0)
+	var hit_r : float  = 30.0 if bullet_type == "sword" else (25.0 if bullet_type == "tw_slash" else (15.0 if bullet_type == "sniper_dart" else 8.0))
 	# Hit if close enough, or if we overshot (moving away after being very close)
 	if dist < hit_r or (dist > _prev_dist and _prev_dist < hit_r * 3.0):
 		if bullet_type == "tw_slash":
@@ -165,6 +165,7 @@ func _draw() -> void:
 		"hero_storm_spear":   _draw_hero_storm_spear()
 		"hero_phoenix_arrow": _draw_hero_phoenix_arrow()
 		"tw_slash":           _draw_tw_slash()
+		"sniper_dart":        _draw_sniper_dart()
 		_:
 			match bullet_style:
 				"bolt":     _draw_bolt()
@@ -838,6 +839,45 @@ func _draw_tw_slash() -> void:
 	# Fading trail behind tail
 	draw_line(Vector2(3, 17), Vector2(1, 32), Color(0.65, 0.95, 1.00, 0.28), 5.0)
 	draw_line(Vector2(3, 17), Vector2(0, 46), Color(0.65, 0.95, 1.00, 0.10), 3.0)
+	draw_set_transform(Vector2.ZERO, 0.0)
+
+
+func _draw_sniper_dart() -> void:
+	var fly_ang := ((_target.position - position).angle() + PI * 0.5 if is_instance_valid(_target) else 0.0)
+	draw_set_transform(Vector2.ZERO, fly_ang)
+
+	# Speed trail
+	draw_line(Vector2(0, 8), Vector2(0, 20), Color(0.18, 0.78, 0.52, 0.22), 3.5)
+	draw_line(Vector2(0, 8), Vector2(0, 15), Color(0.28, 0.90, 0.62, 0.42), 2.0)
+
+	# Body — dark needle cylinder
+	draw_rect(Rect2(-2.0, -8, 4, 17), Color(0.12, 0.14, 0.16))
+	draw_rect(Rect2(-0.7, -8, 1.4, 17), Color(0.30, 0.32, 0.38, 0.50))
+
+	# Metallic tip
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(0, -18), Vector2(-2.5, -8), Vector2(2.5, -8)
+	]), Color(0.80, 0.84, 0.90))
+	draw_line(Vector2(-2.5, -8), Vector2(0, -18), Color(1.00, 1.00, 1.00, 0.50), 0.8)
+	draw_circle(Vector2(0, -18), 1.5, Color(1.00, 1.00, 1.00, 0.90))
+
+	# Teal poison coating near tip
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(0, -18), Vector2(-1.8, -11), Vector2(1.8, -11)
+	]), Color(0.18, 0.85, 0.58, 0.82))
+	draw_circle(Vector2(0, -15), 1.0, Color(0.55, 1.00, 0.72, 0.90))
+
+	# Tail fins — left, right, center
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-2, 6), Vector2(-7, 12), Vector2(-2, 12)
+	]), Color(0.25, 0.72, 0.50, 0.88))
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(2, 6), Vector2(7, 12), Vector2(2, 12)
+	]), Color(0.25, 0.72, 0.50, 0.88))
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-1.5, 6), Vector2(0, 13), Vector2(1.5, 6)
+	]), Color(0.18, 0.60, 0.42, 0.80))
+
 	draw_set_transform(Vector2.ZERO, 0.0)
 
 

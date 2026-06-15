@@ -21,6 +21,10 @@ signal debug_gold_requested
 signal debug_skip_stage_requested(stage: int)
 signal sell_tower_requested
 signal debug_summon_requested(tower_id: String)
+signal tower_selected_tutorial(info_btn_rect: Rect2)
+signal tower_detail_opened_tutorial
+signal tower_moved_tutorial
+signal special_tiles_tutorial_closed
 
 # ── Palette ───────────────────────────────────────────────────────────────────
 const C_BG       := Color(0.10, 0.07, 0.04, 0.94)
@@ -42,6 +46,10 @@ const RADIUS     := 10
 var wave_btn  : Button
 var speed_btn : Button
 var _speed_factor : float = 1.0
+
+var tutorial_block_drag     : bool = false
+var tutorial_block_info_btn : bool = false
+var tutorial_lock_unit_btns : bool = false
 
 var _gold_lbl       : Label
 var _lives_lbl      : Label
@@ -86,6 +94,20 @@ var _modal_odds_lbls   : Array   = []   # [pool][rarity] — 3 pools × 4 rariti
 
 # Boss buff card overlay
 var _boss_buff_overlay    : Control = null
+# Tile drop animation input blocker
+var _tile_anim_blocker    : Control = null
+# Merge tutorial overlay
+var _merge_tut_overlay    : Control    = null
+var _merge_tut_timescale  : float      = 1.0
+var _merge_tut_step       : int        = 0
+var _mt_state             : Dictionary = {}
+var _mt_update_blockers   : Callable
+var _mt_canvas            : Control    = null
+var _mt_panel             : Panel      = null
+var _mt_body_lbl          : Label      = null
+# Recipe tutorial overlay
+var _recipe_tut_overlay   : Control    = null
+var _recipe_tut_ts        : float      = 1.0
 
 # Buff history (upgrades tab)
 var _buff_history_scroll  : ScrollContainer = null
@@ -111,6 +133,8 @@ var _info_counter_lbl   : Label
 var _info_counter_bg    : Panel
 
 # Screens
+var _tutorial_locked_btns   : Array   = []   # nav buttons hidden until dq_unlocked (first loss)
+var _dq_main_btn            : Button  = null
 var _game_over_screen       : Control
 var _run_results_screen     : Control
 var _run_results_loot_grid  : Control = null
@@ -119,6 +143,18 @@ var _shop_screen        : Control
 var _world_map_screen   : Control
 var _heroes_screen      : Control
 var _towers_screen      : Control
+var _daily_quests_screen : Control   = null
+# Daily quests UI refs for live refresh
+var _dq_bar1     : ColorRect = null   # progress fill for quest 1
+var _dq_lbl1     : Label     = null   # "X / 200" text for quest 1
+var _dq_status2  : Label     = null   # status text for quest 2
+var _dq_status3  : Label     = null   # status text for quest 3
+var _dq_check1   : Label     = null
+var _dq_check2   : Label     = null
+var _dq_check3   : Label     = null
+var _dq_btn1     : Button    = null
+var _dq_btn2     : Button    = null
+var _dq_btn3     : Button    = null
 # World Map page refs
 var _world_node_panels  : Array          = []
 var _wm_detail_screen     : Control = null
@@ -216,8 +252,11 @@ var _recipe_scroll_dn    : Button  = null
 var _recipe_modal        : Control = null
 var _gear_btn            : Button  = null
 var _gear_menu           : Panel   = null
+var _recipe_btn          : Button  = null
 var _recipe_btn_badge    : Label   = null
 var _recipe_row_refs     : Array   = []   # [{result_id, badge_lbl, craft_btn, mat_refs:[{panel,id}]}]
+
+const TOKEN_ICON_SCR = preload("res://ui/TokenIcon.gd")
 
 # ── Tower Gacha Shop ──────────────────────────────────────────────────────────
 const GACHA_TOWER_SUMMON_COST    : int = 100
@@ -247,6 +286,38 @@ var _gacha_mode           : String        = "tower"
 var _gacha_title_lbl      : Label         = null
 var _gacha_tab_tower_btn  : Button        = null
 var _gacha_tab_hero_btn   : Button        = null
+var _gacha_tab_quest_btn  : Button        = null
+var _quest_shop_panel     : Control       = null
+var _dq_token_lbl         : Label         = null
+var _relic_strip          : Control       = null
+var _relic_tween          : Tween         = null
+var _relic_spinning       : bool          = false
+var _relic_spin_btn       : Button        = null
+var _relic_pool_lbl       : Label         = null
+var _relic_token_lbl      : Label         = null
+var _relic_tok_coin       : Control       = null   # coin icon beside relic panel balance
+var _gacha_relic_tok_lbl  : Label         = null   # shown in relic mode (replaces gem label)
+var _gacha_relic_coin     : Control       = null   # coin icon in gacha header (relic mode)
+var _relics_screen_tok_lbl : Label        = null   # token count shown top-right on My Relics screen
+var _relics_screen_tok_coin: Control      = null
+var _relic_result_pop     : Panel         = null
+var _relic_screen         : Control       = null
+var _relic_my_grid        : Control       = null
+var _relic_unk_grid       : Control       = null
+var _relic_info_popup     : Control       = null
+var _relic_info_name      : Label         = null
+var _relic_info_desc      : Label         = null
+var _relic_detail_popup   : Panel         = null
+var _relic_detail_backdrop: Control       = null
+var _relic_detail_id      : String        = ""
+var _relic_detail_icon    : Label         = null
+var _relic_detail_name    : Label         = null
+var _relic_detail_level   : Label         = null
+var _relic_detail_cur     : Label         = null
+var _relic_detail_next    : Label         = null
+var _relic_detail_cost    : Label         = null
+var _relic_detail_upg_btn : Button        = null
+var _relic_detail_tok_lbl : Label         = null
 var _gacha_result_panel   : Control       = null
 var _gacha_result_inner   : Control       = null
 var _gacha_result_title   : Label         = null
@@ -305,6 +376,455 @@ func show_wave_btn() -> void:
 		wave_btn.visible = true
 
 
+func block_input_for_tile_anim() -> void:
+	if is_instance_valid(_tile_anim_blocker):
+		return
+	_tile_anim_blocker              = ColorRect.new()
+	_tile_anim_blocker.color        = Color.TRANSPARENT
+	_tile_anim_blocker.size         = Vector2(1280, 720)
+	_tile_anim_blocker.mouse_filter = MOUSE_FILTER_STOP
+	_tile_anim_blocker.z_index      = 50
+	add_child(_tile_anim_blocker)
+
+
+func unblock_input_tile_anim() -> void:
+	if is_instance_valid(_tile_anim_blocker):
+		_tile_anim_blocker.queue_free()
+		_tile_anim_blocker = null
+
+
+func show_merge_tutorial(tower_screen_pos: Vector2) -> void:
+	if is_instance_valid(_merge_tut_overlay):
+		return
+	_merge_tut_timescale = Engine.time_scale
+	Engine.time_scale    = 0.0
+	_merge_tut_step      = 1
+	# Hide upgrade button so it can't be clicked before step 2 guides the player to it
+	if is_instance_valid(_upgrade_popup_btn):
+		_upgrade_popup_btn.visible = false
+
+	const DARK := Color(0.04, 0.04, 0.10, 0.82)
+	const GOLD := Color(1.0, 0.88, 0.28, 1.0)
+	const TS   : int = 60
+
+	var hl_pos  := tower_screen_pos - Vector2(TS * 0.5, TS * 0.5)
+	var hl_rect := Rect2(hl_pos, Vector2(TS, TS))
+
+	# Root — draw-only, no input blocking
+	var ov := Control.new()
+	ov.size         = Vector2(1280, 720)
+	ov.mouse_filter = MOUSE_FILTER_IGNORE
+	ov.z_index      = 200
+	add_child(ov)
+	_merge_tut_overlay = ov
+
+	# Shared state for the lambdas so step 2 can update the spotlight
+	_mt_state = {"hl": hl_rect}
+
+	# Visual canvas — draws 4 dark panels + gold border + brackets
+	var canvas := Control.new()
+	canvas.size         = Vector2(1280, 720)
+	canvas.mouse_filter = MOUSE_FILTER_IGNORE
+	ov.add_child(canvas)
+	_mt_canvas = canvas
+	canvas.draw.connect(func():
+		var r : Rect2 = _mt_state["hl"]
+		if r.position.y > 0:
+			canvas.draw_rect(Rect2(0.0, 0.0, 1280.0, r.position.y), DARK)
+		if r.end.y < 720:
+			canvas.draw_rect(Rect2(0.0, r.end.y, 1280.0, 720.0 - r.end.y), DARK)
+		if r.position.x > 0:
+			canvas.draw_rect(Rect2(0.0, r.position.y, r.position.x, r.size.y), DARK)
+		if r.end.x < 1280:
+			canvas.draw_rect(Rect2(r.end.x, r.position.y, 1280.0 - r.end.x, r.size.y), DARK)
+		canvas.draw_rect(r, GOLD, false, 2.5)
+		var ac := 14.0; var lw := 3.0
+		canvas.draw_line(Vector2(r.position.x,  r.position.y), Vector2(r.position.x + ac, r.position.y), GOLD, lw)
+		canvas.draw_line(Vector2(r.position.x,  r.position.y), Vector2(r.position.x, r.position.y + ac), GOLD, lw)
+		canvas.draw_line(Vector2(r.end.x,        r.position.y), Vector2(r.end.x - ac,  r.position.y),    GOLD, lw)
+		canvas.draw_line(Vector2(r.end.x,        r.position.y), Vector2(r.end.x,  r.position.y + ac),    GOLD, lw)
+		canvas.draw_line(Vector2(r.position.x,  r.end.y),       Vector2(r.position.x + ac, r.end.y),     GOLD, lw)
+		canvas.draw_line(Vector2(r.position.x,  r.end.y),       Vector2(r.position.x, r.end.y - ac),     GOLD, lw)
+		canvas.draw_line(Vector2(r.end.x,        r.end.y),       Vector2(r.end.x - ac,  r.end.y),        GOLD, lw)
+		canvas.draw_line(Vector2(r.end.x,        r.end.y),       Vector2(r.end.x,  r.end.y - ac),        GOLD, lw)
+	)
+	canvas.queue_redraw()
+
+	# 4 transparent blockers surrounding the spotlight
+	var b_top := ColorRect.new(); b_top.color = Color(0,0,0,0); b_top.mouse_filter = MOUSE_FILTER_STOP
+	var b_bot := ColorRect.new(); b_bot.color = Color(0,0,0,0); b_bot.mouse_filter = MOUSE_FILTER_STOP
+	var b_lft := ColorRect.new(); b_lft.color = Color(0,0,0,0); b_lft.mouse_filter = MOUSE_FILTER_STOP
+	var b_rgt := ColorRect.new(); b_rgt.color = Color(0,0,0,0); b_rgt.mouse_filter = MOUSE_FILTER_STOP
+	ov.add_child(b_top); ov.add_child(b_bot); ov.add_child(b_lft); ov.add_child(b_rgt)
+
+	_mt_update_blockers = func(r: Rect2):
+		b_top.position = Vector2(0.0, 0.0);      b_top.size = Vector2(1280.0, r.position.y)
+		b_bot.position = Vector2(0.0, r.end.y);  b_bot.size = Vector2(1280.0, 720.0 - r.end.y)
+		b_lft.position = Vector2(0.0, r.position.y); b_lft.size = Vector2(r.position.x, r.size.y)
+		b_rgt.position = Vector2(r.end.x, r.position.y); b_rgt.size = Vector2(1280.0 - r.end.x, r.size.y)
+	_mt_update_blockers.call(hl_rect)
+
+	# Message panel — bottom-left, below the build grid
+	var panel := Panel.new()
+	panel.position = Vector2(20.0, 485.0)
+	panel.size     = Vector2(390.0, 185.0)
+	panel.z_index  = 202
+	var ps := _rounded(Color(0.06, 0.06, 0.14, 0.97))
+	ps.border_width_left  = 2; ps.border_width_right  = 2
+	ps.border_width_top   = 2; ps.border_width_bottom = 2
+	ps.border_color       = GOLD
+	panel.add_theme_stylebox_override("panel", ps)
+	ov.add_child(panel)
+	_mt_panel = panel
+
+	var title_lbl := _label("Upgrade — Combine 3 Copies", _font_bold, 16, GOLD)
+	title_lbl.position = Vector2(14, 12); title_lbl.size = Vector2(362, 26)
+	panel.add_child(title_lbl)
+
+	var sep := ColorRect.new()
+	sep.color = Color(1.0, 0.88, 0.28, 0.30); sep.position = Vector2(14, 42); sep.size = Vector2(362, 1)
+	panel.add_child(sep)
+
+	var body_lbl := _label(
+		"You have 3 copies of the same tower!\n\nClick on the highlighted tower to select it.",
+		_font_reg, 14, Color(0.92, 0.92, 0.96))
+	body_lbl.position      = Vector2(14, 50)
+	body_lbl.size          = Vector2(362, 130)
+	body_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	panel.add_child(body_lbl)
+	_mt_body_lbl = body_lbl
+
+
+func _advance_merge_tutorial_step2() -> void:
+	_merge_tut_step = 2
+	tutorial_lock_unit_btns = true
+	if not is_instance_valid(_upgrade_popup_btn):
+		return
+	# Reveal the button now that step 2 guides the player to it
+	_upgrade_popup_btn.visible = true
+	# Spotlight the floating "^ Upgrade" button above the tower with padding
+	var pad      : float = 12.0
+	var btn_pos  : Vector2 = _upgrade_popup_btn.position
+	var btn_size : Vector2 = _upgrade_popup_btn.size
+	var upg_rect := Rect2(btn_pos.x - pad, btn_pos.y - pad,
+						  btn_size.x + pad * 2.0, btn_size.y + pad * 2.0)
+	_mt_state["hl"] = upg_rect
+	_mt_update_blockers.call(upg_rect)
+	if is_instance_valid(_mt_canvas):
+		_mt_canvas.queue_redraw()
+	# Keep message panel at bottom-left, just update text
+	if is_instance_valid(_mt_panel):
+		_mt_panel.position = Vector2(20.0, 485.0)
+		_mt_panel.size     = Vector2(390.0, 165.0)
+	if is_instance_valid(_mt_body_lbl):
+		_mt_body_lbl.text = "Click the [ ^ Upgrade ] button above the tower to combine all 3 copies into a random higher-rarity tower!"
+		_mt_body_lbl.size = Vector2(362.0, 115.0)
+	# Clicking the upgrade popup closes the tutorial
+	if is_instance_valid(_upgrade_popup_btn):
+		_upgrade_popup_btn.pressed.connect(_close_merge_tutorial, CONNECT_ONE_SHOT)
+
+
+func show_special_tiles_tutorial(tile_rects: Dictionary) -> void:
+	var ts : float = Engine.time_scale
+	Engine.time_scale = 0.0
+
+	const DARK := Color(0.04, 0.04, 0.10, 0.80)
+	const TILE_COLORS := {
+		"red":   Color(0.95, 0.06, 0.06, 1.0),
+		"blue":  Color(0.08, 0.38, 1.0,  1.0),
+		"green": Color(0.05, 0.88, 0.22, 1.0),
+	}
+
+	# Full-screen dark backdrop
+	var ov := ColorRect.new()
+	ov.color        = DARK
+	ov.size         = Vector2(1280, 720)
+	ov.mouse_filter = MOUSE_FILTER_STOP
+	ov.z_index      = 200
+	add_child(ov)
+
+	# Colored tile highlights drawn over the backdrop
+	var canvas := Control.new()
+	canvas.size         = Vector2(1280, 720)
+	canvas.mouse_filter = MOUSE_FILTER_IGNORE
+	canvas.z_index      = 201
+	ov.add_child(canvas)
+	canvas.draw.connect(func():
+		for kind in tile_rects:
+			var r : Rect2  = tile_rects[kind]
+			var c : Color  = TILE_COLORS.get(kind, Color.WHITE)
+			canvas.draw_rect(r, Color(c.r, c.g, c.b, 0.18))
+			canvas.draw_rect(r, c, false, 3.5)
+			var ac := 10.0; var lw := 2.5
+			canvas.draw_line(Vector2(r.position.x, r.position.y), Vector2(r.position.x + ac, r.position.y), c, lw)
+			canvas.draw_line(Vector2(r.position.x, r.position.y), Vector2(r.position.x, r.position.y + ac), c, lw)
+			canvas.draw_line(Vector2(r.end.x,       r.position.y), Vector2(r.end.x - ac,  r.position.y),   c, lw)
+			canvas.draw_line(Vector2(r.end.x,       r.position.y), Vector2(r.end.x, r.position.y + ac),    c, lw)
+			canvas.draw_line(Vector2(r.position.x, r.end.y),       Vector2(r.position.x + ac, r.end.y),    c, lw)
+			canvas.draw_line(Vector2(r.position.x, r.end.y),       Vector2(r.position.x, r.end.y - ac),    c, lw)
+			canvas.draw_line(Vector2(r.end.x,       r.end.y),      Vector2(r.end.x - ac,  r.end.y),        c, lw)
+			canvas.draw_line(Vector2(r.end.x,       r.end.y),      Vector2(r.end.x, r.end.y - ac),         c, lw)
+	)
+	canvas.queue_redraw()
+
+	# Message panel — bottom-left
+	var panel := Panel.new()
+	panel.position = Vector2(20.0, 458.0)
+	panel.size     = Vector2(430.0, 245.0)
+	panel.z_index  = 202
+	var ps := _rounded(Color(0.06, 0.06, 0.14, 0.97))
+	ps.border_width_left  = 2; ps.border_width_right  = 2
+	ps.border_width_top   = 2; ps.border_width_bottom = 2
+	ps.border_color       = Color(1.0, 0.88, 0.28, 1.0)
+	panel.add_theme_stylebox_override("panel", ps)
+	ov.add_child(panel)
+
+	var title := _label("Special Bonus Tiles Unlocked!", _font_bold, 17, Color(1.0, 0.88, 0.28))
+	title.position = Vector2(14, 12); title.size = Vector2(402, 26)
+	panel.add_child(title)
+
+	var sep := ColorRect.new()
+	sep.color = Color(1.0, 0.88, 0.28, 0.30); sep.position = Vector2(14, 42); sep.size = Vector2(402, 1)
+	panel.add_child(sep)
+
+	var sub := _label("Place a tower on a colored tile to gain its bonus:", _font_reg, 13, Color(0.75, 0.75, 0.85))
+	sub.position = Vector2(14, 50); sub.size = Vector2(402, 20)
+	panel.add_child(sub)
+
+	var entries := [
+		["🔴  Red Tile",   "+30%  Damage",       Color(1.0, 0.30, 0.30)],
+		["🔵  Blue Tile",  "+35 px  Attack Range", Color(0.35, 0.60, 1.0)],
+		["🟢  Green Tile", "+25%  Attack Speed",  Color(0.25, 0.90, 0.40)],
+	]
+	for i in entries.size():
+		var name_lbl := _label(entries[i][0], _font_bold, 14, entries[i][2])
+		name_lbl.position = Vector2(18, 78 + i * 44); name_lbl.size = Vector2(160, 22)
+		panel.add_child(name_lbl)
+		var stat_lbl := _label(entries[i][1], _font_reg, 14, Color(0.92, 0.92, 0.96))
+		stat_lbl.position = Vector2(188, 78 + i * 44); stat_lbl.size = Vector2(230, 22)
+		panel.add_child(stat_lbl)
+
+	var got_it := Button.new()
+	got_it.text       = "Got it!"
+	got_it.position   = Vector2(310, 195)
+	got_it.size       = Vector2(106, 38)
+	got_it.focus_mode = FOCUS_NONE
+	got_it.add_theme_font_override("font",           _font_bold)
+	got_it.add_theme_font_size_override("font_size", 14)
+	got_it.add_theme_color_override("font_color",    C_WHITE)
+	var bs  := _rounded(Color(0.18, 0.38, 0.62))
+	var bsh := _rounded(Color(0.26, 0.52, 0.84))
+	got_it.add_theme_stylebox_override("normal",  bs)
+	got_it.add_theme_stylebox_override("hover",   bsh)
+	got_it.add_theme_stylebox_override("pressed", bs)
+	got_it.add_theme_stylebox_override("focus",   bs)
+	got_it.pressed.connect(func():
+		Engine.time_scale = ts
+		ov.queue_free()
+		special_tiles_tutorial_closed.emit()
+	)
+	panel.add_child(got_it)
+
+
+func _close_merge_tutorial() -> void:
+	tutorial_lock_unit_btns = false
+	Engine.time_scale = _merge_tut_timescale
+	GameData.save_game()
+	_mt_canvas   = null
+	_mt_panel    = null
+	_mt_body_lbl = null
+	_mt_state.clear()
+	if is_instance_valid(_merge_tut_overlay):
+		_merge_tut_overlay.queue_free()
+		_merge_tut_overlay = null
+
+
+# ── Recipe tutorial ───────────────────────────────────────────────────────────
+
+func show_recipe_tutorial() -> void:
+	if is_instance_valid(_recipe_tut_overlay) or GameData.recipe_tutorial_seen:
+		return
+	if is_instance_valid(_merge_tut_overlay):
+		return  # don't interrupt merge tutorial
+	if not is_instance_valid(_recipe_btn):
+		return
+
+	_recipe_tut_ts   = Engine.time_scale
+	Engine.time_scale = 0.0
+
+	const DARK := Color(0.04, 0.04, 0.10, 0.82)
+	const GOLD := Color(1.0, 0.88, 0.28, 1.0)
+
+	var root := Control.new()
+	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	root.mouse_filter = MOUSE_FILTER_IGNORE
+	root.z_index      = 150
+	add_child(root)
+	_recipe_tut_overlay = root
+
+	# Build spotlight around recipe button
+	var pad  : float  = 12.0
+	var brect := Rect2(_recipe_btn.global_position, _recipe_btn.size)
+	var hl    := Rect2(brect.position.x - pad, brect.position.y - pad,
+					   brect.size.x + pad * 2.0, brect.size.y + pad * 2.0)
+
+	# Canvas draws dark panels + gold border
+	var canvas := Control.new()
+	canvas.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	canvas.mouse_filter = MOUSE_FILTER_IGNORE
+	root.add_child(canvas)
+	canvas.draw.connect(func():
+		canvas.draw_rect(Rect2(0, 0, 1280, hl.position.y), DARK)
+		canvas.draw_rect(Rect2(0, hl.position.y, hl.position.x, hl.size.y), DARK)
+		canvas.draw_rect(Rect2(hl.end.x, hl.position.y, 1280.0 - hl.end.x, hl.size.y), DARK)
+		canvas.draw_rect(Rect2(0, hl.end.y, 1280, 720.0 - hl.end.y), DARK)
+		canvas.draw_rect(hl, GOLD, false, 2.5)
+	)
+
+	# 4 input-blocking panels around spotlight
+	var _mb := func(x: float, y: float, w: float, h: float):
+		var c := ColorRect.new()
+		c.color       = Color(0, 0, 0, 0)
+		c.position    = Vector2(x, y)
+		c.size        = Vector2(w, h)
+		c.mouse_filter = MOUSE_FILTER_STOP
+		root.add_child(c)
+	_mb.call(0.0, 0.0, 1280.0, hl.position.y)
+	_mb.call(0.0, hl.position.y, hl.position.x, hl.size.y)
+	_mb.call(hl.end.x, hl.position.y, 1280.0 - hl.end.x, hl.size.y)
+	_mb.call(0.0, hl.end.y, 1280.0, 720.0 - hl.end.y)
+
+	# Message panel above the recipe button
+	var C_PANEL_BG := Color(0.06, 0.08, 0.16, 0.97)
+	var ps         := StyleBoxFlat.new()
+	ps.bg_color    = C_PANEL_BG
+	ps.corner_radius_top_left     = 8; ps.corner_radius_top_right    = 8
+	ps.corner_radius_bottom_left  = 8; ps.corner_radius_bottom_right = 8
+	ps.border_width_left = 2; ps.border_width_right  = 2
+	ps.border_width_top  = 2; ps.border_width_bottom = 2
+	ps.border_color = GOLD
+	var msg_panel := Panel.new()
+	msg_panel.position = Vector2(390.0, hl.position.y - 95.0)
+	msg_panel.size     = Vector2(380.0, 82.0)
+	msg_panel.add_theme_stylebox_override("panel", ps)
+	msg_panel.mouse_filter = MOUSE_FILTER_IGNORE
+	root.add_child(msg_panel)
+	var msg_lbl := _label(
+		"You can craft a Fusion Tower!\nClick the Recipe button to open the Recipe Book.",
+		_font_bold, 15, Color(1.0, 0.95, 0.80))
+	msg_lbl.position      = Vector2(10.0, 8.0)
+	msg_lbl.size          = Vector2(360.0, 66.0)
+	msg_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD
+	msg_lbl.mouse_filter  = MOUSE_FILTER_IGNORE
+	msg_panel.add_child(msg_lbl)
+
+	# Advance to step 2 when recipe button is pressed
+	_recipe_btn.pressed.connect(_advance_recipe_tutorial_step2, CONNECT_ONE_SHOT)
+
+
+func _advance_recipe_tutorial_step2() -> void:
+	# Modal just opened — wait one frame for layout
+	await get_tree().process_frame
+
+	if not is_instance_valid(_recipe_tut_overlay):
+		return
+
+	# Find first available craft button
+	var craftable_ids : Dictionary = {}
+	for f in _cached_fusions:
+		craftable_ids[f["recipe"]["result"]] = true
+
+	var first_craft_btn : Button = null
+	for row in _recipe_row_refs:
+		if craftable_ids.has(row["result_id"]) and is_instance_valid(row["craft_btn"]):
+			first_craft_btn = row["craft_btn"]
+			break
+
+	if not is_instance_valid(first_craft_btn):
+		_close_recipe_tutorial()
+		return
+
+	# Rebuild overlay for step 2 (spotlighting the craft button)
+	if is_instance_valid(_recipe_tut_overlay):
+		_recipe_tut_overlay.queue_free()
+	_recipe_tut_overlay = null
+
+	const DARK := Color(0.04, 0.04, 0.10, 0.82)
+	const GOLD := Color(1.0, 0.88, 0.28, 1.0)
+
+	var root := Control.new()
+	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	root.mouse_filter = MOUSE_FILTER_IGNORE
+	root.z_index      = 200
+	add_child(root)
+	_recipe_tut_overlay = root
+
+	var pad   : float  = 10.0
+	var grect : Rect2  = first_craft_btn.get_global_rect()
+	var hl    : Rect2  = Rect2(grect.position.x - pad, grect.position.y - pad,
+							   grect.size.x + pad * 2.0, grect.size.y + pad * 2.0)
+
+	var canvas := Control.new()
+	canvas.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	canvas.mouse_filter = MOUSE_FILTER_IGNORE
+	root.add_child(canvas)
+	canvas.draw.connect(func():
+		canvas.draw_rect(Rect2(0, 0, 1280, hl.position.y), DARK)
+		canvas.draw_rect(Rect2(0, hl.position.y, hl.position.x, hl.size.y), DARK)
+		canvas.draw_rect(Rect2(hl.end.x, hl.position.y, 1280.0 - hl.end.x, hl.size.y), DARK)
+		canvas.draw_rect(Rect2(0, hl.end.y, 1280, 720.0 - hl.end.y), DARK)
+		canvas.draw_rect(hl, GOLD, false, 2.5)
+	)
+
+	var _mb := func(x: float, y: float, w: float, h: float):
+		var c := ColorRect.new()
+		c.color       = Color(0, 0, 0, 0)
+		c.position    = Vector2(x, y)
+		c.size        = Vector2(w, h)
+		c.mouse_filter = MOUSE_FILTER_STOP
+		root.add_child(c)
+	_mb.call(0.0, 0.0, 1280.0, hl.position.y)
+	_mb.call(0.0, hl.position.y, hl.position.x, hl.size.y)
+	_mb.call(hl.end.x, hl.position.y, 1280.0 - hl.end.x, hl.size.y)
+	_mb.call(0.0, hl.end.y, 1280.0, 720.0 - hl.end.y)
+
+	# Message above the craft button
+	var C_PANEL_BG := Color(0.06, 0.08, 0.16, 0.97)
+	var ps         := StyleBoxFlat.new()
+	ps.bg_color    = C_PANEL_BG
+	ps.corner_radius_top_left     = 8; ps.corner_radius_top_right    = 8
+	ps.corner_radius_bottom_left  = 8; ps.corner_radius_bottom_right = 8
+	ps.border_width_left = 2; ps.border_width_right  = 2
+	ps.border_width_top  = 2; ps.border_width_bottom = 2
+	ps.border_color = GOLD
+	var msg_panel := Panel.new()
+	var mp_y      : float = maxf(hl.position.y - 80.0, 30.0)
+	msg_panel.position = Vector2(clampf(hl.position.x - 80.0, 10.0, 900.0), mp_y)
+	msg_panel.size     = Vector2(340.0, 68.0)
+	msg_panel.add_theme_stylebox_override("panel", ps)
+	msg_panel.mouse_filter = MOUSE_FILTER_IGNORE
+	root.add_child(msg_panel)
+	var msg_lbl := _label(
+		"Click [ Craft! ] to fuse your towers into\na powerful Fusion Turret!",
+		_font_bold, 15, Color(1.0, 0.95, 0.80))
+	msg_lbl.position      = Vector2(10.0, 8.0)
+	msg_lbl.size          = Vector2(320.0, 52.0)
+	msg_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD
+	msg_lbl.mouse_filter  = MOUSE_FILTER_IGNORE
+	msg_panel.add_child(msg_lbl)
+
+	first_craft_btn.pressed.connect(_close_recipe_tutorial, CONNECT_ONE_SHOT)
+
+
+func _close_recipe_tutorial() -> void:
+	GameData.recipe_tutorial_seen = true
+	GameData.save_game()
+	Engine.time_scale = _recipe_tut_ts
+	if is_instance_valid(_recipe_tut_overlay):
+		_recipe_tut_overlay.queue_free()
+	_recipe_tut_overlay = null
+
+
 # ── Public refresh ────────────────────────────────────────────────────────────
 
 func refresh(gold: int, lives: int, stage: int, wave_in_stage: int, total_waves: int,
@@ -314,6 +834,9 @@ func refresh(gold: int, lives: int, stage: int, wave_in_stage: int, total_waves:
 	_current_gold = gold
 	_gold_lbl.text  = "  💰 %d" % gold
 	_lives_lbl.text = "  ❤️ %d" % lives
+	if is_instance_valid(_recipe_btn):
+		_recipe_btn.disabled = false
+		_recipe_btn.text     = "📖  Recipe"
 
 	if stage > 10:
 		_stage_lbl.text = "⚔  All Stages Complete!"
@@ -445,19 +968,22 @@ func _upg_bonus_name(idx: int) -> String:
 	return ""
 
 
-func update_pull_cost(cost: int) -> void:
+func update_pull_cost(cost: int, discount: int = 0) -> void:
 	if is_instance_valid(_roll_turret_btn):
-		_roll_turret_btn.text = "🎲  Common Summon  (%dg)" % cost
+		var suf : String = "  ★-%dg" % discount if discount > 0 else ""
+		_roll_turret_btn.text = "🎲  Common Summon  (%dg%s)" % [cost, suf]
 
 
-func update_rare_cost(cost: int) -> void:
+func update_rare_cost(cost: int, discount: int = 0) -> void:
 	if is_instance_valid(_roll_rare_btn):
-		_roll_rare_btn.text = "🎲  Rare Summon  (%dg)" % cost
+		var suf : String = "  ★-%dg" % discount if discount > 0 else ""
+		_roll_rare_btn.text = "🎲  Rare Summon  (%dg%s)" % [cost, suf]
 
 
-func update_epic_cost(cost: int) -> void:
+func update_epic_cost(cost: int, discount: int = 0) -> void:
 	if is_instance_valid(_roll_epic_btn):
-		_roll_epic_btn.text = "🎲  Epic Summon  (%dg)" % cost
+		var suf : String = "  ★-%dg" % discount if discount > 0 else ""
+		_roll_epic_btn.text = "🎲  Epic Summon  (%dg%s)" % [cost, suf]
 
 
 func show_roll_error(msg: String) -> void:
@@ -524,6 +1050,8 @@ func _build_ui() -> void:
 	_build_world_map_screen()
 	_build_heroes_screen()
 	_build_towers_screen()
+	_build_daily_quests_screen()
+	_build_relics_screen()
 	_build_victory_screen()
 	_build_recipe_panel()
 	_build_recipe_modal()
@@ -1034,26 +1562,26 @@ func _build_hud_bar() -> void:
 
 	# Recipe button — center of bar
 	var C_RECIPE := Color(0.18, 0.42, 0.38)
-	var recipe_btn := Button.new()
-	recipe_btn.text         = "📖  Recipe"
-	recipe_btn.position     = Vector2(507, 10)
-	recipe_btn.size         = Vector2(165, 50)
-	recipe_btn.pivot_offset = Vector2(82, 25)
-	recipe_btn.focus_mode   = FOCUS_NONE
-	recipe_btn.add_theme_font_override("font",           _font_bold)
-	recipe_btn.add_theme_font_size_override("font_size", 15)
-	recipe_btn.add_theme_color_override("font_color",    C_WHITE)
-	recipe_btn.add_theme_stylebox_override("normal",  _btn_style(C_RECIPE))
-	recipe_btn.add_theme_stylebox_override("hover",   _btn_style(C_RECIPE.lightened(0.12)))
-	recipe_btn.add_theme_stylebox_override("pressed", _btn_style(C_RECIPE.darkened(0.12)))
-	recipe_btn.add_theme_stylebox_override("focus",   _btn_style(C_RECIPE))
-	recipe_btn.pressed.connect(func():
-		_tween_scale(recipe_btn, Vector2(0.92, 0.92), 0.07)
+	_recipe_btn = Button.new()
+	_recipe_btn.text         = "📖  Recipe"
+	_recipe_btn.position     = Vector2(507, 10)
+	_recipe_btn.size         = Vector2(165, 50)
+	_recipe_btn.pivot_offset = Vector2(82, 25)
+	_recipe_btn.focus_mode   = FOCUS_NONE
+	_recipe_btn.add_theme_font_override("font",           _font_bold)
+	_recipe_btn.add_theme_font_size_override("font_size", 15)
+	_recipe_btn.add_theme_color_override("font_color",    C_WHITE)
+	_recipe_btn.add_theme_stylebox_override("normal",  _btn_style(C_RECIPE))
+	_recipe_btn.add_theme_stylebox_override("hover",   _btn_style(C_RECIPE.lightened(0.12)))
+	_recipe_btn.add_theme_stylebox_override("pressed", _btn_style(C_RECIPE.darkened(0.12)))
+	_recipe_btn.add_theme_stylebox_override("focus",   _btn_style(C_RECIPE))
+	_recipe_btn.pressed.connect(func():
+		_tween_scale(_recipe_btn, Vector2(0.92, 0.92), 0.07)
 		if is_instance_valid(_recipe_modal):
 			_refresh_recipe_modal()
 			_recipe_modal.visible = true
 	)
-	bar.add_child(recipe_btn)
+	bar.add_child(_recipe_btn)
 
 	# Badge showing number of available crafts
 	var badge_bg := StyleBoxFlat.new()
@@ -1140,10 +1668,16 @@ func show_upgrade_popup(world_pos: Vector2) -> void:
 	if not is_instance_valid(_upgrade_popup_btn):
 		return
 	_upgrade_popup_btn.position = world_pos + Vector2(-43, -48)
-	_upgrade_popup_btn.visible  = true
+	if is_instance_valid(_merge_tut_overlay) and _merge_tut_step == 1:
+		# Keep button hidden until step 2 spotlights it
+		_advance_merge_tutorial_step2()
+		return
+	_upgrade_popup_btn.visible = true
 
 
 func hide_upgrade_popup() -> void:
+	if tutorial_lock_unit_btns:
+		return
 	if is_instance_valid(_upgrade_popup_btn):
 		_upgrade_popup_btn.visible = false
 
@@ -1205,6 +1739,8 @@ func _build_sell_btn() -> void:
 	_hero_info_btn.pressed.connect(func():
 		if is_instance_valid(_pending_hero_tower):
 			show_tower_info(_pending_hero_tower, _pending_hero_merge_cnt)
+			if not GameData.tutorial_complete:
+				tower_detail_opened_tutorial.emit()
 	)
 	add_child(_hero_info_btn)
 
@@ -1223,9 +1759,14 @@ func show_unit_btns(world_pos: Vector2, tower, merge_cnt: int) -> void:
 	_sell_btn.size     = Vector2(SW, BH)
 	_sell_btn.position = Vector2(bx, by)
 	_sell_btn.visible  = true
+	_sell_btn.disabled = not GameData.tutorial_complete
 	_hero_info_btn.size     = Vector2(IW, BH)
 	_hero_info_btn.position = Vector2(bx + SW + GAP, by)
 	_hero_info_btn.visible  = true
+	_hero_info_btn.disabled = tutorial_block_info_btn
+	if not GameData.tutorial_complete:
+		var ib_rect := Rect2(_hero_info_btn.position.x - 6, _hero_info_btn.position.y - 6, IW + 12, BH + 12)
+		tower_selected_tutorial.emit(ib_rect)
 
 
 func is_tower_info_visible() -> bool:
@@ -1240,6 +1781,8 @@ func show_sell_btn(world_pos: Vector2) -> void:
 
 
 func hide_sell_btn() -> void:
+	if tutorial_lock_unit_btns:
+		return
 	if is_instance_valid(_sell_btn):
 		_sell_btn.visible = false
 	if is_instance_valid(_hero_info_btn):
@@ -1362,7 +1905,7 @@ func _build_rarity_modal() -> void:
 
 		for pi in range(3):
 			var val : int = (all_pool_odds[pi] as Array)[ri]
-			var txt : String = "%d%" % val if val > 0 else "—"
+			var txt : String = "%d%%" % val if val > 0 else "—"
 			var pct := _label(txt, _font_bold, 14, C_WHITE)
 			pct.position             = Vector2(col_x[pi + 1], ry)
 			pct.size                 = Vector2(COL_W, 28)
@@ -1440,12 +1983,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 func _on_speed_btn_pressed() -> void:
 	_tween_scale(speed_btn, Vector2(0.92, 0.92), 0.07)
-	if _speed_factor == 1.0:
-		_speed_factor = 2.0
-	elif _speed_factor == 2.0:
-		_speed_factor = 4.0
-	else:
-		_speed_factor = 1.0
+	_speed_factor = 1.0 if _speed_factor == 2.0 else 2.0
 	match _speed_factor:
 		1.0:
 			speed_btn.text = "1× Speed"
@@ -1459,12 +1997,6 @@ func _on_speed_btn_pressed() -> void:
 			speed_btn.add_theme_stylebox_override("normal", _btn_style(c2))
 			speed_btn.add_theme_stylebox_override("hover",  _btn_style(c2.lightened(0.10)))
 			speed_btn.add_theme_stylebox_override("focus",  _btn_style(c2))
-		4.0:
-			speed_btn.text = "4× Speed"
-			var c4 := Color(0.58, 0.14, 0.14)
-			speed_btn.add_theme_stylebox_override("normal", _btn_style(c4))
-			speed_btn.add_theme_stylebox_override("hover",  _btn_style(c4.lightened(0.10)))
-			speed_btn.add_theme_stylebox_override("focus",  _btn_style(c4))
 	Engine.time_scale = _speed_factor
 	speed_toggled.emit(_speed_factor)
 
@@ -2242,29 +2774,33 @@ func show_tower_info(tower, merge_count: int = 0) -> void:
 	var wt_dmg      : float  = tower._wt_dmg_bonus
 	var wt_rate     : float  = tower._wt_rate_bonus
 	var herc_bonus  : float  = tower._hercules_wave_bonus
-	var eff_dmg     : float  = (tower.damage + GameData.buff_damage_flat + wt_dmg + herc_bonus) * dmg_mult
+	var relic_dmg   : float  = tower._relic_dmg_bonus
+	var relic_rate  : float  = tower._relic_rate_bonus
+	var eff_dmg     : float  = (tower.damage + GameData.buff_damage_flat + wt_dmg + herc_bonus + relic_dmg) * dmg_mult * (1.0 + tower._tile_dmg_bonus)
 	var base_rate   : float  = d.get("fire_rate", tower.fire_rate)
-	var eff_rate    : float  = base_rate * spd_mult * (1.0 + wt_rate + tower._ranger_rate_bonus + tower._frost_speed_bonus)
+	var eff_rate    : float  = base_rate * spd_mult * (1.0 + wt_rate + tower._ranger_rate_bonus + tower._frost_speed_bonus + tower._tile_spd_bonus + relic_rate)
+	var dmg_pct     : float  = (dmg_mult - 1.0 + tower._tile_dmg_bonus) * 100.0
 	var dmg_suffix  : String = ""
-	if dmg_mult > 1.0 and wt_dmg > 0.0:
-		dmg_suffix = " (+%.0f%%, 🌳)" % [(dmg_mult - 1.0) * 100]
-	elif dmg_mult > 1.0:
-		dmg_suffix = " (+%.0f%%)" % [(dmg_mult - 1.0) * 100]
-	elif wt_dmg > 0.0:
-		dmg_suffix = " (🌳)"
+	var dmg_tags    : Array  = []
+	if dmg_pct > 0.0:           dmg_tags.append("+%.0f%%" % dmg_pct)
+	if wt_dmg  > 0.0:           dmg_tags.append("🌳")
+	if tower._tile_dmg_bonus > 0.0: dmg_tags.append("🔴")
+	if relic_dmg > 0.0:         dmg_tags.append("★")
+	if not dmg_tags.is_empty(): dmg_suffix = " (%s)" % ", ".join(dmg_tags)
+	var spd_pct     : float  = (spd_mult - 1.0 + tower._tile_spd_bonus) * 100.0
 	var rate_suffix : String = ""
-	if spd_mult > 1.0 and wt_rate > 0.0:
-		rate_suffix = " (+%.0f%%, 🌳)" % [(spd_mult - 1.0) * 100]
-	elif spd_mult > 1.0:
-		rate_suffix = " (+%.0f%%)" % [(spd_mult - 1.0) * 100]
-	elif wt_rate > 0.0:
-		rate_suffix = " (🌳)"
+	var rate_tags   : Array  = []
+	if spd_pct > 0.0:               rate_tags.append("+%.0f%%" % spd_pct)
+	if wt_rate  > 0.0:              rate_tags.append("🌳")
+	if tower._tile_spd_bonus > 0.0: rate_tags.append("🟢")
+	if relic_rate > 0.0:            rate_tags.append("★")
+	if not rate_tags.is_empty():    rate_suffix = " (%s)" % ", ".join(rate_tags)
 	_info_dmg_lbl.text   = "%.0f" % eff_dmg + dmg_suffix
-	_info_rng_lbl.text   = "%.0f px" % tower.attack_range
+	_info_rng_lbl.text   = "%.0f px" % tower.attack_range + (" (🔵)" if tower._tile_range_bonus > 0.0 else "")
 	_info_rate_lbl.text  = "%.1f / s" % eff_rate + rate_suffix
 	var eff_map : Dictionary = {
 		"none":          "Standard single-target shot. No bonus effect.",
-		"focused_shot":  "Consecutive hits on the same target deal +50% damage. Resets when switching targets.",
+		"focused_shot":  "Consecutive hits on the same target stacks +50% damage up to 2x. Resets when switching targets.",
 		"dual_shot":     "Fires at 2 separate enemies simultaneously each attack.",
 		"chain":         "Hits primary target at full damage, then chains to 2 nearby enemies at 50% damage.",
 		"aoe":           "Hits all enemies currently in range with each shot.",
@@ -2281,7 +2817,7 @@ func show_tower_info(tower, merge_count: int = 0) -> void:
 		"frost_cannon_tri": "Fires at up to 3 separate targets per shot. Boss targets take +50% damage and receive a 10% slow that refreshes on repeat hits.",
 		"arcane_overload": "Every 5th attack triggers Arcane Overload — instant lasers hit ALL enemies in range (minimum 5 lasers). Counter never resets.",
 		"arcane_charge": "Persistent charge counter — every 15th hit fires a blue ray hitting all enemies in range. Counter never resets.",
-		"lock_beam":     "Locks onto one target until it dies or leaves range. Beam damage ramps from 1× to 1.5× over 5 seconds of continuous fire.",
+		"lock_beam":     "Locks onto one target until it dies or leaves range. Beam damage ramps from 1× to 2× over 5 seconds of continuous fire.",
 		"tempest_strike":         "Every 10th hit launches a slash that deals base damage + 5% of the target's max HP on impact.",
 		"infernal_serpent_summon":"Each hit has a 10% chance to summon a living fire serpent (100 damage per bite) that races around the battlefield once.",
 		"lightning":     "Chains to the primary target and up to 3 additional enemies at 80% damage.",
@@ -2820,7 +3356,56 @@ func _build_game_over_screen() -> void:
 		nav_btn.add_theme_stylebox_override("focus",   _btn_style(nd["color"]))
 		var cap_ni := ni
 		nav_btn.pressed.connect(func(): _on_main_nav_pressed(cap_ni))
+		if ni > 0:
+			nav_btn.visible = GameData.tutorial_complete
+			_tutorial_locked_btns.append(nav_btn)
 		overlay.add_child(nav_btn)
+
+	# "Daily Quests" button — top-right of black area
+	var dq_btn := Button.new()
+	dq_btn.text         = "📅  Daily Quests"
+	dq_btn.position     = Vector2(920, 195)
+	dq_btn.size         = Vector2(240, 58)
+	dq_btn.focus_mode   = FOCUS_NONE
+	dq_btn.pivot_offset = Vector2(120, 29)
+	dq_btn.add_theme_font_override("font",           _font_bold)
+	dq_btn.add_theme_font_size_override("font_size", 18)
+	dq_btn.add_theme_color_override("font_color",    C_WHITE)
+	dq_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.18, 0.32, 0.45)))
+	dq_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.25, 0.44, 0.62)))
+	dq_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.12, 0.22, 0.32)))
+	dq_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.18, 0.32, 0.45)))
+	dq_btn.visible = GameData.dq_unlocked
+	dq_btn.pressed.connect(func():
+		_game_over_screen.visible = false
+		if is_instance_valid(_daily_quests_screen):
+			_refresh_daily_quests_screen()
+			_daily_quests_screen.visible = true
+	)
+	overlay.add_child(dq_btn)
+	_dq_main_btn = dq_btn
+
+	# "Relics" button — below Daily Quests
+	var relics_btn := Button.new()
+	relics_btn.text         = "💎  Relics"
+	relics_btn.position     = Vector2(920, 268)
+	relics_btn.size         = Vector2(240, 58)
+	relics_btn.focus_mode   = FOCUS_NONE
+	relics_btn.pivot_offset = Vector2(120, 29)
+	relics_btn.add_theme_font_override("font",           _font_bold)
+	relics_btn.add_theme_font_size_override("font_size", 18)
+	relics_btn.add_theme_color_override("font_color",    C_WHITE)
+	relics_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.24, 0.10, 0.44)))
+	relics_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.34, 0.16, 0.62)))
+	relics_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.16, 0.06, 0.30)))
+	relics_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.24, 0.10, 0.44)))
+	relics_btn.pressed.connect(func():
+		_game_over_screen.visible = false
+		if is_instance_valid(_relic_screen):
+			_refresh_relics_screen()
+			_relic_screen.visible = true
+	)
+	overlay.add_child(relics_btn)
 
 	# "Start Game" button — bottom right
 	var start_btn := Button.new()
@@ -2866,6 +3451,25 @@ func _build_game_over_screen() -> void:
 	)
 	overlay.add_child(reset_btn)
 
+	# DEBUG — Add quest tokens
+	var tok_btn := Button.new()
+	tok_btn.text       = "★ +1000 Quest Tokens"
+	tok_btn.position   = Vector2(920, 334)
+	tok_btn.size       = Vector2(240, 44)
+	tok_btn.focus_mode = FOCUS_NONE
+	tok_btn.add_theme_font_override("font",           _font_bold)
+	tok_btn.add_theme_font_size_override("font_size", 14)
+	tok_btn.add_theme_color_override("font_color",    Color(0.88, 0.72, 1.00))
+	tok_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.18, 0.10, 0.32)))
+	tok_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.26, 0.14, 0.46)))
+	tok_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.12, 0.06, 0.22)))
+	tok_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.18, 0.10, 0.32)))
+	tok_btn.pressed.connect(func():
+		GameData.quest_tokens += 1000
+		GameData.save_game()
+	)
+	overlay.add_child(tok_btn)
+
 	call_deferred("_wire_hover_recursive", overlay)
 
 
@@ -2877,11 +3481,22 @@ func show_game_over(stage: int) -> void:
 	_game_over_screen.visible = true
 
 
+func start_tutorial() -> void:
+	var overlay = load("res://ui/TutorialOverlay.gd").new()
+	add_child(overlay)
+	overlay.setup(_font_bold, _font_reg)
+
+
 func show_main_menu() -> void:
 	Engine.time_scale = 1.0
 	_go_title_lbl.text      = "🛡  IDLE BASTION"
 	_go_stage_lbl.visible   = false
 	_go_flavour_lbl.visible = false
+	for btn in _tutorial_locked_btns:
+		if is_instance_valid(btn):
+			btn.visible = GameData.dq_unlocked
+	if is_instance_valid(_dq_main_btn):
+		_dq_main_btn.visible = GameData.dq_unlocked
 	_game_over_screen.visible = true
 
 
@@ -3029,16 +3644,31 @@ func _build_shop_screen() -> void:
 	uline.mouse_filter = MOUSE_FILTER_IGNORE
 	overlay.add_child(uline)
 
-	# ── Gem display ──────────────────────────────────────────────────────────────
+	# ── Gem display (shown for tower/hero tabs) ──────────────────────────────────
 	_gacha_gem_lbl = _label("🔷 0", _font_bold, 20, Color(0.50, 0.82, 1.0))
 	_gacha_gem_lbl.position             = Vector2(0, 62)
 	_gacha_gem_lbl.size                 = Vector2(1280, 28)
 	_gacha_gem_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	overlay.add_child(_gacha_gem_lbl)
 
-	# ── Mode tabs ─────────────────────────────────────────────────────────────────
+	# ── Relic token display (shown only for relic tab) ───────────────────────────
+	const GH_D  : int = 22
+	const GH_GAP: int = 6
+	var _gh := _tok_center("00000 ★", 20, GH_D, GH_GAP, 1280)
+	_gacha_relic_coin = _make_token_coin(GH_D)
+	_gacha_relic_coin.position = Vector2(_gh[0], 65)
+	_gacha_relic_coin.visible  = false
+	overlay.add_child(_gacha_relic_coin)
+	_gacha_relic_tok_lbl = _label("%d ★" % GameData.quest_tokens, _font_bold, 20, Color(0.88, 0.72, 1.00))
+	_gacha_relic_tok_lbl.position             = Vector2(_gh[1], 62)
+	_gacha_relic_tok_lbl.size                 = Vector2(_gh[2], 28)
+	_gacha_relic_tok_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_gacha_relic_tok_lbl.visible              = false
+	overlay.add_child(_gacha_relic_tok_lbl)
+
+	# ── Mode tabs (3 tabs: Towers, Heroes, Quest Shop) ───────────────────────────
 	const TAB_W : int = 180; const TAB_H : int = 32; const TAB_GAP : int = 12
-	var tab_x0  : int = (1280 - 2 * TAB_W - TAB_GAP) / 2
+	var tab_x0  : int = (1280 - 3 * TAB_W - 2 * TAB_GAP) / 2   # centres 3 tabs
 
 	_gacha_tab_tower_btn = Button.new()
 	_gacha_tab_tower_btn.text       = "⚔  Towers"
@@ -3069,6 +3699,21 @@ func _build_shop_screen() -> void:
 	_gacha_tab_hero_btn.add_theme_stylebox_override("focus",   _btn_style(C_TAB_IDLE))
 	_gacha_tab_hero_btn.pressed.connect(func(): _gacha_switch_mode("hero"))
 	overlay.add_child(_gacha_tab_hero_btn)
+
+	_gacha_tab_quest_btn = Button.new()
+	_gacha_tab_quest_btn.text       = "💎  Relics"
+	_gacha_tab_quest_btn.position   = Vector2(tab_x0 + (TAB_W + TAB_GAP) * 2, 96)
+	_gacha_tab_quest_btn.size       = Vector2(TAB_W, TAB_H)
+	_gacha_tab_quest_btn.focus_mode = FOCUS_NONE
+	_gacha_tab_quest_btn.add_theme_font_override("font",           _font_bold)
+	_gacha_tab_quest_btn.add_theme_font_size_override("font_size", 15)
+	_gacha_tab_quest_btn.add_theme_color_override("font_color",    C_DIM)
+	_gacha_tab_quest_btn.add_theme_stylebox_override("normal",  _btn_style(C_TAB_IDLE))
+	_gacha_tab_quest_btn.add_theme_stylebox_override("hover",   _btn_style(C_TAB_IDLE.lightened(0.1)))
+	_gacha_tab_quest_btn.add_theme_stylebox_override("pressed", _btn_style(C_TAB_IDLE.darkened(0.15)))
+	_gacha_tab_quest_btn.add_theme_stylebox_override("focus",   _btn_style(C_TAB_IDLE))
+	_gacha_tab_quest_btn.pressed.connect(func(): _gacha_switch_mode("relic"))
+	overlay.add_child(_gacha_tab_quest_btn)
 
 	# ── Rarity odds pills ─────────────────────────────────────────────────────────
 	var odds_defs : Array = [
@@ -3247,9 +3892,146 @@ func _build_shop_screen() -> void:
 	)
 	overlay.add_child(back_btn)
 
+	# ── Relic panel (overlays gacha content when "relic" tab is active) ──────────
+	var qp := Panel.new()
+	var qp_s := StyleBoxFlat.new()
+	qp_s.bg_color = Color(0.03, 0.03, 0.09)
+	qp.add_theme_stylebox_override("panel", qp_s)
+	qp.position     = Vector2(0, 134)
+	qp.size         = Vector2(1280, 586)
+	qp.mouse_filter = MOUSE_FILTER_STOP
+	qp.visible      = false
+	overlay.add_child(qp)
+	_quest_shop_panel = qp
+
+	# ── Back button inside relic panel ───────────────────────────────────────────
+	var relic_back_btn := Button.new()
+	relic_back_btn.text       = "<  Back"
+	relic_back_btn.position   = Vector2(30, 528)
+	relic_back_btn.size       = Vector2(140, 44)
+	relic_back_btn.focus_mode = FOCUS_NONE
+	relic_back_btn.add_theme_font_override("font",           _font_bold)
+	relic_back_btn.add_theme_font_size_override("font_size", 16)
+	relic_back_btn.add_theme_color_override("font_color",    C_WHITE)
+	relic_back_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.22, 0.22, 0.28)))
+	relic_back_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.30, 0.30, 0.38)))
+	relic_back_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.16, 0.16, 0.20)))
+	relic_back_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.22, 0.22, 0.28)))
+	relic_back_btn.pressed.connect(func():
+		overlay.visible = false
+		_game_over_screen.visible = true
+	)
+	qp.add_child(relic_back_btn)
+
+	# ── Relic token balance bar (coin icon + count) ───────────────────────────────
+	const TC_D  : int = 22
+	const TC_GAP: int = 6
+	var _tc := _tok_center("00000 ★", 17, TC_D, TC_GAP, 1280)
+	_relic_tok_coin = _make_token_coin(TC_D)
+	_relic_tok_coin.position = Vector2(_tc[0], 4)
+	qp.add_child(_relic_tok_coin)
+	_relic_token_lbl = _label("%d ★" % GameData.quest_tokens, _font_bold, 17, Color(0.88, 0.72, 1.00))
+	_relic_token_lbl.position             = Vector2(_tc[1], 6)
+	_relic_token_lbl.size                 = Vector2(_tc[2], 22)
+	_relic_token_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_relic_token_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	qp.add_child(_relic_token_lbl)
+
+	# ── Relic wheel arrow ─────────────────────────────────────────────────────────
+	var r_arrow := _label("▼", _font_bold, 28, Color(0.95, 0.18, 0.18))
+	r_arrow.position             = Vector2(CLIP_X, 18)
+	r_arrow.size                 = Vector2(CLIP_W, 32)
+	r_arrow.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	r_arrow.mouse_filter         = MOUSE_FILTER_IGNORE
+	qp.add_child(r_arrow)
+
+	# ── Relic wheel clip ──────────────────────────────────────────────────────────
+	var r_clip := Panel.new()
+	var r_clip_s := StyleBoxFlat.new()
+	r_clip_s.bg_color                   = Color(0.06, 0.06, 0.12)
+	r_clip_s.corner_radius_top_left     = 12; r_clip_s.corner_radius_top_right    = 12
+	r_clip_s.corner_radius_bottom_left  = 12; r_clip_s.corner_radius_bottom_right = 12
+	r_clip_s.border_width_left  = 2; r_clip_s.border_width_right  = 2
+	r_clip_s.border_width_top   = 2; r_clip_s.border_width_bottom = 2
+	r_clip_s.border_color = Color(0.50, 0.20, 0.82, 0.60)
+	r_clip_s.shadow_color = Color(0.18, 0.04, 0.40, 0.55)
+	r_clip_s.shadow_size  = 12
+	r_clip.add_theme_stylebox_override("panel", r_clip_s)
+	r_clip.position      = Vector2(CLIP_X, 54)
+	r_clip.size          = Vector2(CLIP_W, CLIP_H)
+	r_clip.clip_contents = true
+	r_clip.mouse_filter  = MOUSE_FILTER_IGNORE
+	r_clip.z_index       = 2
+	qp.add_child(r_clip)
+
+	var r_cline := ColorRect.new()
+	r_cline.color        = Color(0.95, 0.18, 0.18, 0.72)
+	r_cline.position     = Vector2(CLIP_X + CLIP_W / 2 - 1, 48)
+	r_cline.size         = Vector2(2, CLIP_H + 12)
+	r_cline.mouse_filter = MOUSE_FILTER_IGNORE
+	r_cline.z_index      = 6
+	qp.add_child(r_cline)
+
+	var r_lfade := ColorRect.new()
+	r_lfade.color        = Color(0.03, 0.03, 0.09, 0.76)
+	r_lfade.position     = Vector2(CLIP_X, 54)
+	r_lfade.size         = Vector2(52, CLIP_H)
+	r_lfade.mouse_filter = MOUSE_FILTER_IGNORE
+	r_lfade.z_index      = 4
+	qp.add_child(r_lfade)
+
+	var r_rfade := ColorRect.new()
+	r_rfade.color        = Color(0.03, 0.03, 0.09, 0.76)
+	r_rfade.position     = Vector2(CLIP_X + CLIP_W - 52, 54)
+	r_rfade.size         = Vector2(52, CLIP_H)
+	r_rfade.mouse_filter = MOUSE_FILTER_IGNORE
+	r_rfade.z_index      = 4
+	qp.add_child(r_rfade)
+
+	var r_strip := Control.new()
+	r_strip.position     = Vector2(4, (CLIP_H - GACHA_CARD_H) / 2)
+	r_strip.mouse_filter = MOUSE_FILTER_IGNORE
+	r_clip.add_child(r_strip)
+	_relic_strip = r_strip
+
+	_relic_rebuild_strip("")
+
+	# ── Spin button ───────────────────────────────────────────────────────────────
+	_relic_spin_btn = Button.new()
+	_relic_spin_btn.text       = "💎  Spin  —  ★ 200"
+	_relic_spin_btn.position   = Vector2((1280 - 340) / 2, 252)
+	_relic_spin_btn.size       = Vector2(340, 56)
+	_relic_spin_btn.focus_mode = FOCUS_NONE
+	_relic_spin_btn.add_theme_font_override("font",           _font_bold)
+	_relic_spin_btn.add_theme_font_size_override("font_size", 20)
+	_relic_spin_btn.add_theme_color_override("font_color",    C_WHITE)
+	_relic_spin_btn.add_theme_stylebox_override("normal",   _btn_style(Color(0.28, 0.10, 0.52)))
+	_relic_spin_btn.add_theme_stylebox_override("hover",    _btn_style(Color(0.38, 0.16, 0.70)))
+	_relic_spin_btn.add_theme_stylebox_override("pressed",  _btn_style(Color(0.18, 0.06, 0.36)))
+	_relic_spin_btn.add_theme_stylebox_override("focus",    _btn_style(Color(0.28, 0.10, 0.52)))
+	_relic_spin_btn.add_theme_stylebox_override("disabled", _btn_style(Color(0.22, 0.22, 0.28)))
+	_relic_spin_btn.pressed.connect(_on_relic_spin_pressed)
+	qp.add_child(_relic_spin_btn)
+
+	# ── Pool remaining label ──────────────────────────────────────────────────────
+	_relic_pool_lbl = _label("", _font_reg, 15, Color(0.60, 0.60, 0.70))
+	_relic_pool_lbl.position             = Vector2(0, 318)
+	_relic_pool_lbl.size                 = Vector2(1280, 24)
+	_relic_pool_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_relic_pool_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	qp.add_child(_relic_pool_lbl)
+
+	_relic_refresh_spin_state()
+
+	# ── Result popup (built hidden, child of main overlay so it's on top) ─────────
+	_relic_build_result_popup(overlay)
+
 	overlay.visibility_changed.connect(func():
 		if overlay.visible and is_instance_valid(_gacha_gem_lbl):
 			_gacha_gem_lbl.text = "🔷 %d" % GameData.blue_gems
+		if overlay.visible:
+			_refresh_quest_token_labels()
+			_relic_refresh_spin_state()
 	)
 
 
@@ -3258,15 +4040,19 @@ func _build_shop_screen() -> void:
 # ─────────────────────────────────────────────────────────────────────────────
 
 func _gacha_switch_mode(mode: String) -> void:
-	if _gacha_spinning:
+	if _gacha_spinning or _relic_spinning:
 		return
 	_gacha_mode = mode
-	var is_hero : bool = (mode == "hero")
+	var is_hero  : bool = (mode == "hero")
+	var is_relic : bool = (mode == "relic")
 	if is_instance_valid(_gacha_title_lbl):
-		_gacha_title_lbl.text = "Hero  Gacha" if is_hero else "Tower  Gacha"
+		if is_relic:
+			_gacha_title_lbl.text = "💎  Relic  Gacha"
+		else:
+			_gacha_title_lbl.text = "Hero  Gacha" if is_hero else "Tower  Gacha"
 	if is_instance_valid(_gacha_tab_tower_btn):
-		var tc : Color = C_TAB_IDLE if is_hero else C_TAB_ACT
-		_gacha_tab_tower_btn.add_theme_color_override("font_color", C_DIM if is_hero else C_WHITE)
+		var tc : Color = C_TAB_ACT if mode == "tower" else C_TAB_IDLE
+		_gacha_tab_tower_btn.add_theme_color_override("font_color", C_WHITE if mode == "tower" else C_DIM)
 		_gacha_tab_tower_btn.add_theme_stylebox_override("normal", _btn_style(tc))
 		_gacha_tab_tower_btn.add_theme_stylebox_override("hover",  _btn_style(tc.lightened(0.1)))
 	if is_instance_valid(_gacha_tab_hero_btn):
@@ -3274,13 +4060,34 @@ func _gacha_switch_mode(mode: String) -> void:
 		_gacha_tab_hero_btn.add_theme_color_override("font_color", C_WHITE if is_hero else C_DIM)
 		_gacha_tab_hero_btn.add_theme_stylebox_override("normal", _btn_style(hc))
 		_gacha_tab_hero_btn.add_theme_stylebox_override("hover",  _btn_style(hc.lightened(0.1)))
-	if is_instance_valid(_gacha_summon_btn):
-		var c1 : int = GACHA_HERO_SUMMON_COST if is_hero else GACHA_TOWER_SUMMON_COST
-		_gacha_summon_btn.text = "✦  Summon x1    🔷 %d" % c1
-	if is_instance_valid(_gacha_summon_10_btn):
-		var c10 : int = GACHA_HERO_SUMMON_10_COST if is_hero else GACHA_TOWER_SUMMON_10_COST
-		_gacha_summon_10_btn.text = "✦✦  Summon x10  🔷 %d" % c10
-	_gacha_rebuild_strip("")
+	if is_instance_valid(_gacha_tab_quest_btn):
+		var qc : Color = C_TAB_ACT if is_relic else C_TAB_IDLE
+		_gacha_tab_quest_btn.add_theme_color_override("font_color", C_WHITE if is_relic else C_DIM)
+		_gacha_tab_quest_btn.add_theme_stylebox_override("normal", _btn_style(qc))
+		_gacha_tab_quest_btn.add_theme_stylebox_override("hover",  _btn_style(qc.lightened(0.1)))
+	# Swap gem / relic token header
+	if is_instance_valid(_gacha_gem_lbl):
+		_gacha_gem_lbl.visible = not is_relic
+		if not is_relic:
+			_gacha_gem_lbl.text = "🔷 %d" % GameData.blue_gems
+			_gacha_gem_lbl.add_theme_color_override("font_color", Color(0.50, 0.82, 1.00))
+	if is_instance_valid(_gacha_relic_coin):
+		_gacha_relic_coin.visible = is_relic
+	if is_instance_valid(_gacha_relic_tok_lbl):
+		_gacha_relic_tok_lbl.visible = is_relic
+	if is_instance_valid(_quest_shop_panel):
+		_quest_shop_panel.visible = is_relic
+		if is_relic:
+			_refresh_quest_token_labels()
+			_relic_refresh_spin_state()
+	if not is_relic:
+		if is_instance_valid(_gacha_summon_btn):
+			var c1 : int = GACHA_HERO_SUMMON_COST if is_hero else GACHA_TOWER_SUMMON_COST
+			_gacha_summon_btn.text = "✦  Summon x1    🔷 %d" % c1
+		if is_instance_valid(_gacha_summon_10_btn):
+			var c10 : int = GACHA_HERO_SUMMON_10_COST if is_hero else GACHA_TOWER_SUMMON_10_COST
+			_gacha_summon_10_btn.text = "✦✦  Summon x10  🔷 %d" % c10
+		_gacha_rebuild_strip("")
 
 
 func _gacha_rebuild_strip(winning_id: String) -> void:
@@ -3952,6 +4759,977 @@ func _gacha_show_multi_result(level_ups: Array) -> void:
 	pop.set_ease(Tween.EASE_OUT)
 	pop.set_trans(Tween.TRANS_BACK)
 	pop.tween_property(panel, "scale", Vector2(1.0, 1.0), 0.35)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RELIC WHEEL (shop tab)
+# ══════════════════════════════════════════════════════════════════════════════
+
+func _relic_make_wheel_card(relic_id: String, grayed: bool = false) -> Control:
+	var def  : Dictionary = GameData.get_relic_def(relic_id)
+	var rcol : Color      = def.get("color", C_WHITE) if not grayed else Color(0.35, 0.35, 0.40)
+
+	var card := Panel.new()
+	var cs   := StyleBoxFlat.new()
+	cs.bg_color                   = Color(0.10, 0.10, 0.17) if not grayed else Color(0.08, 0.08, 0.12)
+	cs.corner_radius_top_left     = 8; cs.corner_radius_top_right    = 8
+	cs.corner_radius_bottom_left  = 8; cs.corner_radius_bottom_right = 8
+	cs.border_width_left  = 2; cs.border_width_right  = 2
+	cs.border_width_top   = 2; cs.border_width_bottom = 2
+	cs.border_color       = Color(rcol.r, rcol.g, rcol.b, 0.55)
+	card.add_theme_stylebox_override("panel", cs)
+	card.custom_minimum_size = Vector2(GACHA_CARD_W, GACHA_CARD_H)
+	card.mouse_filter        = MOUSE_FILTER_IGNORE
+	card.set_meta("style", cs)
+
+	# Icon circle background
+	var ibg := Panel.new()
+	var ibs := StyleBoxFlat.new()
+	ibs.bg_color = Color(rcol.r * 0.18, rcol.g * 0.18, rcol.b * 0.18, 1.0)
+	const ICR : int = 32
+	ibs.corner_radius_top_left     = ICR; ibs.corner_radius_top_right    = ICR
+	ibs.corner_radius_bottom_left  = ICR; ibs.corner_radius_bottom_right = ICR
+	ibs.border_width_left = 2; ibs.border_width_right  = 2
+	ibs.border_width_top  = 2; ibs.border_width_bottom = 2
+	ibs.border_color = Color(rcol.r, rcol.g, rcol.b, 0.55)
+	ibg.add_theme_stylebox_override("panel", ibs)
+	ibg.position     = Vector2((GACHA_CARD_W - ICR * 2) / 2, 8)
+	ibg.size         = Vector2(ICR * 2, ICR * 2)
+	ibg.mouse_filter = MOUSE_FILTER_IGNORE
+	card.add_child(ibg)
+
+	var icon_lbl := _label(def.get("icon", "?"), _font_bold, 34, rcol)
+	icon_lbl.position             = Vector2(0, 4)
+	icon_lbl.size                 = Vector2(ICR * 2, ICR * 2)
+	icon_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	icon_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	icon_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	ibg.add_child(icon_lbl)
+
+	var name_lbl := _label(def.get("name", relic_id), _font_bold, 11, C_WHITE if not grayed else Color(0.45, 0.45, 0.50))
+	name_lbl.position             = Vector2(2, 78)
+	name_lbl.size                 = Vector2(GACHA_CARD_W - 4, 36)
+	name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	name_lbl.autowrap_mode        = TextServer.AUTOWRAP_WORD_SMART
+	name_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	card.add_child(name_lbl)
+
+	var stripe := ColorRect.new()
+	stripe.color        = Color(rcol.r, rcol.g, rcol.b, 0.28)
+	stripe.position     = Vector2(2, GACHA_CARD_H - 12)
+	stripe.size         = Vector2(GACHA_CARD_W - 4, 10)
+	stripe.mouse_filter = MOUSE_FILTER_IGNORE
+	card.add_child(stripe)
+
+	return card
+
+
+func _relic_random_dummy() -> String:
+	var all_ids : Array = []
+	for r in GameData.RELIC_DEFS:
+		all_ids.append(r["id"])
+	return all_ids[randi() % all_ids.size()]
+
+
+func _relic_rebuild_strip(winning_id: String) -> void:
+	if not is_instance_valid(_relic_strip):
+		return
+	for child in _relic_strip.get_children():
+		child.queue_free()
+	var pool : Array = GameData.get_relic_pool()
+	for i in range(GACHA_STRIP_COUNT):
+		var rid : String
+		if i == GACHA_WIN_IDX and winning_id != "":
+			rid = winning_id
+		else:
+			rid = _relic_random_dummy()
+		var card := _relic_make_wheel_card(rid)
+		card.position = Vector2(i * GACHA_CARD_SLOT, 0)
+		_relic_strip.add_child(card)
+
+
+func _relic_refresh_spin_state() -> void:
+	var pool : Array = GameData.get_relic_pool()
+	if not is_instance_valid(_relic_pool_lbl):
+		return
+	if pool.is_empty():
+		_relic_pool_lbl.text = "✔  All 10 relics collected!"
+		if is_instance_valid(_relic_spin_btn):
+			_relic_spin_btn.disabled = true
+			_relic_spin_btn.text     = "All Relics Collected"
+	else:
+		_relic_pool_lbl.text = "%d relic%s remaining in pool  —  Equal chance for each" % [pool.size(), "s" if pool.size() != 1 else ""]
+		if is_instance_valid(_relic_spin_btn):
+			var can_spin : bool = GameData.quest_tokens >= 200 and not _relic_spinning
+			_relic_spin_btn.disabled = not can_spin
+			_relic_spin_btn.text     = "💎  Spin  —  ★ 200"
+
+
+func _on_relic_spin_pressed() -> void:
+	if _relic_spinning:
+		return
+	var pool : Array = GameData.get_relic_pool()
+	if pool.is_empty():
+		return
+	if GameData.quest_tokens < 200:
+		return
+	GameData.quest_tokens -= 200
+	GameData.save_game()
+	_refresh_quest_token_labels()
+	_relic_spinning = true
+	if is_instance_valid(_relic_spin_btn):
+		_relic_spin_btn.disabled = true
+	var result_id : String = pool[randi() % pool.size()]
+	_relic_rebuild_strip(result_id)
+	_relic_spin(result_id)
+
+
+func _relic_spin(result_id: String) -> void:
+	if not is_instance_valid(_relic_strip):
+		return
+	const START_X : float = 4.0
+	const END_X   : float = 420.0 - GACHA_WIN_IDX * GACHA_CARD_SLOT - GACHA_CARD_W / 2.0
+	_relic_strip.position.x = START_X
+	if is_instance_valid(_relic_tween):
+		_relic_tween.kill()
+	_relic_tween = create_tween()
+	_relic_tween.set_trans(Tween.TRANS_EXPO)
+	_relic_tween.set_ease(Tween.EASE_OUT)
+	_relic_tween.tween_property(_relic_strip, "position:x", END_X, GACHA_SPIN_DURATION)
+	_relic_tween.tween_callback(func():
+		_relic_highlight_win_card()
+		var seq := create_tween()
+		seq.tween_interval(0.92)
+		seq.tween_callback(func():
+			_relic_award_and_show(result_id)
+		)
+	)
+
+
+func _relic_highlight_win_card() -> void:
+	if not is_instance_valid(_relic_strip):
+		return
+	var children := _relic_strip.get_children()
+	for i in range(children.size()):
+		if i != GACHA_WIN_IDX:
+			var dtw := create_tween()
+			dtw.tween_property(children[i], "modulate", Color(0.28, 0.28, 0.38, 1.0), 0.42)
+	if GACHA_WIN_IDX >= children.size():
+		return
+	var wc     : Control      = children[GACHA_WIN_IDX]
+	var wstyle : StyleBoxFlat = wc.get_meta("style", null)
+	if wstyle != null:
+		wstyle.border_width_left   = 3; wstyle.border_width_right  = 3
+		wstyle.border_width_top    = 3; wstyle.border_width_bottom = 3
+		var gold_tw := create_tween()
+		gold_tw.set_loops(3)
+		gold_tw.tween_method(func(a: float): wstyle.border_color = Color(0.95, 0.76, 0.10, a), 0.20, 1.0, 0.22)
+		gold_tw.tween_method(func(a: float): wstyle.border_color = Color(0.95, 0.76, 0.10, a), 1.0, 0.42, 0.22)
+	wc.pivot_offset = Vector2(GACHA_CARD_W / 2.0, GACHA_CARD_H / 2.0)
+	var stw := create_tween()
+	stw.set_ease(Tween.EASE_OUT)
+	stw.set_trans(Tween.TRANS_BACK)
+	stw.tween_property(wc, "scale", Vector2(1.08, 1.08), 0.30)
+
+
+func _relic_award_and_show(relic_id: String) -> void:
+	if not GameData.relics_collected.has(relic_id):
+		GameData.relics_collected.append(relic_id)
+		GameData.relic_levels[relic_id] = 1
+		GameData.save_game()
+	_relic_show_result(relic_id)
+
+
+func _relic_show_result(relic_id: String) -> void:
+	var def  : Dictionary = GameData.get_relic_def(relic_id)
+	if not is_instance_valid(_relic_result_pop):
+		return
+	var name_l : Label = _relic_result_pop.get_meta("name_lbl", null)
+	var desc_l : Label = _relic_result_pop.get_meta("desc_lbl", null)
+	var icon_l : Label = _relic_result_pop.get_meta("icon_lbl", null)
+	var ibg_p  : Panel = _relic_result_pop.get_meta("icon_bg",  null)
+	if name_l: name_l.text = def.get("name", relic_id)
+	if desc_l: desc_l.text = GameData.get_relic_effect_text(relic_id, 1)
+	if icon_l: icon_l.text = def.get("icon", "?")
+	var rcol : Color = def.get("color", C_WHITE)
+	if icon_l: icon_l.add_theme_color_override("font_color", rcol)
+	if ibg_p:
+		var ibs2 := StyleBoxFlat.new()
+		ibs2.bg_color = Color(rcol.r * 0.20, rcol.g * 0.20, rcol.b * 0.20)
+		const IBR : int = 52
+		ibs2.corner_radius_top_left     = IBR; ibs2.corner_radius_top_right    = IBR
+		ibs2.corner_radius_bottom_left  = IBR; ibs2.corner_radius_bottom_right = IBR
+		ibs2.border_width_left = 3; ibs2.border_width_right  = 3
+		ibs2.border_width_top  = 3; ibs2.border_width_bottom = 3
+		ibs2.border_color = rcol
+		ibg_p.add_theme_stylebox_override("panel", ibs2)
+	_relic_result_pop.visible = true
+	var pop := create_tween()
+	pop.set_ease(Tween.EASE_OUT)
+	pop.set_trans(Tween.TRANS_BACK)
+	_relic_result_pop.scale = Vector2(0.8, 0.8)
+	_relic_result_pop.pivot_offset = Vector2(240, 180)
+	pop.tween_property(_relic_result_pop, "scale", Vector2(1.0, 1.0), 0.35)
+
+
+func _relic_build_result_popup(parent: Control) -> void:
+	const PW : int = 480; const PH : int = 360
+	var panel := Panel.new()
+	var ps    := StyleBoxFlat.new()
+	ps.bg_color                   = Color(0.06, 0.04, 0.12, 0.97)
+	ps.corner_radius_top_left     = 18; ps.corner_radius_top_right    = 18
+	ps.corner_radius_bottom_left  = 18; ps.corner_radius_bottom_right = 18
+	ps.border_width_left = 3; ps.border_width_right  = 3
+	ps.border_width_top  = 3; ps.border_width_bottom = 3
+	ps.border_color      = Color(0.65, 0.35, 1.00, 0.80)
+	ps.shadow_color      = Color(0.30, 0.10, 0.60, 0.60)
+	ps.shadow_size       = 24
+	panel.add_theme_stylebox_override("panel", ps)
+	panel.position      = Vector2((1280 - PW) / 2, (720 - PH) / 2)
+	panel.size          = Vector2(PW, PH)
+	panel.mouse_filter  = MOUSE_FILTER_STOP
+	panel.visible       = false
+	panel.z_index       = 20
+	parent.add_child(panel)
+	_relic_result_pop = panel
+
+	var header := _label("✦  New Relic!", _font_bold, 22, Color(0.90, 0.75, 1.00))
+	header.position             = Vector2(0, 18)
+	header.size                 = Vector2(PW, 32)
+	header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	header.mouse_filter         = MOUSE_FILTER_IGNORE
+	panel.add_child(header)
+
+	const IBR2 : int = 52
+	var icon_bg := Panel.new()
+	icon_bg.position     = Vector2(PW / 2 - IBR2, 58)
+	icon_bg.size         = Vector2(IBR2 * 2, IBR2 * 2)
+	icon_bg.mouse_filter = MOUSE_FILTER_IGNORE
+	panel.add_child(icon_bg)
+	panel.set_meta("icon_bg", icon_bg)
+
+	var icon_lbl := _label("?", _font_bold, 58, C_WHITE)
+	icon_lbl.position             = Vector2(0, 6)
+	icon_lbl.size                 = Vector2(IBR2 * 2, IBR2 * 2)
+	icon_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	icon_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	icon_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	icon_bg.add_child(icon_lbl)
+	panel.set_meta("icon_lbl", icon_lbl)
+
+	var name_lbl := _label("", _font_bold, 24, C_WHITE)
+	name_lbl.position             = Vector2(20, 174)
+	name_lbl.size                 = Vector2(PW - 40, 36)
+	name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	name_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	panel.add_child(name_lbl)
+	panel.set_meta("name_lbl", name_lbl)
+
+	var desc_lbl := _label("", _font_reg, 16, Color(0.75, 0.75, 0.80))
+	desc_lbl.position      = Vector2(30, 218)
+	desc_lbl.size          = Vector2(PW - 60, 52)
+	desc_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	desc_lbl.mouse_filter  = MOUSE_FILTER_IGNORE
+	panel.add_child(desc_lbl)
+	panel.set_meta("desc_lbl", desc_lbl)
+
+	var close_btn := Button.new()
+	close_btn.text       = "Collect  ✔"
+	close_btn.position   = Vector2((PW - 200) / 2, 284)
+	close_btn.size       = Vector2(200, 52)
+	close_btn.focus_mode = FOCUS_NONE
+	close_btn.add_theme_font_override("font",           _font_bold)
+	close_btn.add_theme_font_size_override("font_size", 18)
+	close_btn.add_theme_color_override("font_color",    C_WHITE)
+	close_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.18, 0.38, 0.18)))
+	close_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.24, 0.50, 0.24)))
+	close_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.12, 0.26, 0.12)))
+	close_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.18, 0.38, 0.18)))
+	close_btn.pressed.connect(func():
+		panel.visible  = false
+		_relic_spinning = false
+		_relic_rebuild_strip("")
+		_relic_refresh_spin_state()
+		_refresh_quest_token_labels()
+	)
+	panel.add_child(close_btn)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MY RELICS SCREEN (main menu)
+# ══════════════════════════════════════════════════════════════════════════════
+
+func _build_relics_screen() -> void:
+	var overlay := Panel.new()
+	var bg_s := StyleBoxFlat.new()
+	bg_s.bg_color = Color(0.03, 0.03, 0.09)
+	overlay.add_theme_stylebox_override("panel", bg_s)
+	overlay.position     = Vector2.ZERO
+	overlay.size         = Vector2(1280, 720)
+	overlay.mouse_filter = MOUSE_FILTER_STOP
+	overlay.visible      = false
+	add_child(overlay)
+	_relic_screen = overlay
+
+	# Top band
+	var top_band := ColorRect.new()
+	top_band.color    = Color(0.28, 0.10, 0.52, 0.45)
+	top_band.position = Vector2.ZERO
+	top_band.size     = Vector2(1280, 80)
+	top_band.mouse_filter = MOUSE_FILTER_IGNORE
+	overlay.add_child(top_band)
+
+	var title := _label("💎  My Relics", _font_bold, 34, C_WHITE)
+	title.position             = Vector2(30, 16)
+	title.size                 = Vector2(600, 50)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	title.mouse_filter         = MOUSE_FILTER_IGNORE
+	overlay.add_child(title)
+
+	# Quest token balance — top-right of the header band
+	const RS_D : int = 22; const RS_GAP : int = 6; const RS_FS : int = 18
+	var rs_tw : float = _font_bold.get_string_size("00000 ★", HORIZONTAL_ALIGNMENT_LEFT, -1, RS_FS).x
+	var rs_label_x : int = 1280 - 20 - int(rs_tw)   # 20px right margin
+	var rs_coin_x  : int = rs_label_x - RS_GAP - RS_D
+	_relics_screen_tok_coin = _make_token_coin(RS_D)
+	_relics_screen_tok_coin.position = Vector2(rs_coin_x, 22)
+	_relics_screen_tok_coin.mouse_filter = MOUSE_FILTER_IGNORE
+	overlay.add_child(_relics_screen_tok_coin)
+	_relics_screen_tok_lbl = _label("%d ★" % GameData.quest_tokens, _font_bold, RS_FS, Color(0.88, 0.72, 1.00))
+	_relics_screen_tok_lbl.position             = Vector2(rs_label_x, 20)
+	_relics_screen_tok_lbl.size                 = Vector2(int(rs_tw) + 4, 28)
+	_relics_screen_tok_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_relics_screen_tok_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	overlay.add_child(_relics_screen_tok_lbl)
+
+	# "My Relics" section header
+	var my_hdr := _label("My Relics", _font_bold, 18, Color(0.82, 0.65, 1.00))
+	my_hdr.position     = Vector2(50, 90)
+	my_hdr.size         = Vector2(400, 28)
+	my_hdr.mouse_filter = MOUSE_FILTER_IGNORE
+	overlay.add_child(my_hdr)
+
+	# My relics grid container (top half)
+	var my_grid := Control.new()
+	my_grid.position     = Vector2(0, 118)
+	my_grid.size         = Vector2(1280, 220)
+	my_grid.mouse_filter = MOUSE_FILTER_IGNORE
+	overlay.add_child(my_grid)
+	_relic_my_grid = my_grid
+
+	# Divider
+	var div := ColorRect.new()
+	div.color        = Color(0.50, 0.25, 0.80, 0.30)
+	div.position     = Vector2(60, 348)
+	div.size         = Vector2(1160, 2)
+	div.mouse_filter = MOUSE_FILTER_IGNORE
+	overlay.add_child(div)
+
+	# "Undiscovered Relics" section header
+	var unk_hdr := _label("Undiscovered Relics", _font_bold, 18, Color(0.50, 0.50, 0.58))
+	unk_hdr.position     = Vector2(50, 358)
+	unk_hdr.size         = Vector2(500, 28)
+	unk_hdr.mouse_filter = MOUSE_FILTER_IGNORE
+	overlay.add_child(unk_hdr)
+
+	# Undiscovered grid container (bottom half)
+	var unk_grid := Control.new()
+	unk_grid.position     = Vector2(0, 386)
+	unk_grid.size         = Vector2(1280, 230)
+	unk_grid.mouse_filter = MOUSE_FILTER_IGNORE
+	overlay.add_child(unk_grid)
+	_relic_unk_grid = unk_grid
+
+	# Info popup (undiscovered relics)
+	_relic_build_info_popup(overlay)
+
+	# Detail popup (owned relics — shows level + upgrade)
+	_build_relic_detail_popup(overlay)
+
+	# Back button
+	var back_btn := Button.new()
+	back_btn.text       = "← Back"
+	back_btn.position   = Vector2(30, 662)
+	back_btn.size       = Vector2(140, 44)
+	back_btn.focus_mode = FOCUS_NONE
+	back_btn.add_theme_font_override("font",           _font_bold)
+	back_btn.add_theme_font_size_override("font_size", 16)
+	back_btn.add_theme_color_override("font_color",    C_WHITE)
+	back_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.22, 0.22, 0.28)))
+	back_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.30, 0.30, 0.38)))
+	back_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.16, 0.16, 0.20)))
+	back_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.22, 0.22, 0.28)))
+	back_btn.pressed.connect(func():
+		overlay.visible           = false
+		_game_over_screen.visible = true
+	)
+	overlay.add_child(back_btn)
+
+	# Debug: Reset All Relics button
+	var reset_relics_btn := Button.new()
+	reset_relics_btn.text       = "⚠ Reset All Relics"
+	reset_relics_btn.position   = Vector2(200, 662)
+	reset_relics_btn.size       = Vector2(220, 44)
+	reset_relics_btn.focus_mode = FOCUS_NONE
+	reset_relics_btn.add_theme_font_override("font",           _font_bold)
+	reset_relics_btn.add_theme_font_size_override("font_size", 15)
+	reset_relics_btn.add_theme_color_override("font_color",    C_WHITE)
+	reset_relics_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.55, 0.18, 0.18)))
+	reset_relics_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.70, 0.22, 0.22)))
+	reset_relics_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.40, 0.12, 0.12)))
+	reset_relics_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.55, 0.18, 0.18)))
+	reset_relics_btn.pressed.connect(func():
+		GameData.relics_collected.clear()
+		GameData.relic_levels.clear()
+		GameData.save_game()
+		_refresh_relics_screen()
+	)
+	overlay.add_child(reset_relics_btn)
+
+	_refresh_relics_screen()
+
+
+func _relic_build_info_popup(parent: Control) -> void:
+	const PW : int = 420; const PH : int = 280
+
+	# Container covers the full screen; hiding it hides backdrop + panel together.
+	var container := Control.new()
+	container.position     = Vector2.ZERO
+	container.size         = Vector2(1280, 720)
+	container.mouse_filter = MOUSE_FILTER_IGNORE
+	container.visible      = false
+	container.z_index      = 20
+	parent.add_child(container)
+	_relic_info_popup = container
+
+	# Transparent backdrop — clicking anywhere outside the panel closes it.
+	var backdrop := Button.new()
+	var bd_s := StyleBoxFlat.new(); bd_s.bg_color = Color(0, 0, 0, 0)
+	backdrop.add_theme_stylebox_override("normal",  bd_s)
+	backdrop.add_theme_stylebox_override("hover",   bd_s)
+	backdrop.add_theme_stylebox_override("pressed", bd_s)
+	backdrop.add_theme_stylebox_override("focus",   bd_s)
+	backdrop.position   = Vector2.ZERO
+	backdrop.size       = Vector2(1280, 720)
+	backdrop.focus_mode = FOCUS_NONE
+	backdrop.pressed.connect(func(): container.visible = false)
+	container.add_child(backdrop)
+
+	var panel := Panel.new()
+	var ps    := StyleBoxFlat.new()
+	ps.bg_color                   = Color(0.06, 0.04, 0.12, 0.97)
+	ps.corner_radius_top_left     = 14; ps.corner_radius_top_right    = 14
+	ps.corner_radius_bottom_left  = 14; ps.corner_radius_bottom_right = 14
+	ps.border_width_left = 2; ps.border_width_right  = 2
+	ps.border_width_top  = 2; ps.border_width_bottom = 2
+	ps.border_color      = Color(0.55, 0.25, 0.90, 0.70)
+	ps.shadow_color      = Color(0.20, 0.05, 0.40, 0.55)
+	ps.shadow_size       = 18
+	panel.add_theme_stylebox_override("panel", ps)
+	panel.position     = Vector2((1280 - PW) / 2, (720 - PH) / 2)
+	panel.size         = Vector2(PW, PH)
+	panel.mouse_filter = MOUSE_FILTER_STOP
+	container.add_child(panel)
+
+	# Icon clipped to its own panel so large emoji cannot overflow
+	const ICON_SIZE : int = 68
+	var icon_clip := Panel.new()
+	var icon_clip_s := StyleBoxFlat.new()
+	icon_clip_s.bg_color = Color(0, 0, 0, 0)
+	icon_clip.add_theme_stylebox_override("panel", icon_clip_s)
+	icon_clip.position       = Vector2((PW - ICON_SIZE) / 2, 16)
+	icon_clip.size           = Vector2(ICON_SIZE, ICON_SIZE)
+	icon_clip.clip_contents  = true
+	icon_clip.mouse_filter   = MOUSE_FILTER_IGNORE
+	panel.add_child(icon_clip)
+
+	var icon_lbl := _label("?", _font_bold, 38, C_WHITE)
+	icon_lbl.position             = Vector2(0, 0)
+	icon_lbl.size                 = Vector2(ICON_SIZE, ICON_SIZE)
+	icon_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	icon_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	icon_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	icon_clip.add_child(icon_lbl)
+	container.set_meta("icon_lbl", icon_lbl)
+
+	var name_lbl := _label("", _font_bold, 20, C_WHITE)
+	name_lbl.position             = Vector2(20, 94)
+	name_lbl.size                 = Vector2(PW - 40, 28)
+	name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	name_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	panel.add_child(name_lbl)
+	_relic_info_name = name_lbl
+	container.set_meta("name_lbl", name_lbl)
+
+	var div2 := ColorRect.new()
+	div2.color        = Color(0.50, 0.25, 0.80, 0.30)
+	div2.position     = Vector2(20, 130)
+	div2.size         = Vector2(PW - 40, 1)
+	div2.mouse_filter = MOUSE_FILTER_IGNORE
+	panel.add_child(div2)
+
+	var desc_lbl := _label("", _font_reg, 15, Color(0.78, 0.78, 0.85))
+	desc_lbl.position      = Vector2(20, 140)
+	desc_lbl.size          = Vector2(PW - 40, 90)
+	desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	desc_lbl.mouse_filter  = MOUSE_FILTER_IGNORE
+	panel.add_child(desc_lbl)
+	_relic_info_desc = desc_lbl
+	container.set_meta("desc_lbl", desc_lbl)
+
+	var close_btn := Button.new()
+	close_btn.text       = "Close"
+	close_btn.position   = Vector2((PW - 140) / 2, PH - 50)
+	close_btn.size       = Vector2(140, 40)
+	close_btn.focus_mode = FOCUS_NONE
+	close_btn.add_theme_font_override("font",           _font_bold)
+	close_btn.add_theme_font_size_override("font_size", 16)
+	close_btn.add_theme_color_override("font_color",    C_WHITE)
+	close_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.22, 0.22, 0.30)))
+	close_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.30, 0.30, 0.40)))
+	close_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.16, 0.16, 0.22)))
+	close_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.22, 0.22, 0.30)))
+	close_btn.pressed.connect(func(): container.visible = false)
+	panel.add_child(close_btn)
+
+
+func _relic_show_info(relic_id: String, collected: bool) -> void:
+	var def  : Dictionary = GameData.get_relic_def(relic_id)
+	if not is_instance_valid(_relic_info_popup):
+		return
+	var icon_l : Label = _relic_info_popup.get_meta("icon_lbl", null)
+	var name_l : Label = _relic_info_popup.get_meta("name_lbl", null)
+	var desc_l : Label = _relic_info_popup.get_meta("desc_lbl", null)
+	var rcol   : Color = def.get("color", C_WHITE) if collected else Color(0.45, 0.45, 0.50)
+	if icon_l:
+		icon_l.text = def.get("icon", "?")
+		icon_l.add_theme_color_override("font_color", rcol)
+	if name_l:
+		name_l.text = def.get("name", relic_id)
+		name_l.add_theme_color_override("font_color", C_WHITE if collected else Color(0.65, 0.65, 0.70))
+	if desc_l:
+		var lv : int = GameData.get_relic_level(relic_id) if collected else 1
+		desc_l.text = GameData.get_relic_effect_text(relic_id, lv)
+		desc_l.add_theme_color_override("font_color",
+			Color(0.78, 0.78, 0.85) if collected else Color(0.55, 0.55, 0.60))
+	_relic_info_popup.visible = true
+
+
+func _relic_make_grid_card(relic_id: String, collected: bool) -> Control:
+	var def   : Dictionary = GameData.get_relic_def(relic_id)
+	var rcol  : Color      = def.get("color", C_WHITE) if collected else Color(0.38, 0.38, 0.44)
+	var level : int        = GameData.get_relic_level(relic_id) if collected else 0
+	var card_h : int       = 158 if collected else 126
+
+	var container := Control.new()
+	container.mouse_filter = MOUSE_FILTER_IGNORE
+	container.size         = Vector2(108, card_h)
+
+	# Background
+	var bg  := Panel.new()
+	var bs  := StyleBoxFlat.new()
+	bs.bg_color                   = Color(0.10, 0.10, 0.17) if collected else Color(0.07, 0.07, 0.11)
+	bs.corner_radius_top_left     = 10; bs.corner_radius_top_right    = 10
+	bs.corner_radius_bottom_left  = 10; bs.corner_radius_bottom_right = 10
+	bs.border_width_left = 2; bs.border_width_right  = 2
+	bs.border_width_top  = 2; bs.border_width_bottom = 2
+	bs.border_color = Color(rcol.r, rcol.g, rcol.b, 0.55 if collected else 0.22)
+	bg.add_theme_stylebox_override("panel", bs)
+	bg.position     = Vector2(0, 0)
+	bg.size         = Vector2(108, card_h)
+	bg.mouse_filter = MOUSE_FILTER_IGNORE
+	container.add_child(bg)
+
+	# Icon circle
+	const GCR : int = 28
+	var ibg := Panel.new()
+	var ibs := StyleBoxFlat.new()
+	ibs.bg_color = Color(rcol.r * 0.20, rcol.g * 0.20, rcol.b * 0.20)
+	ibs.corner_radius_top_left     = GCR; ibs.corner_radius_top_right    = GCR
+	ibs.corner_radius_bottom_left  = GCR; ibs.corner_radius_bottom_right = GCR
+	ibs.border_width_left = 2; ibs.border_width_right  = 2
+	ibs.border_width_top  = 2; ibs.border_width_bottom = 2
+	ibs.border_color = Color(rcol.r, rcol.g, rcol.b, 0.50)
+	ibg.add_theme_stylebox_override("panel", ibs)
+	ibg.position     = Vector2((108 - GCR * 2) / 2, 8)
+	ibg.size         = Vector2(GCR * 2, GCR * 2)
+	ibg.mouse_filter = MOUSE_FILTER_IGNORE
+	container.add_child(ibg)
+
+	var icon_l := _label(def.get("icon", "?"), _font_bold, 28, rcol)
+	icon_l.position             = Vector2(0, 3)
+	icon_l.size                 = Vector2(GCR * 2, GCR * 2)
+	icon_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	icon_l.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	icon_l.mouse_filter         = MOUSE_FILTER_IGNORE
+	ibg.add_child(icon_l)
+
+	# Name
+	var name_l := _label(def.get("name", relic_id) if collected else "???", _font_bold, 10,
+		C_WHITE if collected else Color(0.45, 0.45, 0.50))
+	name_l.position      = Vector2(4, 64)
+	name_l.size          = Vector2(100, 34)
+	name_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	name_l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	name_l.mouse_filter  = MOUSE_FILTER_IGNORE
+	container.add_child(name_l)
+
+	if collected:
+		# Level badge
+		var lv_l := _label("Lv %d" % level, _font_bold, 10, Color(rcol.r, rcol.g, rcol.b, 0.90))
+		lv_l.position             = Vector2(0, 100)
+		lv_l.size                 = Vector2(108, 14)
+		lv_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		lv_l.mouse_filter         = MOUSE_FILTER_IGNORE
+		container.add_child(lv_l)
+
+		# Transparent face button (top area → opens detail page)
+		var face_s := StyleBoxFlat.new(); face_s.bg_color = Color(0, 0, 0, 0)
+		var face_h := StyleBoxFlat.new(); face_h.bg_color = Color(1, 1, 1, 0.06)
+		face_h.corner_radius_top_left = 10; face_h.corner_radius_top_right = 10
+		var face_btn := Button.new()
+		face_btn.position   = Vector2(0, 0)
+		face_btn.size       = Vector2(108, 116)
+		face_btn.focus_mode = FOCUS_NONE
+		face_btn.add_theme_stylebox_override("normal",  face_s)
+		face_btn.add_theme_stylebox_override("hover",   face_h)
+		face_btn.add_theme_stylebox_override("pressed", face_s)
+		face_btn.add_theme_stylebox_override("focus",   face_s)
+		face_btn.pressed.connect(func(): _show_relic_detail(relic_id))
+		container.add_child(face_btn)
+
+		# Quick upgrade button (bottom)
+		var cost       : int   = GameData.get_relic_upgrade_cost(relic_id)
+		var affordable : bool  = GameData.quest_tokens >= cost
+		var upg_col    : Color = Color(0.12, 0.36, 0.12) if affordable else Color(0.20, 0.20, 0.26)
+		var upg_btn := Button.new()
+		upg_btn.text       = "↑ Lv%d  ★%d" % [level + 1, cost]
+		upg_btn.position   = Vector2(4, 120)
+		upg_btn.size       = Vector2(100, 28)
+		upg_btn.focus_mode = FOCUS_NONE
+		upg_btn.disabled   = not affordable
+		upg_btn.add_theme_font_override("font",           _font_bold)
+		upg_btn.add_theme_font_size_override("font_size", 10)
+		upg_btn.add_theme_color_override("font_color",    C_WHITE)
+		upg_btn.add_theme_stylebox_override("normal",   _btn_style(upg_col))
+		upg_btn.add_theme_stylebox_override("hover",    _btn_style(upg_col.lightened(0.15)))
+		upg_btn.add_theme_stylebox_override("pressed",  _btn_style(upg_col.darkened(0.2)))
+		upg_btn.add_theme_stylebox_override("focus",    _btn_style(upg_col))
+		upg_btn.add_theme_stylebox_override("disabled", _btn_style(Color(0.16, 0.16, 0.20)))
+		upg_btn.pressed.connect(func(): _relic_upgrade(relic_id))
+		container.add_child(upg_btn)
+	else:
+		# Face click → info popup for undiscovered
+		var face_s := StyleBoxFlat.new(); face_s.bg_color = Color(0, 0, 0, 0)
+		var face_h := StyleBoxFlat.new(); face_h.bg_color = Color(1, 1, 1, 0.04)
+		var face_btn := Button.new()
+		face_btn.position   = Vector2(0, 0)
+		face_btn.size       = Vector2(108, 126)
+		face_btn.focus_mode = FOCUS_NONE
+		face_btn.add_theme_stylebox_override("normal",  face_s)
+		face_btn.add_theme_stylebox_override("hover",   face_h)
+		face_btn.add_theme_stylebox_override("pressed", face_s)
+		face_btn.add_theme_stylebox_override("focus",   face_s)
+		face_btn.pressed.connect(func(): _relic_show_info(relic_id, false))
+		container.add_child(face_btn)
+
+	return container
+
+
+func _refresh_relics_screen() -> void:
+	if not is_instance_valid(_relic_my_grid) or not is_instance_valid(_relic_unk_grid):
+		return
+	for c in _relic_my_grid.get_children():
+		c.queue_free()
+	for c in _relic_unk_grid.get_children():
+		c.queue_free()
+
+	const CARD_W    : int = 108
+	const CARD_H_OWN: int = 158   # collected card height (includes upgrade button)
+	const CARD_H_UNK: int = 126   # undiscovered card height
+	const CARD_GAP  : int = 12
+
+	var my_ids  : Array = GameData.relics_collected
+	var unk_ids : Array = []
+	for r in GameData.RELIC_DEFS:
+		if not GameData.relics_collected.has(r["id"]):
+			unk_ids.append(r["id"])
+
+	# My relics grid (up to 10 in one row, centered)
+	var total_w_my : int = my_ids.size() * (CARD_W + CARD_GAP) - (CARD_GAP if my_ids.size() > 0 else 0)
+	var x_start_my : int = maxi(40, (1280 - total_w_my) / 2) if my_ids.size() > 0 else 0
+	if my_ids.is_empty():
+		var no_lbl := _label("No relics yet — spin the Relic Gacha in the Shop!", _font_reg, 16, Color(0.45, 0.45, 0.52))
+		no_lbl.position             = Vector2(0, 65)
+		no_lbl.size                 = Vector2(1280, 30)
+		no_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		no_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+		_relic_my_grid.add_child(no_lbl)
+	else:
+		for i in range(my_ids.size()):
+			var card := _relic_make_grid_card(my_ids[i], true)
+			card.position = Vector2(x_start_my + i * (CARD_W + CARD_GAP), (220 - CARD_H_OWN) / 2)
+			_relic_my_grid.add_child(card)
+
+	# Undiscovered grid
+	var total_w_unk : int = unk_ids.size() * (CARD_W + CARD_GAP) - (CARD_GAP if unk_ids.size() > 0 else 0)
+	var x_start_unk : int = (1280 - total_w_unk) / 2 if unk_ids.size() > 0 else 0
+	if unk_ids.is_empty():
+		var all_lbl := _label("✔  All relics discovered — upgrade them below!", _font_bold, 18, Color(0.25, 0.88, 0.55))
+		all_lbl.position             = Vector2(0, 65)
+		all_lbl.size                 = Vector2(1280, 30)
+		all_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		all_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+		_relic_unk_grid.add_child(all_lbl)
+	else:
+		for i in range(unk_ids.size()):
+			var card := _relic_make_grid_card(unk_ids[i], false)
+			card.position = Vector2(x_start_unk + i * (CARD_W + CARD_GAP), (230 - CARD_H_UNK) / 2)
+			_relic_unk_grid.add_child(card)
+
+
+func _build_relic_detail_popup(parent: Control) -> void:
+	var backdrop := ColorRect.new()
+	backdrop.color        = Color(0, 0, 0, 0.55)
+	backdrop.position     = Vector2.ZERO
+	backdrop.size         = Vector2(1280, 720)
+	backdrop.mouse_filter = MOUSE_FILTER_STOP
+	backdrop.z_index      = 21
+	backdrop.visible      = false
+	backdrop.gui_input.connect(func(ev: InputEvent):
+		if ev is InputEventMouseButton and ev.button_index == MOUSE_BUTTON_LEFT and ev.pressed:
+			backdrop.visible = false
+			if is_instance_valid(_relic_detail_popup):
+				_relic_detail_popup.visible = false
+	)
+	parent.add_child(backdrop)
+	_relic_detail_backdrop = backdrop
+
+	const PW : int = 600; const PH : int = 452
+	var panel := Panel.new()
+	var ps    := StyleBoxFlat.new()
+	ps.bg_color                   = Color(0.05, 0.04, 0.12, 0.97)
+	ps.corner_radius_top_left     = 18; ps.corner_radius_top_right    = 18
+	ps.corner_radius_bottom_left  = 18; ps.corner_radius_bottom_right = 18
+	ps.border_width_left = 3; ps.border_width_right  = 3
+	ps.border_width_top  = 3; ps.border_width_bottom = 3
+	ps.border_color = Color(0.60, 0.30, 1.00, 0.80)
+	ps.shadow_color = Color(0.25, 0.08, 0.55, 0.65)
+	ps.shadow_size  = 28
+	panel.add_theme_stylebox_override("panel", ps)
+	panel.position     = Vector2((1280 - PW) / 2, (720 - PH) / 2)
+	panel.size         = Vector2(PW, PH)
+	panel.mouse_filter = MOUSE_FILTER_STOP
+	panel.visible      = false
+	panel.z_index      = 22
+	parent.add_child(panel)
+	_relic_detail_popup = panel
+
+	# Icon circle (left column)
+	const DR : int = 58
+	var icon_bg := Panel.new()
+	icon_bg.position     = Vector2(18, 18)
+	icon_bg.size         = Vector2(DR * 2, DR * 2)
+	icon_bg.mouse_filter = MOUSE_FILTER_IGNORE
+	panel.add_child(icon_bg)
+	panel.set_meta("icon_bg", icon_bg)
+
+	_relic_detail_icon = _label("?", _font_bold, 60, C_WHITE)
+	_relic_detail_icon.position             = Vector2(0, 6)
+	_relic_detail_icon.size                 = Vector2(DR * 2, DR * 2)
+	_relic_detail_icon.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_relic_detail_icon.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	_relic_detail_icon.mouse_filter         = MOUSE_FILTER_IGNORE
+	icon_bg.add_child(_relic_detail_icon)
+
+	# Right column: name + level + upgrade-to label
+	_relic_detail_name = _label("", _font_bold, 24, C_WHITE)
+	_relic_detail_name.position     = Vector2(DR * 2 + 30, 20)
+	_relic_detail_name.size         = Vector2(PW - DR * 2 - 50, 34)
+	_relic_detail_name.mouse_filter = MOUSE_FILTER_IGNORE
+	panel.add_child(_relic_detail_name)
+
+	_relic_detail_level = _label("", _font_bold, 16, Color(0.82, 0.65, 1.00))
+	_relic_detail_level.position     = Vector2(DR * 2 + 30, 58)
+	_relic_detail_level.size         = Vector2(PW - DR * 2 - 50, 24)
+	_relic_detail_level.mouse_filter = MOUSE_FILTER_IGNORE
+	panel.add_child(_relic_detail_level)
+
+	_relic_detail_cost = _label("", _font_bold, 13, Color(0.55, 0.55, 0.62))
+	_relic_detail_cost.position     = Vector2(DR * 2 + 30, 84)
+	_relic_detail_cost.size         = Vector2(PW - DR * 2 - 50, 20)
+	_relic_detail_cost.mouse_filter = MOUSE_FILTER_IGNORE
+	panel.add_child(_relic_detail_cost)
+
+	# Divider 1
+	var div1 := ColorRect.new()
+	div1.color    = Color(0.45, 0.22, 0.75, 0.30)
+	div1.position = Vector2(18, 148)
+	div1.size     = Vector2(PW - 36, 1)
+	div1.mouse_filter = MOUSE_FILTER_IGNORE
+	panel.add_child(div1)
+
+	# Current effect
+	var cur_hdr := _label("Current Effect:", _font_bold, 13, Color(0.60, 0.60, 0.68))
+	cur_hdr.position     = Vector2(18, 158)
+	cur_hdr.size         = Vector2(PW - 36, 20)
+	cur_hdr.mouse_filter = MOUSE_FILTER_IGNORE
+	panel.add_child(cur_hdr)
+
+	_relic_detail_cur = _label("", _font_reg, 16, C_WHITE)
+	_relic_detail_cur.position      = Vector2(18, 180)
+	_relic_detail_cur.size          = Vector2(PW - 36, 58)
+	_relic_detail_cur.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_relic_detail_cur.mouse_filter  = MOUSE_FILTER_IGNORE
+	panel.add_child(_relic_detail_cur)
+
+	# Divider 2
+	var div2 := ColorRect.new()
+	div2.color    = Color(0.45, 0.22, 0.75, 0.30)
+	div2.position = Vector2(18, 246)
+	div2.size     = Vector2(PW - 36, 1)
+	div2.mouse_filter = MOUSE_FILTER_IGNORE
+	panel.add_child(div2)
+
+	# Next level effect
+	var nxt_hdr := _label("Next Level:", _font_bold, 13, Color(0.40, 0.75, 0.40))
+	nxt_hdr.position     = Vector2(18, 256)
+	nxt_hdr.size         = Vector2(PW - 36, 20)
+	nxt_hdr.mouse_filter = MOUSE_FILTER_IGNORE
+	panel.add_child(nxt_hdr)
+
+	_relic_detail_next = _label("", _font_reg, 15, Color(0.60, 0.82, 0.60))
+	_relic_detail_next.position      = Vector2(18, 278)
+	_relic_detail_next.size          = Vector2(PW - 36, 55)
+	_relic_detail_next.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_relic_detail_next.mouse_filter  = MOUSE_FILTER_IGNORE
+	panel.add_child(_relic_detail_next)
+
+	# Divider 3
+	var div3 := ColorRect.new()
+	div3.color    = Color(0.45, 0.22, 0.75, 0.30)
+	div3.position = Vector2(18, 340)
+	div3.size     = Vector2(PW - 36, 1)
+	div3.mouse_filter = MOUSE_FILTER_IGNORE
+	panel.add_child(div3)
+
+	# Token balance (coin icon + count)
+	var dtok_coin := _make_token_coin(18)
+	dtok_coin.position     = Vector2(18, 352)
+	dtok_coin.mouse_filter = MOUSE_FILTER_IGNORE
+	panel.add_child(dtok_coin)
+	_relic_detail_tok_lbl = _label("0 ★", _font_bold, 15, Color(0.88, 0.72, 1.00))
+	_relic_detail_tok_lbl.position     = Vector2(40, 350)
+	_relic_detail_tok_lbl.size         = Vector2(PW - 58, 24)
+	_relic_detail_tok_lbl.mouse_filter = MOUSE_FILTER_IGNORE
+	panel.add_child(_relic_detail_tok_lbl)
+
+	# Upgrade button
+	_relic_detail_upg_btn = Button.new()
+	_relic_detail_upg_btn.text       = "↑ Upgrade  ★ 200"
+	_relic_detail_upg_btn.position   = Vector2(18, 382)
+	_relic_detail_upg_btn.size       = Vector2(240, 52)
+	_relic_detail_upg_btn.focus_mode = FOCUS_NONE
+	_relic_detail_upg_btn.add_theme_font_override("font",           _font_bold)
+	_relic_detail_upg_btn.add_theme_font_size_override("font_size", 18)
+	_relic_detail_upg_btn.add_theme_color_override("font_color",    C_WHITE)
+	_relic_detail_upg_btn.add_theme_stylebox_override("normal",   _btn_style(Color(0.10, 0.36, 0.10)))
+	_relic_detail_upg_btn.add_theme_stylebox_override("hover",    _btn_style(Color(0.16, 0.50, 0.16)))
+	_relic_detail_upg_btn.add_theme_stylebox_override("pressed",  _btn_style(Color(0.06, 0.24, 0.06)))
+	_relic_detail_upg_btn.add_theme_stylebox_override("focus",    _btn_style(Color(0.10, 0.36, 0.10)))
+	_relic_detail_upg_btn.add_theme_stylebox_override("disabled", _btn_style(Color(0.18, 0.18, 0.22)))
+	_relic_detail_upg_btn.pressed.connect(func():
+		_relic_upgrade(_relic_detail_id)
+		_relic_refresh_detail()
+	)
+	panel.add_child(_relic_detail_upg_btn)
+
+	# Close button
+	var close_btn := Button.new()
+	close_btn.text       = "Close"
+	close_btn.position   = Vector2(PW - 158, 382)
+	close_btn.size       = Vector2(140, 52)
+	close_btn.focus_mode = FOCUS_NONE
+	close_btn.add_theme_font_override("font",           _font_bold)
+	close_btn.add_theme_font_size_override("font_size", 18)
+	close_btn.add_theme_color_override("font_color",    C_WHITE)
+	close_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.22, 0.22, 0.28)))
+	close_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.30, 0.30, 0.38)))
+	close_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.16, 0.16, 0.20)))
+	close_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.22, 0.22, 0.28)))
+	close_btn.pressed.connect(func():
+		panel.visible = false
+		if is_instance_valid(_relic_detail_backdrop):
+			_relic_detail_backdrop.visible = false
+	)
+	panel.add_child(close_btn)
+
+
+func _show_relic_detail(relic_id: String) -> void:
+	_relic_detail_id = relic_id
+	_relic_refresh_detail()
+	if is_instance_valid(_relic_detail_popup):
+		_relic_detail_popup.visible = true
+	if is_instance_valid(_relic_detail_backdrop):
+		_relic_detail_backdrop.visible = true
+
+
+func _relic_refresh_detail() -> void:
+	if not is_instance_valid(_relic_detail_popup):
+		return
+	var id    : String     = _relic_detail_id
+	var def   : Dictionary = GameData.get_relic_def(id)
+	var level : int        = GameData.get_relic_level(id)
+	var cost  : int        = GameData.get_relic_upgrade_cost(id)
+	var rcol  : Color      = def.get("color", C_WHITE)
+
+	# Icon background style
+	var icon_bg : Panel = _relic_detail_popup.get_meta("icon_bg", null)
+	if icon_bg:
+		const DR2 : int = 58
+		var ibs := StyleBoxFlat.new()
+		ibs.bg_color = Color(rcol.r * 0.18, rcol.g * 0.18, rcol.b * 0.18)
+		ibs.corner_radius_top_left     = DR2; ibs.corner_radius_top_right    = DR2
+		ibs.corner_radius_bottom_left  = DR2; ibs.corner_radius_bottom_right = DR2
+		ibs.border_width_left = 3; ibs.border_width_right  = 3
+		ibs.border_width_top  = 3; ibs.border_width_bottom = 3
+		ibs.border_color = rcol
+		icon_bg.add_theme_stylebox_override("panel", ibs)
+
+	if _relic_detail_icon:
+		_relic_detail_icon.text = def.get("icon", "?")
+		_relic_detail_icon.add_theme_color_override("font_color", rcol)
+	if _relic_detail_name:
+		_relic_detail_name.text = def.get("name", id)
+	if _relic_detail_level:
+		_relic_detail_level.text = "Level %d" % level
+	if _relic_detail_cost:
+		_relic_detail_cost.text = "Upgrade to Level %d" % (level + 1)
+	if _relic_detail_cur:
+		_relic_detail_cur.text = GameData.get_relic_effect_text(id, level)
+	if _relic_detail_next:
+		_relic_detail_next.text = GameData.get_relic_effect_text(id, level + 1)
+	if _relic_detail_tok_lbl:
+		_relic_detail_tok_lbl.text = "%d ★" % GameData.quest_tokens
+	if _relic_detail_upg_btn:
+		_relic_detail_upg_btn.text     = "↑ Upgrade  ★ %d" % cost
+		_relic_detail_upg_btn.disabled = GameData.quest_tokens < cost
+
+
+func _relic_upgrade(relic_id: String) -> void:
+	var cost : int = GameData.get_relic_upgrade_cost(relic_id)
+	if GameData.quest_tokens < cost:
+		return
+	GameData.quest_tokens -= cost
+	if not GameData.relic_levels.has(relic_id):
+		GameData.relic_levels[relic_id] = 1
+	GameData.relic_levels[relic_id] += 1
+	GameData.save_game()
+	_refresh_relics_screen()
+	if is_instance_valid(_relic_detail_tok_lbl):
+		_relic_detail_tok_lbl.text = "%d ★" % GameData.quest_tokens
+	_refresh_quest_token_labels()
+
 
 func _build_world_map_screen() -> void:
 	# ── Overlay ──────────────────────────────────────────────────────────────
@@ -5463,7 +7241,7 @@ func _build_towers_screen() -> void:
 	# Full effect description map (same as in show_tower_info)
 	var eff_map : Dictionary = {
 		"none":          "Standard single-target shot.",
-		"focused_shot":  "Consecutive hits on the same target deal +50% damage.",
+		"focused_shot":  "Consecutive hits on the same target stacks +50% damage up to 2x. Resets when switching targets.",
 		"dual_shot":     "Fires at 2 separate enemies simultaneously.",
 		"chain":         "Hits primary at full damage, then chains to 2 nearby enemies at 50% damage.",
 		"aoe":           "Hits all enemies currently in range.",
@@ -5484,7 +7262,7 @@ func _build_towers_screen() -> void:
 		"frost_cannon_tri": "Fires at up to 3 separate targets per shot. Boss targets take +50% damage and receive a 10% slow that refreshes on repeat hits.",
 		"arcane_overload":  "Every 5th attack triggers Arcane Overload — instant lasers hit ALL enemies in range (minimum 5 lasers). Counter never resets.",
 		"arcane_charge": "Every 15th hit fires a blue laser for 2× damage to all in range.",
-		"lock_beam":     "Locks beam on one target; damage ramps to 1.5× over 5s.",
+		"lock_beam":     "Locks beam on one target; damage ramps 1× to 2× over 5s.",
 		"tempest_strike":          "Every 10th hit launches a slash that deals base damage + 5% of the target's max HP on impact.",
 		"infernal_serpent_summon": "Each hit has a 10% chance to summon a fire serpent (100 damage per bite) that laps the battlefield once.",
 		"lightning":     "Chains to primary + 3 more at 80% damage.",
@@ -6081,6 +7859,385 @@ func _refresh_tower_cards() -> void:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# DAILY QUESTS SCREEN
+# ══════════════════════════════════════════════════════════════════════════════
+
+func _build_daily_quests_screen() -> void:
+	var overlay := Panel.new()
+	var bg_s := StyleBoxFlat.new()
+	bg_s.bg_color = Color(0.04, 0.04, 0.10)
+	overlay.add_theme_stylebox_override("panel", bg_s)
+	overlay.position     = Vector2.ZERO
+	overlay.size         = Vector2(1280, 720)
+	overlay.mouse_filter = MOUSE_FILTER_STOP
+	overlay.visible      = false
+	add_child(overlay)
+	_daily_quests_screen = overlay
+
+	# Top red band
+	var top_band := ColorRect.new()
+	top_band.color        = Color(0.18, 0.10, 0.06, 0.90)
+	top_band.position     = Vector2.ZERO
+	top_band.size         = Vector2(1280, 138)
+	top_band.mouse_filter = MOUSE_FILTER_IGNORE
+	overlay.add_child(top_band)
+
+	var title := _label("📅  Daily Quests", _font_bold, 36, C_WHITE)
+	title.position             = Vector2(0, 20)
+	title.size                 = Vector2(1280, 60)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	title.mouse_filter         = MOUSE_FILTER_IGNORE
+	overlay.add_child(title)
+
+	var sub := _label("Complete quests to earn Quest Tokens. Resets daily.", _font_reg, 15, Color(0.70, 0.65, 0.60))
+	sub.position             = Vector2(0, 70)
+	sub.size                 = Vector2(1280, 28)
+	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sub.mouse_filter         = MOUSE_FILTER_IGNORE
+	overlay.add_child(sub)
+
+	# Token balance display (coin icon + count, centered pair)
+	const DQ_D : int = 22; const DQ_GAP : int = 6
+	var _dq := _tok_center("00000 ★", 18, DQ_D, DQ_GAP, 1280)
+	var dq_coin := _make_token_coin(DQ_D)
+	dq_coin.position     = Vector2(_dq[0], 108)
+	dq_coin.mouse_filter = MOUSE_FILTER_IGNORE
+	overlay.add_child(dq_coin)
+	_dq_token_lbl = _label("%d ★" % GameData.quest_tokens, _font_bold, 18, Color(0.88, 0.72, 1.00))
+	_dq_token_lbl.position             = Vector2(_dq[1], 106)
+	_dq_token_lbl.size                 = Vector2(_dq[2], 24)
+	_dq_token_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_dq_token_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	overlay.add_child(_dq_token_lbl)
+
+	# Divider
+	var hdiv := ColorRect.new()
+	hdiv.color = Color(1, 1, 1, 0.08); hdiv.position = Vector2(60, 136); hdiv.size = Vector2(1160, 2)
+	hdiv.mouse_filter = MOUSE_FILTER_IGNORE
+	overlay.add_child(hdiv)
+
+	# ── Quest card builder helper ──────────────────────────────────────────────
+	const CW : float = 1100.0
+	const CH : float = 140.0
+	const CX : float = 90.0
+	var card_style := func(complete: bool) -> StyleBoxFlat:
+		var s := StyleBoxFlat.new()
+		s.bg_color = Color(0.12, 0.14, 0.22, 0.95) if not complete else Color(0.08, 0.22, 0.10, 0.95)
+		s.corner_radius_top_left = 8; s.corner_radius_top_right = 8
+		s.corner_radius_bottom_left = 8; s.corner_radius_bottom_right = 8
+		s.border_width_left = 2; s.border_width_right  = 2
+		s.border_width_top  = 2; s.border_width_bottom = 2
+		s.border_color = Color(0.18, 0.68, 0.32) if complete else Color(0.30, 0.38, 0.55)
+		return s
+
+	# ── Quest 1: Kill 200 enemies ──────────────────────────────────────────────
+	var q1_y : float = 158.0
+	var q1_card := Panel.new()
+	q1_card.position = Vector2(CX, q1_y)
+	q1_card.size     = Vector2(CW, CH)
+	q1_card.add_theme_stylebox_override("panel", card_style.call(GameData.dq_kills_complete))
+	q1_card.mouse_filter = MOUSE_FILTER_IGNORE
+	overlay.add_child(q1_card)
+
+	_dq_check1 = _label("✔" if GameData.dq_kills_claimed else "", _font_bold, 32, Color(0.20, 0.90, 0.40))
+	_dq_check1.position = Vector2(CW - 140, 40); _dq_check1.size = Vector2(120, 46)
+	_dq_check1.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_dq_check1.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	_dq_check1.visible      = GameData.dq_kills_claimed
+	_dq_check1.mouse_filter = MOUSE_FILTER_IGNORE
+	q1_card.add_child(_dq_check1)
+
+	var q1_badge := _label("EASY", _font_bold, 12, Color(0.15, 0.90, 0.42))
+	q1_badge.position = Vector2(20, 14); q1_badge.size = Vector2(50, 18)
+	q1_badge.mouse_filter = MOUSE_FILTER_IGNORE
+	q1_card.add_child(q1_badge)
+
+	var q1_title := _label("⚔  Kill 200 Enemies", _font_bold, 20, Color(1.0, 0.88, 0.50))
+	q1_title.position = Vector2(74, 10); q1_title.size = Vector2(650, 30)
+	q1_title.mouse_filter = MOUSE_FILTER_IGNORE
+	q1_card.add_child(q1_title)
+
+	var q1_desc := _label("Defeat 200 enemies across any run today.", _font_reg, 15, Color(0.72, 0.72, 0.72))
+	q1_desc.position = Vector2(20, 46); q1_desc.size = Vector2(700, 24)
+	q1_desc.mouse_filter = MOUSE_FILTER_IGNORE
+	q1_card.add_child(q1_desc)
+
+	# Progress bar background
+	var q1_bar_bg := ColorRect.new()
+	q1_bar_bg.color    = Color(0.10, 0.10, 0.18)
+	q1_bar_bg.position = Vector2(20, 82); q1_bar_bg.size = Vector2(CW - 300, 22)
+	q1_bar_bg.mouse_filter = MOUSE_FILTER_IGNORE
+	q1_card.add_child(q1_bar_bg)
+	var q1_bar_fill := ColorRect.new()
+	q1_bar_fill.color    = Color(0.22, 0.72, 0.38)
+	q1_bar_fill.position = Vector2(0, 0)
+	var q1_pct := clampf(float(GameData.dq_kills_progress) / float(GameData.DQ_KILL_TARGET), 0.0, 1.0)
+	q1_bar_fill.size     = Vector2((CW - 300) * q1_pct, 22)
+	q1_bar_fill.mouse_filter = MOUSE_FILTER_IGNORE
+	q1_bar_bg.add_child(q1_bar_fill)
+	_dq_bar1 = q1_bar_fill
+	_dq_lbl1 = _label("%d / %d" % [GameData.dq_kills_progress, GameData.DQ_KILL_TARGET],
+		_font_bold, 14, C_WHITE)
+	_dq_lbl1.position = Vector2(20, 82 + 3); _dq_lbl1.size = Vector2(CW - 300, 18)
+	_dq_lbl1.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_dq_lbl1.mouse_filter = MOUSE_FILTER_IGNORE
+	q1_card.add_child(_dq_lbl1)
+
+	var q1_reward := _label("Reward: ★ +100 Quest Tokens", _font_bold, 14, Color(0.82, 0.65, 1.00))
+	q1_reward.position = Vector2(20, 110); q1_reward.size = Vector2(400, 22)
+	q1_reward.mouse_filter = MOUSE_FILTER_IGNORE
+	q1_card.add_child(q1_reward)
+
+	_dq_btn1 = Button.new()
+	_dq_btn1.text       = "✦  Claim"
+	_dq_btn1.position   = Vector2(CW - 140, 40)
+	_dq_btn1.size       = Vector2(120, 46)
+	_dq_btn1.focus_mode = FOCUS_NONE
+	_dq_btn1.visible    = GameData.dq_kills_complete and not GameData.dq_kills_claimed
+	_dq_btn1.add_theme_font_override("font",           _font_bold)
+	_dq_btn1.add_theme_font_size_override("font_size", 18)
+	_dq_btn1.add_theme_color_override("font_color",    C_WHITE)
+	_dq_btn1.add_theme_stylebox_override("normal",  _btn_style(Color(0.08, 0.38, 0.14)))
+	_dq_btn1.add_theme_stylebox_override("hover",   _btn_style(Color(0.12, 0.52, 0.20)))
+	_dq_btn1.add_theme_stylebox_override("pressed", _btn_style(Color(0.05, 0.26, 0.09)))
+	_dq_btn1.add_theme_stylebox_override("focus",   _btn_style(Color(0.08, 0.38, 0.14)))
+	_dq_btn1.pressed.connect(func():
+		GameData.dq_kills_claimed = true
+		GameData.quest_tokens    += 100
+		GameData.save_game()
+		_refresh_daily_quests_screen()
+	)
+	q1_card.add_child(_dq_btn1)
+
+	# ── Quest 2: Clear Mutated World 1 ────────────────────────────────────────
+	var q2_y : float = 318.0
+	var q2_card := Panel.new()
+	q2_card.position = Vector2(CX, q2_y)
+	q2_card.size     = Vector2(CW, CH)
+	q2_card.add_theme_stylebox_override("panel", card_style.call(GameData.dq_mutated_complete))
+	q2_card.mouse_filter = MOUSE_FILTER_IGNORE
+	overlay.add_child(q2_card)
+
+	_dq_check2 = _label("✔" if GameData.dq_mutated_claimed else "", _font_bold, 32, Color(0.20, 0.90, 0.40))
+	_dq_check2.position = Vector2(CW - 140, 40); _dq_check2.size = Vector2(120, 46)
+	_dq_check2.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_dq_check2.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	_dq_check2.visible      = GameData.dq_mutated_claimed
+	_dq_check2.mouse_filter = MOUSE_FILTER_IGNORE
+	q2_card.add_child(_dq_check2)
+
+	var q2_badge := _label("MEDIUM", _font_bold, 12, Color(0.30, 0.72, 1.00))
+	q2_badge.position = Vector2(20, 14); q2_badge.size = Vector2(65, 18)
+	q2_badge.mouse_filter = MOUSE_FILTER_IGNORE
+	q2_card.add_child(q2_badge)
+
+	var q2_title := _label("☠  Clear Mutated World 1", _font_bold, 20, Color(1.0, 0.55, 0.35))
+	q2_title.position = Vector2(88, 10); q2_title.size = Vector2(640, 30)
+	q2_title.mouse_filter = MOUSE_FILTER_IGNORE
+	q2_card.add_child(q2_title)
+
+	var q2_desc := _label("Clear all 10 stages of World 1 in Mutated mode (20% skeleton respawn).", _font_reg, 15, Color(0.72, 0.72, 0.72))
+	q2_desc.position = Vector2(20, 46); q2_desc.size = Vector2(700, 24)
+	q2_desc.mouse_filter = MOUSE_FILTER_IGNORE
+	q2_card.add_child(q2_desc)
+
+	_dq_status2 = _label(
+		"✔ Completed!" if GameData.dq_mutated_complete else "Not started",
+		_font_bold, 15,
+		Color(0.20, 0.90, 0.40) if GameData.dq_mutated_complete else Color(0.55, 0.55, 0.55))
+	_dq_status2.position = Vector2(20, 82); _dq_status2.size = Vector2(500, 24)
+	_dq_status2.mouse_filter = MOUSE_FILTER_IGNORE
+	q2_card.add_child(_dq_status2)
+
+	var q2_reward := _label("Reward: ★ +300 Quest Tokens", _font_bold, 14, Color(0.82, 0.65, 1.00))
+	q2_reward.position = Vector2(20, 110); q2_reward.size = Vector2(400, 22)
+	q2_reward.mouse_filter = MOUSE_FILTER_IGNORE
+	q2_card.add_child(q2_reward)
+
+	var _q2_complete := GameData.dq_mutated_complete
+	var _q2_claimed  := GameData.dq_mutated_claimed
+	var _q2_col := Color(0.08, 0.38, 0.14) if _q2_complete else Color(0.48, 0.20, 0.06)
+	_dq_btn2 = Button.new()
+	_dq_btn2.text       = "✦  Claim" if _q2_complete else "▶  Start"
+	_dq_btn2.position   = Vector2(CW - 140, 40)
+	_dq_btn2.size       = Vector2(120, 46)
+	_dq_btn2.focus_mode = FOCUS_NONE
+	_dq_btn2.visible    = not _q2_claimed
+	_dq_btn2.add_theme_font_override("font",           _font_bold)
+	_dq_btn2.add_theme_font_size_override("font_size", 18)
+	_dq_btn2.add_theme_color_override("font_color",    C_WHITE)
+	_dq_btn2.add_theme_stylebox_override("normal",  _btn_style(_q2_col))
+	_dq_btn2.add_theme_stylebox_override("hover",   _btn_style(_q2_col.lightened(0.15)))
+	_dq_btn2.add_theme_stylebox_override("pressed", _btn_style(_q2_col.darkened(0.25)))
+	_dq_btn2.add_theme_stylebox_override("focus",   _btn_style(_q2_col))
+	_dq_btn2.pressed.connect(func():
+		if GameData.dq_mutated_complete:
+			GameData.dq_mutated_claimed = true
+			GameData.quest_tokens      += 300
+			GameData.save_game()
+			_refresh_daily_quests_screen()
+		else:
+			_show_loading_screen(func():
+				GameData.dq_mode             = "mutated_w1"
+				GameData.selected_world      = 1
+				GameData.launching_into_game = true
+				get_tree().reload_current_scene()
+			)
+	)
+	q2_card.add_child(_dq_btn2)
+
+	# ── Quest 3: Sell 10 towers and clear World 1 ─────────────────────────────
+	var q3_y : float = 478.0
+	var q3_card := Panel.new()
+	q3_card.position = Vector2(CX, q3_y)
+	q3_card.size     = Vector2(CW, CH)
+	q3_card.add_theme_stylebox_override("panel", card_style.call(GameData.dq_sell_complete))
+	q3_card.mouse_filter = MOUSE_FILTER_IGNORE
+	overlay.add_child(q3_card)
+
+	_dq_check3 = _label("✔" if GameData.dq_sell_claimed else "", _font_bold, 32, Color(0.20, 0.90, 0.40))
+	_dq_check3.position = Vector2(CW - 140, 40); _dq_check3.size = Vector2(120, 46)
+	_dq_check3.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_dq_check3.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	_dq_check3.visible      = GameData.dq_sell_claimed
+	_dq_check3.mouse_filter = MOUSE_FILTER_IGNORE
+	q3_card.add_child(_dq_check3)
+
+	var q3_badge := _label("HARD", _font_bold, 12, Color(1.00, 0.35, 0.35))
+	q3_badge.position = Vector2(20, 14); q3_badge.size = Vector2(50, 18)
+	q3_badge.mouse_filter = MOUSE_FILTER_IGNORE
+	q3_card.add_child(q3_badge)
+
+	var q3_title := _label("💰  Sell 10 Towers & Clear World 1", _font_bold, 20, Color(0.90, 0.80, 0.30))
+	q3_title.position = Vector2(74, 10); q3_title.size = Vector2(650, 30)
+	q3_title.mouse_filter = MOUSE_FILTER_IGNORE
+	q3_card.add_child(q3_title)
+
+	var q3_desc := _label("Sell at least 10 towers during a World 1 normal run and clear all 10 stages.", _font_reg, 15, Color(0.72, 0.72, 0.72))
+	q3_desc.position = Vector2(20, 46); q3_desc.size = Vector2(700, 24)
+	q3_desc.mouse_filter = MOUSE_FILTER_IGNORE
+	q3_card.add_child(q3_desc)
+
+	_dq_status3 = _label(
+		"✔ Completed!" if GameData.dq_sell_complete else "Not started",
+		_font_bold, 15,
+		Color(0.20, 0.90, 0.40) if GameData.dq_sell_complete else Color(0.55, 0.55, 0.55))
+	_dq_status3.position = Vector2(20, 82); _dq_status3.size = Vector2(500, 24)
+	_dq_status3.mouse_filter = MOUSE_FILTER_IGNORE
+	q3_card.add_child(_dq_status3)
+
+	var q3_reward := _label("Reward: ★ +500 Quest Tokens", _font_bold, 14, Color(0.82, 0.65, 1.00))
+	q3_reward.position = Vector2(20, 110); q3_reward.size = Vector2(400, 22)
+	q3_reward.mouse_filter = MOUSE_FILTER_IGNORE
+	q3_card.add_child(q3_reward)
+
+	var _q3_complete := GameData.dq_sell_complete
+	var _q3_claimed  := GameData.dq_sell_claimed
+	var _q3_col := Color(0.08, 0.38, 0.14) if _q3_complete else Color(0.48, 0.20, 0.06)
+	_dq_btn3 = Button.new()
+	_dq_btn3.text       = "✦  Claim" if _q3_complete else "▶  Start"
+	_dq_btn3.position   = Vector2(CW - 140, 40)
+	_dq_btn3.size       = Vector2(120, 46)
+	_dq_btn3.focus_mode = FOCUS_NONE
+	_dq_btn3.visible    = not _q3_claimed
+	_dq_btn3.add_theme_font_override("font",           _font_bold)
+	_dq_btn3.add_theme_font_size_override("font_size", 18)
+	_dq_btn3.add_theme_color_override("font_color",    C_WHITE)
+	_dq_btn3.add_theme_stylebox_override("normal",  _btn_style(_q3_col))
+	_dq_btn3.add_theme_stylebox_override("hover",   _btn_style(_q3_col.lightened(0.15)))
+	_dq_btn3.add_theme_stylebox_override("pressed", _btn_style(_q3_col.darkened(0.25)))
+	_dq_btn3.add_theme_stylebox_override("focus",   _btn_style(_q3_col))
+	_dq_btn3.pressed.connect(func():
+		if GameData.dq_sell_complete:
+			GameData.dq_sell_claimed = true
+			GameData.quest_tokens   += 500
+			GameData.save_game()
+			_refresh_daily_quests_screen()
+		else:
+			_show_loading_screen(func():
+				GameData.dq_mode             = "sell_w1"
+				GameData.selected_world      = 1
+				GameData.launching_into_game = true
+				get_tree().reload_current_scene()
+			)
+	)
+	q3_card.add_child(_dq_btn3)
+
+	# ── Back button ───────────────────────────────────────────────────────────
+	var back_btn := Button.new()
+	back_btn.text         = "← Back"
+	back_btn.position     = Vector2(20, 660)
+	back_btn.size         = Vector2(160, 46)
+	back_btn.focus_mode   = FOCUS_NONE
+	back_btn.add_theme_font_override("font",           _font_bold)
+	back_btn.add_theme_font_size_override("font_size", 18)
+	back_btn.add_theme_color_override("font_color",    C_WHITE)
+	back_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.22, 0.22, 0.28)))
+	back_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.32, 0.32, 0.40)))
+	back_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.14, 0.14, 0.18)))
+	back_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.22, 0.22, 0.28)))
+	back_btn.pressed.connect(func():
+		overlay.visible           = false
+		_game_over_screen.visible = true
+	)
+	overlay.add_child(back_btn)
+
+	call_deferred("_wire_hover_recursive", overlay)
+
+
+func _refresh_daily_quests_screen() -> void:
+	GameData.check_daily_reset()
+	# Quest 1 — progress bar
+	if is_instance_valid(_dq_bar1):
+		var pct : float  = clampf(float(GameData.dq_kills_progress) / float(GameData.DQ_KILL_TARGET), 0.0, 1.0)
+		var bg_w : float = (_dq_bar1.get_parent() as ColorRect).size.x
+		_dq_bar1.size = Vector2(bg_w * pct, _dq_bar1.size.y)
+	if is_instance_valid(_dq_lbl1):
+		_dq_lbl1.text = "%d / %d" % [GameData.dq_kills_progress, GameData.DQ_KILL_TARGET]
+	if is_instance_valid(_dq_btn1):
+		_dq_btn1.visible = GameData.dq_kills_complete and not GameData.dq_kills_claimed
+	if is_instance_valid(_dq_check1):
+		_dq_check1.visible = GameData.dq_kills_claimed
+		_dq_check1.text    = "✔" if GameData.dq_kills_claimed else ""
+	# Quest 2 — status + button
+	if is_instance_valid(_dq_status2):
+		_dq_status2.text = "✔ Completed!" if GameData.dq_mutated_complete else "Not started"
+		_dq_status2.add_theme_color_override("font_color",
+			Color(0.20, 0.90, 0.40) if GameData.dq_mutated_complete else Color(0.55, 0.55, 0.55))
+	if is_instance_valid(_dq_btn2):
+		_dq_btn2.visible = not GameData.dq_mutated_claimed
+		if not GameData.dq_mutated_claimed:
+			var col2 := Color(0.08, 0.38, 0.14) if GameData.dq_mutated_complete else Color(0.48, 0.20, 0.06)
+			_dq_btn2.text = "✦  Claim" if GameData.dq_mutated_complete else "▶  Start"
+			_dq_btn2.add_theme_stylebox_override("normal",  _btn_style(col2))
+			_dq_btn2.add_theme_stylebox_override("hover",   _btn_style(col2.lightened(0.15)))
+			_dq_btn2.add_theme_stylebox_override("pressed", _btn_style(col2.darkened(0.25)))
+			_dq_btn2.add_theme_stylebox_override("focus",   _btn_style(col2))
+	if is_instance_valid(_dq_check2):
+		_dq_check2.visible = GameData.dq_mutated_claimed
+		_dq_check2.text    = "✔" if GameData.dq_mutated_claimed else ""
+	# Quest 3 — status + button
+	if is_instance_valid(_dq_status3):
+		_dq_status3.text = "✔ Completed!" if GameData.dq_sell_complete else "Not started"
+		_dq_status3.add_theme_color_override("font_color",
+			Color(0.20, 0.90, 0.40) if GameData.dq_sell_complete else Color(0.55, 0.55, 0.55))
+	if is_instance_valid(_dq_btn3):
+		_dq_btn3.visible = not GameData.dq_sell_claimed
+		if not GameData.dq_sell_claimed:
+			var col3 := Color(0.08, 0.38, 0.14) if GameData.dq_sell_complete else Color(0.18, 0.38, 0.18)
+			_dq_btn3.text = "✦  Claim" if GameData.dq_sell_complete else "▶  Start"
+			_dq_btn3.add_theme_stylebox_override("normal",  _btn_style(col3))
+			_dq_btn3.add_theme_stylebox_override("hover",   _btn_style(col3.lightened(0.15)))
+			_dq_btn3.add_theme_stylebox_override("pressed", _btn_style(col3.darkened(0.25)))
+			_dq_btn3.add_theme_stylebox_override("focus",   _btn_style(col3))
+	if is_instance_valid(_dq_check3):
+		_dq_check3.visible = GameData.dq_sell_claimed
+		_dq_check3.text    = "✔" if GameData.dq_sell_claimed else ""
+	_refresh_quest_token_labels()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # VICTORY SCREEN
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -6236,6 +8393,9 @@ func update_recipe_notifications(available_fusions: Array, all_owned_ids: Dictio
 	# Refresh modal if it's open
 	if is_instance_valid(_recipe_modal) and _recipe_modal.visible:
 		_refresh_recipe_modal()
+	# First time a fusion becomes available → show recipe tutorial
+	if not GameData.recipe_tutorial_seen and available_fusions.size() > 0:
+		show_recipe_tutorial()
 
 
 func _rebuild_recipe_cards() -> void:
@@ -6810,14 +8970,6 @@ func _build_recipe_modal() -> void:
 			mat_name_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
 			mat_card.add_child(mat_name_lbl)
 
-			# Plus between cards
-			if mi < recipe_mats.size() - 1:
-				var plus := _label("+", _font_bold, 16, C_DIM)
-				plus.position = Vector2(292 + mi * 118 + 112, row_y + 40)
-				plus.size     = Vector2(14, 24)
-				plus.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-				inner.add_child(plus)
-
 			mat_refs.append({"panel": mat_card, "id": mat_id, "style": mat_style,
 							  "base_col": mat_bg_col, "rarity_col": mat_col})
 
@@ -7051,7 +9203,9 @@ func _build_settings_gear() -> void:
 		var any_overlay : bool = (
 			_game_over_screen.visible or
 			_upgrades_screen.visible  or
-			_victory_screen.visible
+			_victory_screen.visible   or
+			(is_instance_valid(_daily_quests_screen) and _daily_quests_screen.visible) or
+			(is_instance_valid(_relic_screen) and _relic_screen.visible)
 		)
 		gear_btn.visible = not any_overlay
 		if any_overlay: menu.visible = false
@@ -7178,6 +9332,49 @@ func _btn_style(bg: Color) -> StyleBoxFlat:
 	s.shadow_color          = Color(0.0, 0.0, 0.0, 0.50)
 	s.shadow_size           = 3
 	return s
+
+
+func show_relic_gold_popup(amount: int) -> void:
+	var lbl := Label.new()
+	lbl.text                      = "★ +%d" % amount
+	lbl.add_theme_font_override("font", _font_bold)
+	lbl.add_theme_font_size_override("font_size", 20)
+	lbl.add_theme_color_override("font_color", Color(1.00, 0.88, 0.25))
+	lbl.position              = Vector2(13, 618)   # centered over gold display (center x=93)
+	lbl.size                  = Vector2(160, 28)
+	lbl.horizontal_alignment  = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.mouse_filter          = MOUSE_FILTER_IGNORE
+	lbl.z_index               = 30
+	add_child(lbl)
+	var dur : float = 1.0 / maxf(1.0, Engine.time_scale)   # always 1 real-world second
+	var tw := create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(lbl, "position:y", 578.0, dur).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.tween_property(lbl, "modulate:a", 0.0,   dur).set_trans(Tween.TRANS_LINEAR)
+	tw.chain().tween_callback(lbl.queue_free)
+
+
+func _refresh_quest_token_labels() -> void:
+	var txt : String = "%d ★" % GameData.quest_tokens
+	if is_instance_valid(_relic_token_lbl):       _relic_token_lbl.text       = txt
+	if is_instance_valid(_gacha_relic_tok_lbl):   _gacha_relic_tok_lbl.text   = txt
+	if is_instance_valid(_dq_token_lbl):          _dq_token_lbl.text          = txt
+	if is_instance_valid(_relics_screen_tok_lbl): _relics_screen_tok_lbl.text = txt
+
+
+func _make_token_coin(diameter: int) -> Control:
+	var icon : Control = TOKEN_ICON_SCR.new()
+	icon.size         = Vector2(diameter, diameter)
+	icon.mouse_filter = MOUSE_FILTER_IGNORE
+	return icon
+
+
+# Returns (coin_x, label_x, label_w) that perfectly centers [coin][gap][text] in parent_w.
+# Uses the font's actual string metrics so centering is pixel-accurate regardless of digit count.
+func _tok_center(ref_text: String, font_size: int, coin_d: int, gap: int, parent_w: int) -> Array:
+	var tw : float = _font_bold.get_string_size(ref_text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
+	var cx : int   = int((parent_w - coin_d - gap - tw) / 2.0)
+	return [cx, cx + coin_d + gap, int(tw) + 4]   # +4px slack for sub-pixel rounding
 
 
 func _label(text: String, font: Font, size: int, color: Color) -> Label:

@@ -11,6 +11,8 @@ const C_ROCK_DARK := Color(0.36, 0.34, 0.29)
 
 
 func _draw() -> void:
+	if GameData.selected_world != 1:
+		return
 	_draw_grass_patches()
 	_draw_trees()
 	_draw_rocks()

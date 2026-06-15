@@ -24,7 +24,8 @@ var can_upgrade  : bool       = false
 
 var _cooldown      : float   = 0.0
 var _hit_counter   : int     = 0
-var _last_target   : Node2D  = null
+var _last_target        : Node2D  = null
+var _focused_stacks     : int     = 0    # focused_shot stack count (0–4, 4 = 3×)
 var _bleed_stacks  : Dictionary = {}
 var _bleed_tick_timer : float = 0.0
 var _arcane_charge : int = 0   # persistent hit counter for arcane_cannon, never resets
@@ -67,6 +68,11 @@ var _rock_zones        : Array = []   # stone guardian: active brittle zones [{p
 var _debuff_cd         : Dictionary = {}  # dual debuff: per-enemy cooldown {enemy:{type:timer}}
 var _frost_speed_bonus : float = 0.0      # frost herald: accumulated +5% atk speed per slowed hit (max 50%)
 var _frost_idle_timer  : float = 0.0      # frost herald: seconds since last attack; resets bonus at 3s
+var _tile_dmg_bonus    : float = 0.0      # special tile (red): +30% damage multiplier
+var _tile_range_bonus  : float = 0.0      # special tile (blue): flat px added to attack_range
+var _tile_spd_bonus    : float = 0.0      # special tile (green): +25% fire rate
+var _relic_dmg_bonus   : float = 0.0   # power_surge relic: accumulated flat damage bonus
+var _relic_rate_bonus  : float = 0.0   # swift_wind / bloodlust_tide relic: stacking fire-rate bonus
 var _sw_stacks         : int   = 0        # shadow weaver: shadow-phase hit counter (0-10)
 var _sw_light_timer    : float = 0.0      # shadow weaver: seconds remaining in light phase
 var _sw_beam_tick      : float = 0.0      # shadow weaver: countdown to next light-phase beam pulse
@@ -171,7 +177,7 @@ func _process(delta: float) -> void:
 	if _beam_timer > 0.0:
 		_beam_timer -= delta
 		_beam_lock_time += delta
-		if not is_instance_valid(_beam_target):
+		if not is_instance_valid(_beam_target) or _beam_target._dying:
 			_beam_target     = null
 			_beam_timer      = 0.0
 			_beam_tick_timer = 0.0
@@ -186,7 +192,7 @@ func _process(delta: float) -> void:
 			_beam_tick_timer -= delta
 			if _beam_tick_timer <= 0.0:
 				_beam_tick_timer = 0.25
-				var lock_mult := 1.0 + minf(_beam_lock_time / 5.0, 1.0) * 0.5
+				var lock_mult := 1.0 + minf(_beam_lock_time / 5.0, 1.0)
 				var tick_dmg := damage * fire_rate * 0.25 * lock_mult * \
 					(GameData.relic_boss_dmg_mult() if _beam_target.is_boss else 1.0)
 				_beam_target.take_damage(tick_dmg)
@@ -200,7 +206,7 @@ func _process(delta: float) -> void:
 	if _beam_timer2 > 0.0:
 		_beam_timer2 -= delta
 		_beam_lock_time2 += delta
-		if not is_instance_valid(_beam_target2):
+		if not is_instance_valid(_beam_target2) or _beam_target2._dying:
 			_beam_target2     = null
 			_beam_timer2      = 0.0
 			_beam_tick_timer2 = 0.0
@@ -214,7 +220,7 @@ func _process(delta: float) -> void:
 			_beam_tick_timer2 -= delta
 			if _beam_tick_timer2 <= 0.0:
 				_beam_tick_timer2 = 0.25
-				var lock_mult2 := 1.0 + minf(_beam_lock_time2 / 5.0, 1.0) * 0.5
+				var lock_mult2 := 1.0 + minf(_beam_lock_time2 / 5.0, 1.0)
 				var tick_dmg2 := damage * fire_rate * 0.25 * lock_mult2 * \
 					(GameData.relic_boss_dmg_mult() if _beam_target2.is_boss else 1.0)
 				_beam_target2.take_damage(tick_dmg2)
@@ -586,10 +592,13 @@ func _try_shoot() -> void:
 				_beam_tick_timer2 = 0.0
 			_shoot_anim = 0.35
 		"focused_shot":
-			# +50% damage when hitting the same target consecutively
-			var bonus_dmg := damage * 1.5 if (is_instance_valid(_last_target) and _last_target == primary) else damage
+			if is_instance_valid(_last_target) and _last_target == primary:
+				_focused_stacks = mini(_focused_stacks + 1, 2)
+			else:
+				_focused_stacks = 0
 			_last_target = primary
-			_fire(primary, bonus_dmg)
+			var mult : float = 1.0 + _focused_stacks * 0.5   # 1×, 1.5×, 2×
+			_fire(primary, damage * mult)
 		"dual_shot":
 			# Fire at up to 2 separate enemies
 			for i in range(min(2, in_range.size())):
@@ -991,7 +1000,7 @@ func _try_shoot() -> void:
 				})
 
 	var tid : String = tower_data.get("id", "")
-	var effective_rate : float = tower_data.get("fire_rate", fire_rate) * (GameData.tower_total_fire_rate_mult(tid) + GameData.buff_fire_rate_pct + _wt_rate_bonus + _ranger_rate_bonus + _frost_speed_bonus)
+	var effective_rate : float = tower_data.get("fire_rate", fire_rate) * (GameData.tower_total_fire_rate_mult(tid) + GameData.buff_fire_rate_pct + _wt_rate_bonus + _ranger_rate_bonus + _frost_speed_bonus + _tile_spd_bonus + _relic_rate_bonus)
 	_cooldown = 1.0 / effective_rate
 
 
@@ -1003,7 +1012,7 @@ func _fire(target: Node2D, dmg: float, p_pushback: bool = false, spawn_offset: V
 		# Heroes use the talent system — damage matches stat page exactly (base + talents only)
 		final_dmg = dmg * boss_mult
 	else:
-		final_dmg = (dmg * GameData.tower_total_damage_mult(tid) + GameData.buff_damage_flat + _wt_dmg_bonus) * boss_mult
+		final_dmg = (dmg * GameData.tower_total_damage_mult(tid) * (1.0 + _tile_dmg_bonus) + GameData.buff_damage_flat + _wt_dmg_bonus + _relic_dmg_bonus) * boss_mult
 
 	# Melee towers — instant direct damage, no projectile
 	if tower_type in [26, 27, 28, 29, 30, 31, 32, 33]:
@@ -1035,11 +1044,10 @@ func _fire(target: Node2D, dmg: float, p_pushback: bool = false, spawn_offset: V
 			b.pushback_on_hit = p_pushback
 			_throw_dir       = position.direction_to(target.position)
 			_throw_timer     = 0.35
-		8:  # Sniper — white arrow, fast straight shot
+		8:  # Sniper — homing arrow (same as archer but faster)
 			b.setup(target, final_dmg)
 			b.bullet_type = "arrow"
 			b._speed      = 1200.0
-			b.set_straight(position.direction_to(target.position))
 		2:  # Catapult — bomb projectile
 			b.setup(target, final_dmg)
 			b.bullet_type = "bomb"
@@ -2358,71 +2366,136 @@ func _draw_poison_tower(b: float, s: bool) -> void:
 # ── Sniper Tower (type 8) ─────────────────────────────────────────────────────
 func _draw_sniper_tower(b: float, s: bool) -> void:
 	var skin   := Color(0.94, 0.78, 0.60)
-	var cloak  := Color(0.42, 0.46, 0.36)
-	var cloak_d:= Color(0.28, 0.30, 0.22)
-	var cloak_l:= Color(0.58, 0.62, 0.48)
-	var wood   := Color(0.45, 0.30, 0.14)
-	var wood_d := Color(0.30, 0.20, 0.08)
-	var steel  := Color(0.58, 0.60, 0.68)
-	var steel_d:= Color(0.38, 0.40, 0.48)
+	var jacket := Color(0.14, 0.16, 0.20)
+	var jack_d := Color(0.08, 0.09, 0.12)
+	var jack_l := Color(0.24, 0.27, 0.33)
+	var pants  := Color(0.12, 0.14, 0.18)
+	var boots  := Color(0.10, 0.08, 0.06)
+	var belt   := Color(0.32, 0.22, 0.08)
+	var teal   := Color(0.18, 0.78, 0.58)
+	var teal_d := Color(0.08, 0.45, 0.32)
+	var hair   := Color(0.18, 0.14, 0.10)
+	var gun_c  := Color(0.28, 0.30, 0.36)
+	var gun_l  := Color(0.48, 0.50, 0.58)
 	var sf     := clampf(_shoot_anim / 0.35, 0.0, 1.0)
-	var recoil := sf * 4.0
+	var gx     := 18.0
 
 	draw_circle(Vector2(0, 24), 11, Color(0, 0, 0, 0.15))
 
-	# ── Elevated wooden platform ──────────────────────────────────────────────
-	draw_line(Vector2(-13, 22 + b), Vector2(-13, 2 + b), wood, 4.0)
-	draw_line(Vector2( 13, 22 + b), Vector2( 13, 2 + b), wood, 4.0)
-	draw_line(Vector2(-13, 12 + b), Vector2( 13, 12 + b), wood, 3.5)
-	draw_line(Vector2(-13,  4 + b), Vector2( 13,  4 + b), wood, 3.5)
-	draw_rect(Rect2(-14, 0 + b, 28, 5), wood.lightened(0.12))
-	draw_rect(Rect2(-14, 0 + b, 28, 5), wood_d, false, 1.0)
-	for px in [-7, 0, 7]:
-		draw_line(Vector2(px, 0 + b), Vector2(px, 5 + b), wood_d, 1.0)
+	# ── Dart gun at rest (behind body) ───────────────────────────────────────
+	if not s:
+		draw_line(Vector2(-2, -5 + b), Vector2(gx + 14, -5 + b), gun_c, 5.0)
+		draw_line(Vector2(-2, -5 + b), Vector2(gx + 14, -5 + b), gun_l, 2.5)
+		draw_line(Vector2(-2, -5 + b), Vector2(gx + 14, -5 + b), teal,  1.0)
+		draw_circle(Vector2(gx + 14, -5 + b), 3.5, gun_c)
+		draw_circle(Vector2(gx + 14, -5 + b), 2.0, teal_d)
+		# Dart loaded in barrel
+		draw_line(Vector2(gx + 4, -5 + b), Vector2(gx + 14, -5 + b), teal, 1.5)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(gx + 14, -5 + b), Vector2(gx + 11, -7 + b), Vector2(gx + 11, -3 + b)
+		]), Color(0.80, 0.84, 0.90))
 
-	# ── Ghillie cloak body ────────────────────────────────────────────────────
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(-10, -4 + b), Vector2(10, -4 + b),
-		Vector2(12,   4 + b), Vector2(-12,  4 + b)
-	]), cloak)
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(3, -4 + b), Vector2(10, -4 + b),
-		Vector2(12, 4 + b), Vector2( 5,  4 + b)
-	]), cloak_d)
-	draw_line(Vector2(-8, -2 + b), Vector2(-4, 2 + b), cloak_l, 1.0)
-	draw_line(Vector2(-2, -3 + b), Vector2( 2, 1 + b), cloak_l, 1.0)
-	draw_line(Vector2( 4, -2 + b), Vector2( 8, 2 + b), cloak_l, 1.0)
+	# ── Boots ─────────────────────────────────────────────────────────────────
+	draw_rect(Rect2(-9, 16 + b, 8, 8), boots)
+	draw_rect(Rect2( 1, 16 + b, 8, 8), boots)
+	draw_line(Vector2(-9, 19 + b), Vector2(-1, 19 + b), boots.lightened(0.2), 1.0)
+	draw_line(Vector2( 1, 19 + b), Vector2( 9, 19 + b), boots.lightened(0.2), 1.0)
 
-	# ── Head + hood ───────────────────────────────────────────────────────────
-	draw_circle(Vector2(0, -10 + b), 7, skin)
-	draw_circle(Vector2(0, -16 + b), 5, cloak.darkened(0.1))
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(-8, -12 + b), Vector2(8, -12 + b),
-		Vector2( 6,  -5 + b), Vector2(-6,  -5 + b)
-	]), cloak)
-	draw_circle(Vector2(4, -10 + b), 1.5, Color(0.14, 0.08, 0.04))
-	draw_line(Vector2(-5, -14 + b), Vector2(-2, -12 + b), cloak_l, 1.0)
-	draw_line(Vector2( 2, -14 + b), Vector2( 5, -12 + b), cloak_l, 1.0)
+	# ── Pants ─────────────────────────────────────────────────────────────────
+	draw_rect(Rect2(-9, 4 + b, 8, 14), pants)
+	draw_rect(Rect2( 1, 4 + b, 8, 14), pants)
 
-	# ── Sniper rifle ──────────────────────────────────────────────────────────
-	draw_line(Vector2(-4, 0 + b), Vector2(-8, 5 + b), steel_d, 2.0)
-	draw_line(Vector2(-4, 0 + b), Vector2( 0, 5 + b), steel_d, 2.0)
-	# Barrel
-	draw_line(Vector2(-6, -2 + b), Vector2(22.0 - recoil, -6 + b), steel_d, 5.0)
-	draw_line(Vector2(-6, -2 + b), Vector2(22.0 - recoil, -6 + b), steel,    4.0)
-	draw_line(Vector2(-6, -2 + b), Vector2(22.0 - recoil, -6 + b), Color(0.78, 0.80, 0.88), 1.5)
-	# Wooden stock
-	draw_rect(Rect2(-16, -4 + b, 12, 5), wood)
-	draw_line(Vector2(-16, -3 + b), Vector2(-4, -3 + b), wood.lightened(0.2), 1.0)
-	# Scope
-	draw_rect(Rect2(4.0 - recoil, -10 + b, 10, 5), steel_d)
-	draw_circle(Vector2(4.0 - recoil,  -8 + b), 3, steel_d.darkened(0.3))
-	draw_circle(Vector2(14.0 - recoil, -8 + b), 3, steel_d.darkened(0.3))
-	draw_rect(Rect2(3.0 - recoil, -9 + b, 12, 3), steel_d)
-	# Muzzle flash
-	if s and sf > 0.2:
-		draw_circle(Vector2(22, -6 + b), 6.0 * sf, Color(1, 0.88, 0.45, sf * 0.9))
-		draw_circle(Vector2(22, -6 + b), 3.0 * sf, Color(1.0, 1.0, 0.85, sf))
+	# ── Jacket ────────────────────────────────────────────────────────────────
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-13, -10 + b), Vector2(13, -10 + b),
+		Vector2(15,   6 + b),  Vector2(-15,  6 + b)
+	]), jacket)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(4, -10 + b), Vector2(13, -10 + b),
+		Vector2(15,  6 + b), Vector2( 7,  6 + b)
+	]), jack_d)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-4, -10 + b), Vector2(4, -10 + b),
+		Vector2( 5,  6 + b),  Vector2(-5,  6 + b)
+	]), jack_l)
+	draw_line(Vector2(-13, -10 + b), Vector2(13, -10 + b), teal, 1.5)
+	draw_line(Vector2(-15,   3 + b), Vector2(15,  3 + b),  jack_d, 1.0)
+
+	# ── Shoulder pauldrons ────────────────────────────────────────────────────
+	draw_circle(Vector2(-17, -7 + b), 7, jack_d)
+	draw_arc(Vector2(-17, -7 + b), 7, -PI * 0.9, PI * 0.1, 10, teal, 1.5)
+	draw_circle(Vector2(-17, -11 + b), 4, jacket)
+	draw_circle(Vector2( 17, -7 + b), 7, jack_d)
+	draw_arc(Vector2( 17, -7 + b), 7, -PI * 0.1, PI * 0.9, 10, teal, 1.5)
+	draw_circle(Vector2( 17, -11 + b), 4, jacket)
+
+	# ── Belt + dart pouch ─────────────────────────────────────────────────────
+	draw_rect(Rect2(-13, -1 + b, 26, 5), belt)
+	draw_rect(Rect2(-13, -1 + b, 26, 2), belt.lightened(0.15))
+	draw_rect(Rect2(-4, -2 + b, 8, 7), belt.darkened(0.15))
+	draw_rect(Rect2(-2,  0 + b, 4, 3), belt)
+	# Dart pouch on right hip
+	draw_rect(Rect2(9, -9 + b, 6, 11), jack_d)
+	draw_rect(Rect2(9, -9 + b, 6,  2), teal_d)
+	for qi in range(3):
+		draw_line(Vector2(10 + qi * 2, -9 + b), Vector2(10 + qi * 2, -14 + b), teal, 1.5)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(10 + qi * 2, -14 + b),
+			Vector2( 9 + qi * 2, -12 + b),
+			Vector2(11 + qi * 2, -12 + b)
+		]), Color(0.80, 0.84, 0.90))
+
+	# ── Arms ──────────────────────────────────────────────────────────────────
+	draw_rect(Rect2(-20, -9 + b, 10, 5), skin)
+	draw_rect(Rect2(  8, -9 + b,  8, 5), skin)
+
+	# ── Head ──────────────────────────────────────────────────────────────────
+	draw_circle(Vector2(0, -17 + b), 7, skin)
+	draw_circle(Vector2(-5, -17 + b), 2.5, skin)
+	draw_circle(Vector2(0, -23 + b), 6, hair)
+	draw_rect(Rect2(-6, -23 + b, 12, 7), hair)
+	# Dark scout cap (same shape as archer's ranger cap)
+	draw_rect(Rect2(-9, -22 + b, 18, 3), jack_d)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-8, -22 + b), Vector2(8, -22 + b),
+		Vector2( 5, -30 + b), Vector2(-5, -30 + b)
+	]), jacket)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(2, -30 + b), Vector2(8, -22 + b), Vector2(5, -22 + b)
+	]), jack_d)
+	draw_line(Vector2(-8, -22 + b), Vector2(8, -22 + b), teal, 1.5)
+	# Red feather
+	draw_line(Vector2(5, -29 + b), Vector2(14, -24 + b), Color(0.88, 0.12, 0.10), 2.0)
+	draw_line(Vector2(6, -28 + b), Vector2(13, -24 + b), Color(1.00, 0.36, 0.32, 0.60), 1.0)
+	draw_circle(Vector2(3, -17 + b), 1.5, Color(0.14, 0.08, 0.02))
+	draw_line(Vector2(0, -20 + b), Vector2(5, -21 + b), hair, 1.5)
+
+	# ── Dart gun when shooting ────────────────────────────────────────────────
+	if s:
+		draw_line(Vector2(-2, -5 + b), Vector2(gx + 14, -5 + b), gun_c, 5.0)
+		draw_line(Vector2(-2, -5 + b), Vector2(gx + 14, -5 + b), gun_l, 2.5)
+		draw_line(Vector2(-2, -5 + b), Vector2(gx + 14, -5 + b), teal,  1.0)
+		draw_circle(Vector2(gx + 14, -5 + b), 3.5, gun_c)
+		draw_circle(Vector2(gx + 14, -5 + b), 2.0, teal_d)
+		# Dart exiting barrel
+		if sf > 0.2:
+			var dart_ext := (sf - 0.2) / 0.8 * 20.0
+			draw_line(Vector2(gx + 14 + dart_ext, -5 + b),
+					  Vector2(gx + 24 + dart_ext, -5 + b), Color(0.12, 0.14, 0.16), 2.5)
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(gx + 24 + dart_ext, -5 + b),
+				Vector2(gx + 21 + dart_ext, -7 + b),
+				Vector2(gx + 21 + dart_ext, -3 + b)
+			]), Color(0.80, 0.84, 0.90))
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(gx + 24 + dart_ext, -5 + b),
+				Vector2(gx + 22 + dart_ext, -6 + b),
+				Vector2(gx + 22 + dart_ext, -4 + b)
+			]), teal)
+		# Teal muzzle puff
+		if sf > 0.05:
+			draw_circle(Vector2(gx + 16, -5 + b), 4.5 * (1.0 - sf),
+					Color(0.25, 0.90, 0.65, sf * 0.72))
 
 
 # ── Tesla Tower (type 9) ──────────────────────────────────────────────────────

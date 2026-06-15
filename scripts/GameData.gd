@@ -6,8 +6,8 @@ extends Node
 const MAX_LEVEL : int = 5
 
 # ── Visual settings (toggled from gear menu) ──────────────────────────────────
-var show_damage_numbers : bool = false
-var show_projectiles    : bool = false
+var show_damage_numbers : bool = true
+var show_projectiles    : bool = true
 
 # ── Run state ─────────────────────────────────────────────────────────────────
 var run_gold                  : int = 0
@@ -15,13 +15,97 @@ var current_run_highest_stage : int = 0
 var all_time_highest_stage    : int = 0
 var max_world_unlocked        : int = 1
 var blue_gems                 : int = 0
+var quest_tokens              : int = 0
 var upgrade_purchases         : Dictionary = {}  # {node_id: tiers_bought}
 var tower_levels              : Dictionary = {}  # {tower_id: {level:int, xp:int}}
 var hero_talent_points        : Dictionary = {}  # {hero_id: int}  — unspent talent points
 var hero_talent_alloc         : Dictionary = {}  # {hero_id: {dmg:int, rng:int, fr:int}}
-var selected_hero_id          : String    = "knight"
+var selected_hero_id          : String    = ""
+var tutorial_complete         : bool      = false
+var merge_tutorial_seen       : bool      = false
+var special_tiles_seen        : bool      = false
+var recipe_tutorial_seen      : bool      = false
 var selected_world            : int       = 1     # in-memory only; set by HUD before scene reload
 var launching_into_game       : bool      = false # true only when Start World triggers reload
+
+# ── Daily Quests ──────────────────────────────────────────────────────────────
+const DQ_KILL_TARGET  : int = 200
+const DQ_SELL_TARGET  : int = 10
+var dq_last_reset_date  : String = ""     # "YYYY-MM-DD"; when it changes, reset progress
+var dq_kills_progress   : int    = 0      # Quest 1 — accumulates across all runs today
+var dq_kills_complete   : bool   = false
+var dq_mutated_complete : bool   = false  # Quest 2 — clear W1 in mutated mode
+var dq_sell_complete    : bool   = false  # Quest 3 — sell ≥10 towers and clear W1 normal
+var dq_kills_claimed    : bool   = false
+var dq_mutated_claimed  : bool   = false
+var dq_sell_claimed     : bool   = false
+var dq_mode             : String = ""     # in-memory: "" | "mutated_w1" | "sell_w1"
+var dq_sell_run_count   : int    = 0      # in-memory: tower sells in current sell_w1 run
+var dq_unlocked         : bool   = false  # true after first defeat (unlocks Daily Quests tab)
+
+# ── Relics ────────────────────────────────────────────────────────────────────
+const RELIC_DEFS : Array = [
+	{"id": "gold_rush",       "name": "Gold Rush",        "icon": "★",  "color": Color(1.00, 0.85, 0.15)},
+	{"id": "power_surge",     "name": "Power Surge",      "icon": "⚔",  "color": Color(1.00, 0.38, 0.08)},
+	{"id": "swift_wind",      "name": "Swift Wind",       "icon": "▲",  "color": Color(0.30, 0.88, 0.85)},
+	{"id": "war_spoils",      "name": "War Spoils",       "icon": "◆",  "color": Color(0.25, 0.82, 0.45)},
+	{"id": "merchants_deal",  "name": "Merchant's Deal",  "icon": "●",  "color": Color(0.95, 0.72, 0.10)},
+	{"id": "rite_of_five",    "name": "Rite of Five",     "icon": "✦",  "color": Color(0.75, 0.35, 1.00)},
+	{"id": "treasury",        "name": "Treasury",         "icon": "■",  "color": Color(0.50, 0.85, 0.35)},
+	{"id": "bloodlust_tide",  "name": "Bloodlust Tide",   "icon": "♦",  "color": Color(0.90, 0.12, 0.18)},
+	{"id": "castle_tax",      "name": "Castle Tax",       "icon": "◉",  "color": Color(0.45, 0.65, 0.90)},
+	{"id": "founders_pledge", "name": "Founder's Pledge", "icon": "◎",  "color": Color(1.00, 0.60, 0.15)},
+]
+var relics_collected : Array     = []
+var relic_levels     : Dictionary = {}   # {relic_id: int}  starts at 1 on first collect
+
+func get_relic_def(id: String) -> Dictionary:
+	for r in RELIC_DEFS:
+		if r["id"] == id:
+			return r
+	return {}
+
+func get_relic_pool() -> Array:
+	var pool : Array = []
+	for r in RELIC_DEFS:
+		if not relics_collected.has(r["id"]):
+			pool.append(r["id"])
+	return pool
+
+func get_relic_level(id: String) -> int:
+	return int(relic_levels.get(id, 1))
+
+func get_relic_upgrade_cost(id: String) -> int:
+	return 200 + (get_relic_level(id) - 1) * 100
+
+func get_relic_effect_text(id: String, level: int) -> String:
+	match id:
+		"gold_rush":
+			return "Every 10 enemies killed: +%d gold." % level
+		"power_surge":
+			return "Every 10 enemies killed: a random owned\ntower gains +%d base attack." % level
+		"swift_wind":
+			return "Every 10 enemies killed: a random owned\ntower gains +%d%% attack speed." % (level * 5)
+		"war_spoils":
+			return "End of each stage: gain a random Common tower.\nIf your grid is full, gain %dg instead." % (20 + level * 5)
+		"merchants_deal":
+			return "All tower summon costs reduced by %d gold." % level
+		"rite_of_five":
+			match level:
+				1: return "At stage 5, automatically summon\na random Rare tower."
+				2: return "At stages 5 and 10, automatically\nsummon a random Rare tower."
+				3: return "At stages 5, 10, and 15, automatically\nsummon a random Rare tower."
+				_: return "At every 5th stage, automatically\nsummon a random Rare tower."
+		"treasury":
+			return "At the start of each new stage,\ngain %d%% of your current gold." % (level * 5)
+		"bloodlust_tide":
+			return "Every 5th wave, all towers gain\n+%d%% attack speed for 10 seconds." % (level * 20)
+		"castle_tax":
+			return "Enemies that reach the castle drop\n%d gold per hit taken (minimum %d gold)." % [level, level]
+		"founders_pledge":
+			return "The first tower placed each stage costs\n%d fewer gold (minimum 1)." % level
+		_:
+			return ""
 
 # ── Hero definitions ──────────────────────────────────────────────────────────
 const HERO_DEFS : Dictionary = {
@@ -333,11 +417,27 @@ func save_game() -> void:
 		"all_time_highest_stage": all_time_highest_stage,
 		"max_world_unlocked":      max_world_unlocked,
 		"blue_gems":              blue_gems,
+		"quest_tokens":           quest_tokens,
 		"upgrade_purchases":      upgrade_purchases,
 		"tower_levels":           tower_levels,
 		"hero_talent_points":     hero_talent_points,
 		"hero_talent_alloc":      hero_talent_alloc,
 		"selected_hero_id":       selected_hero_id,
+		"tutorial_complete":      tutorial_complete,
+		"merge_tutorial_seen":    merge_tutorial_seen,
+		"special_tiles_seen":     special_tiles_seen,
+		"recipe_tutorial_seen":   recipe_tutorial_seen,
+		"dq_last_reset_date":     dq_last_reset_date,
+		"dq_kills_progress":      dq_kills_progress,
+		"dq_kills_complete":      dq_kills_complete,
+		"dq_mutated_complete":    dq_mutated_complete,
+		"dq_sell_complete":       dq_sell_complete,
+		"dq_kills_claimed":       dq_kills_claimed,
+		"dq_mutated_claimed":     dq_mutated_claimed,
+		"dq_sell_claimed":        dq_sell_claimed,
+		"dq_unlocked":            dq_unlocked,
+		"relics_collected":       relics_collected,
+		"relic_levels":           relic_levels,
 	}
 	var file := FileAccess.open_encrypted_with_pass(SAVE_PATH, FileAccess.WRITE, SAVE_KEY)
 	if file:
@@ -360,6 +460,7 @@ func load_game() -> void:
 	all_time_highest_stage = int(d.get("all_time_highest_stage", 0))
 	max_world_unlocked     = int(d.get("max_world_unlocked",      1))
 	blue_gems              = int(d.get("blue_gems",              0))
+	quest_tokens           = int(d.get("quest_tokens",           0))
 	var up = d.get("upgrade_purchases", {})
 	if up is Dictionary:
 		upgrade_purchases = up
@@ -376,9 +477,28 @@ func load_game() -> void:
 		# from older save formats is correctly converted into levels.
 		for tid in tower_levels.keys():
 			add_tower_xp(tid, 0)
-	var shi = d.get("selected_hero_id", "knight")
-	if shi is String and HERO_DEFS.has(shi):
+	var shi = d.get("selected_hero_id", "")
+	if shi is String and (shi == "" or HERO_DEFS.has(shi)):
 		selected_hero_id = shi
+	tutorial_complete      = bool(d.get("tutorial_complete",    false))
+	merge_tutorial_seen    = bool(d.get("merge_tutorial_seen",  false))
+	special_tiles_seen     = bool(d.get("special_tiles_seen",   false))
+	recipe_tutorial_seen   = bool(d.get("recipe_tutorial_seen", false))
+	dq_last_reset_date     = str(d.get("dq_last_reset_date",    ""))
+	dq_kills_progress      = int(d.get("dq_kills_progress",     0))
+	dq_kills_complete      = bool(d.get("dq_kills_complete",    false))
+	dq_mutated_complete    = bool(d.get("dq_mutated_complete",  false))
+	dq_sell_complete       = bool(d.get("dq_sell_complete",     false))
+	dq_kills_claimed       = bool(d.get("dq_kills_claimed",     false))
+	dq_mutated_claimed     = bool(d.get("dq_mutated_claimed",   false))
+	dq_sell_claimed        = bool(d.get("dq_sell_claimed",      false))
+	dq_unlocked            = bool(d.get("dq_unlocked",          false))
+	var rc = d.get("relics_collected", [])
+	if rc is Array:
+		relics_collected = rc
+	var rl = d.get("relic_levels", {})
+	if rl is Dictionary:
+		relic_levels = rl
 	_reconcile_hero_talents()
 
 func _reconcile_hero_talents() -> void:
@@ -583,17 +703,44 @@ func reset_save() -> void:
 	max_world_unlocked        = 1
 	current_run_highest_stage = 0
 	blue_gems                 = 0
+	quest_tokens              = 0
 	upgrade_purchases         = {}
 	tower_levels              = {}
 	hero_talent_points        = {}
 	hero_talent_alloc         = {}
-	selected_hero_id          = "knight"
+	selected_hero_id          = ""
+	tutorial_complete         = false
+	merge_tutorial_seen       = false
+	special_tiles_seen        = false
+	recipe_tutorial_seen      = false
+	dq_last_reset_date        = ""
+	dq_kills_progress         = 0
+	dq_kills_complete         = false
+	dq_mutated_complete       = false
+	dq_sell_complete          = false
+	dq_kills_claimed          = false
+	dq_mutated_claimed        = false
+	dq_sell_claimed           = false
+	relics_collected          = []
+	relic_levels              = {}
 	reset_run_buffs()
 	if FileAccess.file_exists(SAVE_PATH):
 		DirAccess.remove_absolute(SAVE_PATH)
-	add_tower_copy("knight")  # knight is always the starter hero
+	save_game()
+
+func check_daily_reset() -> void:
+	var today : String = Time.get_date_string_from_system()
+	if dq_last_reset_date != today:
+		dq_last_reset_date  = today
+		dq_kills_progress   = 0
+		dq_kills_complete   = false
+		dq_mutated_complete = false
+		dq_sell_complete    = false
+		dq_kills_claimed    = false
+		dq_mutated_claimed  = false
+		dq_sell_claimed     = false
+		save_game()
 
 func _ready() -> void:
 	load_game()
-	if get_tower_level("knight") == 0:
-		add_tower_copy("knight")  # unlock knight on first ever launch
+	check_daily_reset()
