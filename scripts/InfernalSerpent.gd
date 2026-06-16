@@ -31,18 +31,17 @@ func setup(dmg: float, enemy_path: Array = []) -> void:
 	_damage   = dmg
 	_lap_path = _make_serpent_path(enemy_path)
 
-# Extract one circuit from the enemy path and reverse it so the serpent
-# travels opposite to enemies.  "One circuit" is determined by finding the
-# first waypoint that would be revisited — everything before that repetition
-# is one unique pass through the map.
+# Build the serpent's travel path: the enemy road reversed so the serpent
+# moves from the enemy EXIT back to the enemy ENTRY.
+# For worlds with repeated loops (W1, W5-W9), we extract one circuit.
+# For figure-8 / crossing paths (W3, W8, W10) where the repeated waypoint
+# is a mid-map crossing rather than a loop repetition, we use the full path.
 static func _make_serpent_path(enemy_path: Array) -> Array:
 	if enemy_path.size() < 2:
-		# Fallback: world 1 reversed loop
 		return [Vector2(-40,140), Vector2(250,140), Vector2(250,500),
 				Vector2(850,500), Vector2(850,140), Vector2(-40,140)]
 
-	# Find the first index where a waypoint has already been visited.
-	# That marks the end of one unique circuit.
+	# Find the first repeated waypoint (marks where a loop closes or a road crosses itself).
 	var cutoff : int = enemy_path.size()
 	for i in range(1, enemy_path.size()):
 		var found : bool = false
@@ -56,14 +55,21 @@ static func _make_serpent_path(enemy_path: Array) -> Array:
 
 	var one_pass : Array
 	if cutoff < enemy_path.size():
-		one_pass = enemy_path.slice(0, cutoff)
-		# Close the loop back to the entrance if not already there
-		if (one_pass as Array).back().distance_to(enemy_path[0]) > 5.0:
-			one_pass.append(enemy_path[0])
+		var remaining : int = enemy_path.size() - cutoff
+		# If remaining points after cutoff are fewer than 60% of the circuit
+		# length, the repeated point is a road crossing (figure-8 / end-revisit),
+		# NOT a repeated loop.  Use the full path to avoid a diagonal shortcut.
+		if remaining * 10 < cutoff * 6:
+			one_pass = enemy_path.duplicate()
+		else:
+			# True repeated loop — extract one circuit and close back to entry.
+			one_pass = enemy_path.slice(0, cutoff)
+			if (one_pass as Array).back().distance_to(enemy_path[0]) > 5.0:
+				one_pass.append(enemy_path[0])
 	else:
 		one_pass = enemy_path.duplicate()
 
-	# Reverse — serpent travels opposite to enemies
+	# Reverse so serpent travels from exit → entry, opposite to enemies.
 	(one_pass as Array).reverse()
 	return one_pass
 

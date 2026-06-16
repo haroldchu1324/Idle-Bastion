@@ -410,9 +410,11 @@ func apply_buff(buff_id: String) -> void:
 # ── Save / Load ───────────────────────────────────────────────────────────────
 const SAVE_PATH    := "user://savegame.dat"
 const SAVE_KEY     := "1b9f3c7e2a084d56"  # 16-char AES-256 key — do not change after shipping
+const SAVE_VERSION := 2  # bump this to wipe all existing saves on next upload
 
 func save_game() -> void:
 	var data := {
+		"save_version":           SAVE_VERSION,
 		"run_gold":               run_gold,
 		"all_time_highest_stage": all_time_highest_stage,
 		"max_world_unlocked":      max_world_unlocked,
@@ -449,13 +451,23 @@ func load_game() -> void:
 		return
 	var file := FileAccess.open_encrypted_with_pass(SAVE_PATH, FileAccess.READ, SAVE_KEY)
 	if not file:
+		# Unreadable file (wrong key / corrupt) — wipe and start fresh
+		DirAccess.remove_absolute(SAVE_PATH)
+		reset_save()
 		return
 	var text := file.get_as_text()
 	file.close()
 	var result = JSON.parse_string(text)
 	if result == null or not result is Dictionary:
+		# Corrupt or unreadable content — wipe and start fresh
+		DirAccess.remove_absolute(SAVE_PATH)
+		reset_save()
 		return
 	var d : Dictionary = result
+	if int(d.get("save_version", 0)) != SAVE_VERSION:
+		DirAccess.remove_absolute(SAVE_PATH)
+		reset_save()
+		return
 	run_gold               = int(d.get("run_gold",               0))
 	all_time_highest_stage = int(d.get("all_time_highest_stage", 0))
 	max_world_unlocked     = int(d.get("max_world_unlocked",      1))
@@ -721,6 +733,7 @@ func reset_save() -> void:
 	dq_kills_claimed          = false
 	dq_mutated_claimed        = false
 	dq_sell_claimed           = false
+	dq_unlocked               = false
 	relics_collected          = []
 	relic_levels              = {}
 	reset_run_buffs()

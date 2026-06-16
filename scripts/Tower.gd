@@ -1044,9 +1044,9 @@ func _fire(target: Node2D, dmg: float, p_pushback: bool = false, spawn_offset: V
 			b.pushback_on_hit = p_pushback
 			_throw_dir       = position.direction_to(target.position)
 			_throw_timer     = 0.35
-		8:  # Sniper — homing arrow (same as archer but faster)
+		8:  # Sniper — homing dart, guaranteed hit (same radius as knight sword)
 			b.setup(target, final_dmg)
-			b.bullet_type = "arrow"
+			b.bullet_type = "sniper_dart"
 			b._speed      = 1200.0
 		2:  # Catapult — bomb projectile
 			b.setup(target, final_dmg)

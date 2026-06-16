@@ -1,7 +1,7 @@
 extends Control
 
 # ── Debug toggle — set false before exporting ─────────────────────────────────
-const DEBUG : bool = true
+const DEBUG : bool = false
 
 # ── Signals ───────────────────────────────────────────────────────────────────
 signal wave_pressed
@@ -26,20 +26,28 @@ signal tower_detail_opened_tutorial
 signal tower_moved_tutorial
 signal special_tiles_tutorial_closed
 
-# ── Palette ───────────────────────────────────────────────────────────────────
-const C_BG       := Color(0.10, 0.07, 0.04, 0.94)
-const C_PANEL    := Color(0.12, 0.10, 0.08, 0.97)
-const C_CARD     := Color(0.18, 0.15, 0.12, 1.00)
-const C_BTN      := Color(0.22, 0.52, 0.18)
-const C_BTN_HOV  := Color(0.28, 0.60, 0.22)
-const C_BTN_OFF  := Color(0.28, 0.28, 0.24)
-const C_BASE_BTN := Color(0.18, 0.36, 0.62)
-const C_TAB_ACT  := Color(0.22, 0.42, 0.72)
-const C_TAB_IDLE := Color(0.14, 0.14, 0.18)
-const C_WHITE    := Color(1.00, 1.00, 1.00)
-const C_GOLD     := Color(1.00, 0.82, 0.22)
-const C_RED      := Color(0.95, 0.30, 0.30)
-const C_DIM      := Color(0.75, 0.75, 0.75)
+# ── Palette — Medieval Fantasy ────────────────────────────────────────────────
+const C_BG       := Color(0.106, 0.102, 0.090, 0.96)  # deep stone #1B1A17
+const C_PANEL    := Color(0.122, 0.106, 0.082, 0.97)  # dark parchment
+const C_CARD     := Color(0.165, 0.145, 0.110, 1.00)  # aged leather
+const C_BTN      := Color(0.192, 0.157, 0.098)        # dark wood/stone
+const C_BTN_HOV  := Color(0.243, 0.200, 0.129)        # lighter wood hover
+const C_BTN_OFF  := Color(0.196, 0.184, 0.161)        # desaturated stone
+const C_BASE_BTN := Color(0.160, 0.259, 0.455)        # deep royal blue
+const C_TAB_ACT  := Color(0.165, 0.259, 0.435)        # active tab — royal blue
+const C_TAB_IDLE := Color(0.137, 0.125, 0.098)        # idle tab — dark stone
+const C_WHITE    := Color(0.961, 0.922, 0.827)        # parchment white #F5EBD3
+const C_GOLD     := Color(0.847, 0.702, 0.365)        # royal gold #D8B35D
+const C_RED      := Color(0.878, 0.255, 0.235)        # blood red
+const C_DIM      := Color(0.784, 0.729, 0.604)        # aged parchment #C8BA9A
+# Fantasy accent colours (use sparingly)
+const C_GOLD_HI  := Color(0.949, 0.851, 0.545)        # highlight gold #F2D98B
+const C_ARCANE   := Color(0.298, 0.608, 0.910)        # arcane blue #4C9BE8
+const C_NATURE   := Color(0.373, 0.651, 0.427)        # nature green #5FA66D
+const C_PURPLE   := Color(0.545, 0.361, 0.965)        # arcane purple #8B5CF6
+const C_LEGEND   := Color(0.906, 0.608, 0.224)        # legendary orange #E79B39
+const C_DIS_TEXT   := Color(0.490, 0.455, 0.392)      # disabled text #7D7464
+const C_STONE_BASE := Color(0.165, 0.180, 0.208)      # dark slate #2A2E35 — unified button fill
 const RADIUS     := 10
 
 # ── Nodes ─────────────────────────────────────────────────────────────────────
@@ -239,6 +247,8 @@ var _pending_hero_tower              = null
 var _pending_hero_merge_cnt : int   = 0
 # Debug tower-list panel
 var _dbg_tower_panel   : Control = null
+var _main_debug_panel  : Control = null
+var _debug_kbuf        : String  = ""
 
 # Recipe notification panel (right side of track)
 var _recipe_panel        : Control = null
@@ -279,9 +289,14 @@ var _gacha_spinning       : bool          = false
 var _gacha_is_multi       : bool          = false
 var _gacha_multi_results  : Array         = []
 var _gacha_strip          : Control       = null
-var _gacha_summon_btn     : Button        = null
-var _gacha_summon_10_btn  : Button        = null
-var _gacha_gem_lbl        : Label         = null
+var _gacha_summon_btn        : Button        = null
+var _gacha_summon_10_btn     : Button        = null
+var _gacha_summon_cost_lbl   : Label         = null
+var _gacha_summon_10_cost_lbl: Label         = null
+var _gacha_summon_hbox       : Control       = null
+var _gacha_summon_10_hbox    : Control       = null
+var _gacha_gem_lbl        : Control       = null
+var _gacha_gem_num_lbl    : Label         = null
 var _gacha_mode           : String        = "tower"
 var _gacha_title_lbl      : Label         = null
 var _gacha_tab_tower_btn  : Button        = null
@@ -293,6 +308,7 @@ var _relic_strip          : Control       = null
 var _relic_tween          : Tween         = null
 var _relic_spinning       : bool          = false
 var _relic_spin_btn       : Button        = null
+var _relic_spin_lbl       : Label         = null
 var _relic_pool_lbl       : Label         = null
 var _relic_token_lbl      : Label         = null
 var _relic_tok_coin       : Control       = null   # coin icon beside relic panel balance
@@ -310,7 +326,7 @@ var _relic_info_desc      : Label         = null
 var _relic_detail_popup   : Panel         = null
 var _relic_detail_backdrop: Control       = null
 var _relic_detail_id      : String        = ""
-var _relic_detail_icon    : Label         = null
+var _relic_detail_icon    : Control        = null
 var _relic_detail_name    : Label         = null
 var _relic_detail_level   : Label         = null
 var _relic_detail_cur     : Label         = null
@@ -346,6 +362,9 @@ func _ready() -> void:
 	mouse_filter = MOUSE_FILTER_IGNORE
 	_load_fonts()
 	_build_ui()
+	_main_debug_panel = _build_main_debug_panel()
+	_main_debug_panel.z_index = 200
+	add_child(_main_debug_panel)
 	# Wire hover after one frame so all button sizes are finalized
 	call_deferred("_wire_all_button_hovers")
 
@@ -365,7 +384,7 @@ func setup(_main) -> void:
 
 func refresh_gems() -> void:
 	if is_instance_valid(_gem_hud_lbl):
-		_gem_hud_lbl.text = "🔷 %d" % GameData.blue_gems
+		_gem_hud_lbl.text = "%d" % GameData.blue_gems
 
 func hide_wave_btn() -> void:
 	if is_instance_valid(wave_btn):
@@ -637,6 +656,13 @@ func _close_merge_tutorial() -> void:
 	if is_instance_valid(_merge_tut_overlay):
 		_merge_tut_overlay.queue_free()
 		_merge_tut_overlay = null
+	# Hide floating buttons that were blocked from closing while the lock was active
+	if is_instance_valid(_upgrade_popup_btn):
+		_upgrade_popup_btn.visible = false
+	if is_instance_valid(_sell_btn):
+		_sell_btn.visible = false
+	if is_instance_valid(_hero_info_btn):
+		_hero_info_btn.visible = false
 
 
 # ── Recipe tutorial ───────────────────────────────────────────────────────────
@@ -735,14 +761,23 @@ func _advance_recipe_tutorial_step2() -> void:
 		craftable_ids[f["recipe"]["result"]] = true
 
 	var first_craft_btn : Button = null
-	for row in _recipe_row_refs:
+	var first_craft_idx : int   = 0
+	for i in range(_recipe_row_refs.size()):
+		var row = _recipe_row_refs[i]
 		if craftable_ids.has(row["result_id"]) and is_instance_valid(row["craft_btn"]):
 			first_craft_btn = row["craft_btn"]
+			first_craft_idx = i
 			break
 
 	if not is_instance_valid(first_craft_btn):
 		_close_recipe_tutorial()
 		return
+
+	# Scroll so the craft button is already visible when the overlay builds
+	if _recipe_scroll_offset != first_craft_idx:
+		_recipe_scroll_offset = first_craft_idx
+		_refresh_recipe_modal()
+		await get_tree().process_frame
 
 	# Rebuild overlay for step 2 (spotlighting the craft button)
 	if is_instance_valid(_recipe_tut_overlay):
@@ -1063,7 +1098,7 @@ func _build_ui() -> void:
 func _build_gem_hud() -> void:
 	var bg := Panel.new()
 	var bg_s := StyleBoxFlat.new()
-	bg_s.bg_color = Color(0.06, 0.06, 0.12, 0.88)
+	bg_s.bg_color = Color(0.094, 0.086, 0.071, 0.92)
 	bg_s.corner_radius_top_left = 8; bg_s.corner_radius_top_right = 8
 	bg_s.corner_radius_bottom_left = 8; bg_s.corner_radius_bottom_right = 8
 	bg_s.border_width_left = 1; bg_s.border_width_right = 1
@@ -1075,14 +1110,23 @@ func _build_gem_hud() -> void:
 	bg.mouse_filter = MOUSE_FILTER_IGNORE
 	add_child(bg)
 
-	_gem_hud_lbl = _label("🔷  0", _font_bold, 20, Color(0.45, 0.75, 1.0))
-	_gem_hud_lbl.position           = Vector2(0, 0)
-	_gem_hud_lbl.size               = Vector2(148, 38)
-	_gem_hud_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_gem_hud_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_gem_hud_lbl.mouse_filter       = MOUSE_FILTER_IGNORE
-	bg.add_child(_gem_hud_lbl)
-	_gem_hud_lbl.text = "🔷  %d" % GameData.blue_gems
+	var gem_center := CenterContainer.new()
+	gem_center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	gem_center.mouse_filter = MOUSE_FILTER_IGNORE
+	bg.add_child(gem_center)
+
+	var gem_row := HBoxContainer.new()
+	gem_row.add_theme_constant_override("separation", 6)
+	gem_row.mouse_filter = MOUSE_FILTER_IGNORE
+	gem_center.add_child(gem_row)
+
+	gem_row.add_child(_mk_blue_gem_icon(22.0))
+
+	_gem_hud_lbl = _label("%d" % GameData.blue_gems, _font_bold, 20, Color(0.45, 0.75, 1.0))
+	_gem_hud_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	_gem_hud_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_gem_hud_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	gem_row.add_child(_gem_hud_lbl)
 
 
 func _build_loot_tab() -> void:
@@ -1096,8 +1140,8 @@ func _build_loot_tab() -> void:
 	btn.add_theme_font_size_override("font_size", 18)
 	btn.add_theme_color_override("font_color",    C_WHITE)
 	btn.add_theme_stylebox_override("normal",  _btn_style(C_LOOT))
-	btn.add_theme_stylebox_override("hover",   _btn_style(C_LOOT.lightened(0.12)))
-	btn.add_theme_stylebox_override("pressed", _btn_style(C_LOOT.darkened(0.15)))
+	btn.add_theme_stylebox_override("hover",   _btn_hover(C_LOOT))
+	btn.add_theme_stylebox_override("pressed", _btn_pressed(C_LOOT))
 	btn.add_theme_stylebox_override("focus",   _btn_style(C_LOOT))
 	btn.pressed.connect(_on_loot_btn_pressed)
 	add_child(btn)
@@ -1140,8 +1184,8 @@ func _build_loot_tab() -> void:
 	const PH : int = 566
 	var panel := Panel.new()
 	var ps    := StyleBoxFlat.new()
-	ps.bg_color     = Color(0.07, 0.06, 0.13, 0.97)
-	ps.border_color = Color(0.55, 0.35, 0.80, 0.65)
+	ps.bg_color     = Color(0.110, 0.094, 0.098, 0.97)
+	ps.border_color = Color(C_PURPLE.r, C_PURPLE.g, C_PURPLE.b, 0.60)
 	ps.set_border_width_all(1)
 	ps.set_corner_radius_all(12)
 	panel.add_theme_stylebox_override("panel", ps)
@@ -1396,7 +1440,7 @@ func _make_loot_card(entry: Dictionary) -> Control:
 	# Preview background + turret drawing
 	var pbg := Panel.new()
 	var pbs := StyleBoxFlat.new()
-	pbs.bg_color = Color(0.06, 0.06, 0.12)
+	pbs.bg_color = Color(0.094, 0.086, 0.071)
 	pbs.set_corner_radius_all(6)
 	pbg.add_theme_stylebox_override("panel", pbs)
 	pbg.position     = Vector2(10, 10)
@@ -1554,8 +1598,8 @@ func _build_hud_bar() -> void:
 	speed_btn.add_theme_color_override("font_color",    C_WHITE)
 	var C_SPEED := Color(0.18, 0.42, 0.58)
 	speed_btn.add_theme_stylebox_override("normal",  _btn_style(C_SPEED))
-	speed_btn.add_theme_stylebox_override("hover",   _btn_style(C_SPEED.lightened(0.10)))
-	speed_btn.add_theme_stylebox_override("pressed", _btn_style(C_SPEED.darkened(0.10)))
+	speed_btn.add_theme_stylebox_override("hover",   _btn_hover(C_SPEED))
+	speed_btn.add_theme_stylebox_override("pressed", _btn_pressed(C_SPEED))
 	speed_btn.add_theme_stylebox_override("focus",   _btn_style(C_SPEED))
 	speed_btn.pressed.connect(_on_speed_btn_pressed)
 	bar.add_child(speed_btn)
@@ -1572,8 +1616,8 @@ func _build_hud_bar() -> void:
 	_recipe_btn.add_theme_font_size_override("font_size", 15)
 	_recipe_btn.add_theme_color_override("font_color",    C_WHITE)
 	_recipe_btn.add_theme_stylebox_override("normal",  _btn_style(C_RECIPE))
-	_recipe_btn.add_theme_stylebox_override("hover",   _btn_style(C_RECIPE.lightened(0.12)))
-	_recipe_btn.add_theme_stylebox_override("pressed", _btn_style(C_RECIPE.darkened(0.12)))
+	_recipe_btn.add_theme_stylebox_override("hover",   _btn_hover(C_RECIPE))
+	_recipe_btn.add_theme_stylebox_override("pressed", _btn_pressed(C_RECIPE))
 	_recipe_btn.add_theme_stylebox_override("focus",   _btn_style(C_RECIPE))
 	_recipe_btn.pressed.connect(func():
 		_tween_scale(_recipe_btn, Vector2(0.92, 0.92), 0.07)
@@ -1975,6 +2019,16 @@ func _process(delta: float) -> void:
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo:
+		var ch := String.chr(event.unicode).to_lower()
+		if ch.length() == 1 and ch >= "a" and ch <= "z":
+			_debug_kbuf += ch
+			if _debug_kbuf.length() > 6:
+				_debug_kbuf = _debug_kbuf.right(6)
+			if _debug_kbuf == "harold":
+				_debug_kbuf = ""
+				if is_instance_valid(_main_debug_panel):
+					_main_debug_panel.visible = not _main_debug_panel.visible
 	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
 		if is_instance_valid(_rarity_modal) and _rarity_modal.visible:
 			_rarity_modal.visible = false
@@ -1983,20 +2037,31 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 func _on_speed_btn_pressed() -> void:
 	_tween_scale(speed_btn, Vector2(0.92, 0.92), 0.07)
-	_speed_factor = 1.0 if _speed_factor == 2.0 else 2.0
+	if _speed_factor == 1.0:
+		_speed_factor = 2.0
+	elif _speed_factor == 2.0:
+		_speed_factor = 4.0
+	else:
+		_speed_factor = 1.0
 	match _speed_factor:
 		1.0:
 			speed_btn.text = "1× Speed"
 			var c1 := Color(0.18, 0.42, 0.58)
 			speed_btn.add_theme_stylebox_override("normal", _btn_style(c1))
-			speed_btn.add_theme_stylebox_override("hover",  _btn_style(c1.lightened(0.10)))
+			speed_btn.add_theme_stylebox_override("hover",  _btn_hover(c1))
 			speed_btn.add_theme_stylebox_override("focus",  _btn_style(c1))
 		2.0:
 			speed_btn.text = "2× Speed"
 			var c2 := Color(0.58, 0.38, 0.10)
 			speed_btn.add_theme_stylebox_override("normal", _btn_style(c2))
-			speed_btn.add_theme_stylebox_override("hover",  _btn_style(c2.lightened(0.10)))
+			speed_btn.add_theme_stylebox_override("hover",  _btn_hover(c2))
 			speed_btn.add_theme_stylebox_override("focus",  _btn_style(c2))
+		4.0:
+			speed_btn.text = "4× Speed"
+			var c4 := Color(0.55, 0.18, 0.18)
+			speed_btn.add_theme_stylebox_override("normal", _btn_style(c4))
+			speed_btn.add_theme_stylebox_override("hover",  _btn_hover(c4))
+			speed_btn.add_theme_stylebox_override("focus",  _btn_style(c4))
 	Engine.time_scale = _speed_factor
 	speed_toggled.emit(_speed_factor)
 
@@ -2040,7 +2105,7 @@ func _build_right_panel() -> void:
 		tb.add_theme_font_size_override("font_size", 12)
 		tb.add_theme_color_override("font_color",    C_WHITE)
 		tb.add_theme_stylebox_override("normal",  _btn_style(C_TAB_ACT if i == 0 else C_TAB_IDLE))
-		tb.add_theme_stylebox_override("hover",   _btn_style(C_TAB_ACT.lightened(0.10)))
+		tb.add_theme_stylebox_override("hover",   _btn_hover(C_TAB_ACT))
 		tb.add_theme_stylebox_override("pressed", _btn_style(C_TAB_ACT))
 		tb.add_theme_stylebox_override("focus",   _btn_style(C_TAB_ACT if i == 0 else C_TAB_IDLE))
 		var idx := i
@@ -2088,7 +2153,7 @@ func _fill_turrets_tab(page: Control) -> void:
 
 	# Small circular ℹ — Panel+Label to avoid Button padding breaking the circle
 	var circle_s := StyleBoxFlat.new()
-	circle_s.bg_color = Color(0.08, 0.18, 0.32, 0.90)
+	circle_s.bg_color = Color(0.110, 0.157, 0.220, 0.92)
 	circle_s.corner_radius_top_left     = 11
 	circle_s.corner_radius_top_right    = 11
 	circle_s.corner_radius_bottom_left  = 11
@@ -2136,8 +2201,8 @@ func _fill_turrets_tab(page: Control) -> void:
 	common_btn.add_theme_font_size_override("font_size", 14)
 	common_btn.add_theme_color_override("font_color",    C_WHITE)
 	common_btn.add_theme_stylebox_override("normal",  _btn_style(C_COMMON_BTN))
-	common_btn.add_theme_stylebox_override("hover",   _btn_style(C_COMMON_BTN.lightened(0.12)))
-	common_btn.add_theme_stylebox_override("pressed", _btn_style(C_COMMON_BTN.darkened(0.12)))
+	common_btn.add_theme_stylebox_override("hover",   _btn_hover(C_COMMON_BTN))
+	common_btn.add_theme_stylebox_override("pressed", _btn_pressed(C_COMMON_BTN))
 	common_btn.add_theme_stylebox_override("focus",   _btn_style(C_COMMON_BTN))
 	common_btn.pressed.connect(func():
 		_tween_scale(common_btn, Vector2(0.92, 0.92), 0.08)
@@ -2165,8 +2230,8 @@ func _fill_turrets_tab(page: Control) -> void:
 	rare_btn.add_theme_font_size_override("font_size", 14)
 	rare_btn.add_theme_color_override("font_color",    C_WHITE)
 	rare_btn.add_theme_stylebox_override("normal",  _btn_style(C_RARE_BTN))
-	rare_btn.add_theme_stylebox_override("hover",   _btn_style(C_RARE_BTN.lightened(0.12)))
-	rare_btn.add_theme_stylebox_override("pressed", _btn_style(C_RARE_BTN.darkened(0.12)))
+	rare_btn.add_theme_stylebox_override("hover",   _btn_hover(C_RARE_BTN))
+	rare_btn.add_theme_stylebox_override("pressed", _btn_pressed(C_RARE_BTN))
 	rare_btn.add_theme_stylebox_override("focus",   _btn_style(C_RARE_BTN))
 	rare_btn.pressed.connect(func():
 		_tween_scale(rare_btn, Vector2(0.92, 0.92), 0.08)
@@ -2194,8 +2259,8 @@ func _fill_turrets_tab(page: Control) -> void:
 	epic_btn.add_theme_font_size_override("font_size", 14)
 	epic_btn.add_theme_color_override("font_color",    C_WHITE)
 	epic_btn.add_theme_stylebox_override("normal",  _btn_style(C_EPIC_BTN))
-	epic_btn.add_theme_stylebox_override("hover",   _btn_style(C_EPIC_BTN.lightened(0.12)))
-	epic_btn.add_theme_stylebox_override("pressed", _btn_style(C_EPIC_BTN.darkened(0.12)))
+	epic_btn.add_theme_stylebox_override("hover",   _btn_hover(C_EPIC_BTN))
+	epic_btn.add_theme_stylebox_override("pressed", _btn_pressed(C_EPIC_BTN))
 	epic_btn.add_theme_stylebox_override("focus",   _btn_style(C_EPIC_BTN))
 	epic_btn.pressed.connect(func():
 		_tween_scale(epic_btn, Vector2(0.92, 0.92), 0.08)
@@ -2290,8 +2355,8 @@ func _build_dbg_tower_panel() -> Control:
 	panel.position = Vector2(vp.x - 530, 60)
 	panel.size     = Vector2(240, 500)
 	var ps := StyleBoxFlat.new()
-	ps.bg_color          = Color(0.08, 0.06, 0.12, 0.97)
-	ps.border_color      = Color(0.40, 0.55, 1.00, 0.80)
+	ps.bg_color          = Color(0.094, 0.086, 0.071, 0.97)
+	ps.border_color      = Color(C_ARCANE.r, C_ARCANE.g, C_ARCANE.b, 0.75)
 	ps.border_width_left = 2; ps.border_width_right  = 2
 	ps.border_width_top  = 2; ps.border_width_bottom = 2
 	ps.corner_radius_top_left     = 6; ps.corner_radius_top_right    = 6
@@ -2389,6 +2454,181 @@ func _build_dbg_tower_panel() -> Control:
 			btn.pressed.connect(func(): debug_summon_requested.emit(captured_id))
 			vbox.add_child(btn)
 
+	return panel
+
+
+func _build_main_debug_panel() -> Control:
+	var PW : int = 260
+	var panel := Panel.new()
+	panel.z_index  = 100
+	panel.position = Vector2(1280 - PW - 10, 8)
+	panel.size     = Vector2(PW, 310)
+	panel.visible  = false
+	var ps := StyleBoxFlat.new()
+	ps.bg_color                  = Color(0.094, 0.082, 0.067, 0.97)
+	ps.border_color              = Color(C_GOLD.r, C_GOLD.g, C_GOLD.b, 0.85)
+	ps.border_width_left         = 2; ps.border_width_right  = 2
+	ps.border_width_top          = 2; ps.border_width_bottom = 2
+	ps.corner_radius_top_left    = 6; ps.corner_radius_top_right    = 6
+	ps.corner_radius_bottom_left = 6; ps.corner_radius_bottom_right = 6
+	panel.add_theme_stylebox_override("panel", ps)
+
+	var title := _label("🐛  Harold Debug Mode", _font_bold, 13, Color(0.55, 0.90, 0.55))
+	title.position             = Vector2(8, 8)
+	title.size                 = Vector2(PW - 16, 20)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	panel.add_child(title)
+
+	var close_btn := Button.new()
+	close_btn.text       = "✕"
+	close_btn.position   = Vector2(PW - 28, 4)
+	close_btn.size       = Vector2(22, 22)
+	close_btn.focus_mode = FOCUS_NONE
+	close_btn.add_theme_font_override("font",           _font_bold)
+	close_btn.add_theme_font_size_override("font_size", 13)
+	close_btn.add_theme_color_override("font_color",    Color(0.70, 0.70, 0.70))
+	close_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.18, 0.10, 0.10)))
+	close_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.40, 0.14, 0.14)))
+	close_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.12, 0.06, 0.06)))
+	close_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.18, 0.10, 0.10)))
+	close_btn.pressed.connect(func(): panel.visible = false)
+	panel.add_child(close_btn)
+
+	var sep := ColorRect.new()
+	sep.color    = Color(0.55, 0.90, 0.55, 0.30)
+	sep.position = Vector2(8, 32)
+	sep.size     = Vector2(PW - 16, 1)
+	panel.add_child(sep)
+
+	var BH : int = 38; var BW : int = PW - 16; var BY : int = 40; var GAP : int = 6
+
+	var gem_btn := Button.new()
+	gem_btn.text       = "💎  +500 Blue Gems"
+	gem_btn.position   = Vector2(8, BY)
+	gem_btn.size       = Vector2(BW, BH)
+	gem_btn.focus_mode = FOCUS_NONE
+	gem_btn.add_theme_font_override("font",           _font_bold)
+	gem_btn.add_theme_font_size_override("font_size", 13)
+	gem_btn.add_theme_color_override("font_color",    Color(0.50, 0.82, 1.00))
+	gem_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.08, 0.18, 0.30)))
+	gem_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.12, 0.26, 0.44)))
+	gem_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.05, 0.12, 0.20)))
+	gem_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.08, 0.18, 0.30)))
+	gem_btn.pressed.connect(func():
+		GameData.blue_gems += 500
+		GameData.save_game()
+		_gacha_refresh_gems()
+	)
+	panel.add_child(gem_btn)
+	BY += BH + GAP
+
+	var tok_btn := Button.new()
+	tok_btn.text       = "★  +1000 Quest Tokens"
+	tok_btn.position   = Vector2(8, BY)
+	tok_btn.size       = Vector2(BW, BH)
+	tok_btn.focus_mode = FOCUS_NONE
+	tok_btn.add_theme_font_override("font",           _font_bold)
+	tok_btn.add_theme_font_size_override("font_size", 13)
+	tok_btn.add_theme_color_override("font_color",    Color(0.88, 0.72, 1.00))
+	tok_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.18, 0.10, 0.32)))
+	tok_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.26, 0.14, 0.46)))
+	tok_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.12, 0.06, 0.22)))
+	tok_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.18, 0.10, 0.32)))
+	tok_btn.pressed.connect(func():
+		GameData.quest_tokens += 1000
+		GameData.save_game()
+		_refresh_quest_token_labels()
+	)
+	panel.add_child(tok_btn)
+	BY += BH + GAP
+
+	var gold_btn := Button.new()
+	gold_btn.text       = "💰  +10 000 Gold (in-run)"
+	gold_btn.position   = Vector2(8, BY)
+	gold_btn.size       = Vector2(BW, BH)
+	gold_btn.focus_mode = FOCUS_NONE
+	gold_btn.add_theme_font_override("font",           _font_bold)
+	gold_btn.add_theme_font_size_override("font_size", 13)
+	gold_btn.add_theme_color_override("font_color",    Color(0.95, 0.85, 0.30))
+	gold_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.22, 0.18, 0.04)))
+	gold_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.32, 0.26, 0.06)))
+	gold_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.14, 0.12, 0.02)))
+	gold_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.22, 0.18, 0.04)))
+	gold_btn.pressed.connect(func(): debug_gold_requested.emit())
+	panel.add_child(gold_btn)
+	BY += BH + GAP
+
+	var skip_btn := Button.new()
+	skip_btn.text       = "⏭  Skip to Stage 8 (in-run)"
+	skip_btn.position   = Vector2(8, BY)
+	skip_btn.size       = Vector2(BW, BH)
+	skip_btn.focus_mode = FOCUS_NONE
+	skip_btn.add_theme_font_override("font",           _font_bold)
+	skip_btn.add_theme_font_size_override("font_size", 13)
+	skip_btn.add_theme_color_override("font_color",    Color(1.00, 0.75, 0.30))
+	skip_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.24, 0.14, 0.04)))
+	skip_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.32, 0.20, 0.06)))
+	skip_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.18, 0.10, 0.02)))
+	skip_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.24, 0.14, 0.04)))
+	skip_btn.pressed.connect(func(): debug_skip_stage_requested.emit(8))
+	panel.add_child(skip_btn)
+	BY += BH + GAP
+
+	var skip_tut_btn := Button.new()
+	skip_tut_btn.text       = "🎓  Skip Tutorial"
+	skip_tut_btn.position   = Vector2(8, BY)
+	skip_tut_btn.size       = Vector2(BW, BH)
+	skip_tut_btn.focus_mode = FOCUS_NONE
+	skip_tut_btn.add_theme_font_override("font",           _font_bold)
+	skip_tut_btn.add_theme_font_size_override("font_size", 13)
+	skip_tut_btn.add_theme_color_override("font_color",    Color(0.60, 0.90, 0.65))
+	skip_tut_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.06, 0.22, 0.10)))
+	skip_tut_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.09, 0.32, 0.15)))
+	skip_tut_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.04, 0.14, 0.07)))
+	skip_tut_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.06, 0.22, 0.10)))
+	skip_tut_btn.pressed.connect(func():
+		GameData.tutorial_complete = true
+		GameData.dq_unlocked = true
+		GameData.save_game()
+		show_main_menu()
+	)
+	panel.add_child(skip_tut_btn)
+	BY += BH + GAP
+
+	var sep2 := ColorRect.new()
+	sep2.color    = Color(1.00, 0.40, 0.40, 0.30)
+	sep2.position = Vector2(8, BY)
+	sep2.size     = Vector2(BW, 1)
+	panel.add_child(sep2)
+	BY += 7
+
+	var reset_btn := Button.new()
+	reset_btn.text       = "🗑  Reset Progress"
+	reset_btn.position   = Vector2(8, BY)
+	reset_btn.size       = Vector2(BW, BH)
+	reset_btn.focus_mode = FOCUS_NONE
+	reset_btn.add_theme_font_override("font",           _font_bold)
+	reset_btn.add_theme_font_size_override("font_size", 13)
+	reset_btn.add_theme_color_override("font_color",    Color(1, 0.6, 0.6))
+	reset_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.28, 0.10, 0.10)))
+	reset_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.40, 0.14, 0.14)))
+	reset_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.20, 0.07, 0.07)))
+	reset_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.28, 0.10, 0.10)))
+	var _rst := [false]
+	reset_btn.pressed.connect(func():
+		if not _rst[0]:
+			_rst[0] = true
+			reset_btn.text = "⚠  CONFIRM? (click again)"
+			reset_btn.add_theme_color_override("font_color", Color(1, 0.85, 0.2))
+			reset_btn.add_theme_stylebox_override("normal", _btn_style(Color(0.55, 0.28, 0.04)))
+			reset_btn.add_theme_stylebox_override("hover",  _btn_style(Color(0.72, 0.36, 0.06)))
+		else:
+			GameData.reset_save()
+			get_tree().reload_current_scene()
+	)
+	panel.add_child(reset_btn)
+
+	panel.size.y = BY + BH + 10
 	return panel
 
 
@@ -2731,8 +2971,8 @@ func _build_tower_info_panel() -> void:
 	_info_upgrade_btn.add_theme_font_size_override("font_size", 14)
 	_info_upgrade_btn.add_theme_color_override("font_color",    C_WHITE)
 	_info_upgrade_btn.add_theme_stylebox_override("normal",  _btn_style(C_UPG))
-	_info_upgrade_btn.add_theme_stylebox_override("hover",   _btn_style(C_UPG.lightened(0.15)))
-	_info_upgrade_btn.add_theme_stylebox_override("pressed", _btn_style(C_UPG.darkened(0.15)))
+	_info_upgrade_btn.add_theme_stylebox_override("hover",   _btn_hover(C_UPG))
+	_info_upgrade_btn.add_theme_stylebox_override("pressed", _btn_pressed(C_UPG))
 	_info_upgrade_btn.add_theme_stylebox_override("focus",   _btn_style(C_UPG))
 	_info_upgrade_btn.pressed.connect(func(): upgrade_merge_requested.emit())
 	panel.add_child(_info_upgrade_btn)
@@ -2957,7 +3197,7 @@ func show_run_results(stage: int, kills: int, bosses: int, gems: int, turrets: A
 	var stage_lbl     : Label   = _run_results_screen.get_node("stage_info")
 	var wave_lbl      : Label   = _run_results_screen.get_node("wave_info")
 	var kills_lbl     : Label   = _run_results_screen.get_node("kills")
-	var gems_earn_lbl : Label   = _run_results_screen.get_node("gems_earned")
+	var gems_earn_lbl : Label   = _run_results_screen.find_child("gems_earned", true, false)
 	var gems_tot_lbl  : Label   = _run_results_screen.get_node("gems_total")
 	var tower_grid    : Control = _run_results_screen.get_node("tower_grid")
 
@@ -2972,7 +3212,7 @@ func show_run_results(stage: int, kills: int, bosses: int, gems: int, turrets: A
 		stage_lbl.text = ("Stage %d Clear" % (stage - 1)) if stage > 1 else ""
 		wave_lbl.text  = "Wave %d" % wave if wave > 0 else ""
 	kills_lbl.text     = "⚔  %d enemies slain  (%d bosses)" % [kills, bosses]
-	gems_earn_lbl.text = "+%d  🔷  Blue Gems" % gems
+	gems_earn_lbl.text = "+%d  " % gems
 	gems_tot_lbl.text  = "Total: %d" % GameData.blue_gems
 
 	for child in tower_grid.get_children():
@@ -3109,7 +3349,7 @@ func _build_run_results_screen() -> void:
 
 	var overlay := Panel.new()
 	var bg_s := StyleBoxFlat.new()
-	bg_s.bg_color = Color(0.04, 0.04, 0.10)
+	bg_s.bg_color = Color(0.094, 0.086, 0.071)
 	bg_s.corner_radius_top_left = 0; bg_s.corner_radius_top_right = 0
 	bg_s.corner_radius_bottom_left = 0; bg_s.corner_radius_bottom_right = 0
 	overlay.add_theme_stylebox_override("panel", bg_s)
@@ -3232,12 +3472,27 @@ func _build_run_results_screen() -> void:
 	overlay.add_child(rewards_hdr)
 
 	# Gems earned this run
+	var gems_earn_row := CenterContainer.new()
+	gems_earn_row.position     = Vector2(RX + PAD, 278)
+	gems_earn_row.size         = Vector2(RW - PAD * 2, 36)
+	gems_earn_row.mouse_filter = MOUSE_FILTER_IGNORE
+	overlay.add_child(gems_earn_row)
+
+	var gems_earn_hbox := HBoxContainer.new()
+	gems_earn_hbox.add_theme_constant_override("separation", 8)
+	gems_earn_hbox.mouse_filter = MOUSE_FILTER_IGNORE
+	gems_earn_row.add_child(gems_earn_hbox)
+
 	var gems_earn_lbl := _label("", _font_bold, 26, Color(0.45, 0.75, 1.00))
 	gems_earn_lbl.name         = "gems_earned"
-	gems_earn_lbl.position     = Vector2(RX + PAD, 278)
-	gems_earn_lbl.size         = Vector2(RW - PAD * 2, 36)
 	gems_earn_lbl.mouse_filter = MOUSE_FILTER_IGNORE
-	overlay.add_child(gems_earn_lbl)
+	gems_earn_hbox.add_child(gems_earn_lbl)
+
+	gems_earn_hbox.add_child(_mk_blue_gem_icon(30.0))
+
+	var gems_earn_suffix := _label("Blue Gems", _font_bold, 26, Color(0.45, 0.75, 1.00))
+	gems_earn_suffix.mouse_filter = MOUSE_FILTER_IGNORE
+	gems_earn_hbox.add_child(gems_earn_suffix)
 
 	# Total gems
 	var gems_tot_lbl := _label("", _font_reg, 15, C_DIM)
@@ -3258,7 +3513,7 @@ func _build_run_results_screen() -> void:
 	cont_btn.add_theme_color_override("font_color",    C_WHITE)
 	cont_btn.add_theme_stylebox_override("normal",  _btn_style(C_BTN))
 	cont_btn.add_theme_stylebox_override("hover",   _btn_style(C_BTN_HOV))
-	cont_btn.add_theme_stylebox_override("pressed", _btn_style(C_BTN.darkened(0.1)))
+	cont_btn.add_theme_stylebox_override("pressed", _btn_pressed(C_BTN))
 	cont_btn.add_theme_stylebox_override("focus",   _btn_style(C_BTN))
 	cont_btn.pressed.connect(func():
 		overlay.visible = false
@@ -3273,7 +3528,7 @@ func _build_game_over_screen() -> void:
 	# Full-screen main page shown on game over
 	var overlay := Panel.new()
 	var bg_s := StyleBoxFlat.new()
-	bg_s.bg_color = Color(0.04, 0.04, 0.10)
+	bg_s.bg_color = Color(0.094, 0.086, 0.071)
 	bg_s.corner_radius_top_left = 0; bg_s.corner_radius_top_right = 0
 	bg_s.corner_radius_bottom_left = 0; bg_s.corner_radius_bottom_right = 0
 	overlay.add_theme_stylebox_override("panel", bg_s)
@@ -3330,19 +3585,18 @@ func _build_game_over_screen() -> void:
 	const NAV_BTN_H : int = 64
 	const NAV_BTN_X : int = 100
 	const NAV_BTN_GAP : int = 20
-	var nav_data := [
-		{"label": "⚔  Upgrades",  "color": Color(0.18, 0.28, 0.55), "hover": Color(0.25, 0.38, 0.72)},
-		{"label": "🛒  Shop",      "color": Color(0.18, 0.38, 0.22), "hover": Color(0.24, 0.50, 0.30)},
-		{"label": "🗺  World Map", "color": Color(0.30, 0.20, 0.45), "hover": Color(0.40, 0.28, 0.60)},
-		{"label": "🦸  Heroes",    "color": Color(0.45, 0.18, 0.18), "hover": Color(0.60, 0.24, 0.24)},
-		{"label": "🗼  Towers",    "color": Color(0.35, 0.28, 0.12), "hover": Color(0.50, 0.40, 0.18)},
+	var nav_data : Array = [
+		"⚔  Upgrades",
+		"🛒  Shop",
+		"🗺  World Map",
+		"🦸  Heroes",
+		"🗼  Towers",
 	]
 	var nav_start_y : int = 240
 	for ni in range(nav_data.size()):
-		var nd       : Dictionary = nav_data[ni]
-		var btn_y    : int        = nav_start_y + ni * (NAV_BTN_H + NAV_BTN_GAP)
-		var nav_btn  := Button.new()
-		nav_btn.text         = nd["label"]
+		var btn_y   : int = nav_start_y + ni * (NAV_BTN_H + NAV_BTN_GAP)
+		var nav_btn := Button.new()
+		nav_btn.text         = nav_data[ni]
 		nav_btn.position     = Vector2(NAV_BTN_X, btn_y)
 		nav_btn.size         = Vector2(NAV_BTN_W, NAV_BTN_H)
 		nav_btn.focus_mode   = FOCUS_NONE
@@ -3350,10 +3604,10 @@ func _build_game_over_screen() -> void:
 		nav_btn.add_theme_font_override("font",           _font_bold)
 		nav_btn.add_theme_font_size_override("font_size", 20)
 		nav_btn.add_theme_color_override("font_color",    C_WHITE)
-		nav_btn.add_theme_stylebox_override("normal",  _btn_style(nd["color"]))
-		nav_btn.add_theme_stylebox_override("hover",   _btn_style(nd["hover"]))
-		nav_btn.add_theme_stylebox_override("pressed", _btn_style((nd["color"] as Color).darkened(0.2)))
-		nav_btn.add_theme_stylebox_override("focus",   _btn_style(nd["color"]))
+		nav_btn.add_theme_stylebox_override("normal",  _btn_secondary())
+		nav_btn.add_theme_stylebox_override("hover",   _btn_secondary_hover())
+		nav_btn.add_theme_stylebox_override("pressed", _btn_secondary_pressed())
+		nav_btn.add_theme_stylebox_override("focus",   _btn_secondary())
 		var cap_ni := ni
 		nav_btn.pressed.connect(func(): _on_main_nav_pressed(cap_ni))
 		if ni > 0:
@@ -3371,10 +3625,10 @@ func _build_game_over_screen() -> void:
 	dq_btn.add_theme_font_override("font",           _font_bold)
 	dq_btn.add_theme_font_size_override("font_size", 18)
 	dq_btn.add_theme_color_override("font_color",    C_WHITE)
-	dq_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.18, 0.32, 0.45)))
-	dq_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.25, 0.44, 0.62)))
-	dq_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.12, 0.22, 0.32)))
-	dq_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.18, 0.32, 0.45)))
+	dq_btn.add_theme_stylebox_override("normal",  _btn_secondary())
+	dq_btn.add_theme_stylebox_override("hover",   _btn_secondary_hover())
+	dq_btn.add_theme_stylebox_override("pressed", _btn_secondary_pressed())
+	dq_btn.add_theme_stylebox_override("focus",   _btn_secondary())
 	dq_btn.visible = GameData.dq_unlocked
 	dq_btn.pressed.connect(func():
 		_game_over_screen.visible = false
@@ -3395,10 +3649,10 @@ func _build_game_over_screen() -> void:
 	relics_btn.add_theme_font_override("font",           _font_bold)
 	relics_btn.add_theme_font_size_override("font_size", 18)
 	relics_btn.add_theme_color_override("font_color",    C_WHITE)
-	relics_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.24, 0.10, 0.44)))
-	relics_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.34, 0.16, 0.62)))
-	relics_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.16, 0.06, 0.30)))
-	relics_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.24, 0.10, 0.44)))
+	relics_btn.add_theme_stylebox_override("normal",  _btn_secondary())
+	relics_btn.add_theme_stylebox_override("hover",   _btn_secondary_hover())
+	relics_btn.add_theme_stylebox_override("pressed", _btn_secondary_pressed())
+	relics_btn.add_theme_stylebox_override("focus",   _btn_secondary())
 	relics_btn.pressed.connect(func():
 		_game_over_screen.visible = false
 		if is_instance_valid(_relic_screen):
@@ -3417,58 +3671,12 @@ func _build_game_over_screen() -> void:
 	start_btn.add_theme_font_override("font",           _font_bold)
 	start_btn.add_theme_font_size_override("font_size", 26)
 	start_btn.add_theme_color_override("font_color",    C_WHITE)
-	start_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.55, 0.22, 0.05)))
-	start_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.72, 0.30, 0.07)))
-	start_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.40, 0.16, 0.03)))
-	start_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.55, 0.22, 0.05)))
+	start_btn.add_theme_stylebox_override("normal",  _btn_primary())
+	start_btn.add_theme_stylebox_override("hover",   _btn_primary_hover())
+	start_btn.add_theme_stylebox_override("pressed", _btn_primary_pressed())
+	start_btn.add_theme_stylebox_override("focus",   _btn_primary())
 	start_btn.pressed.connect(func(): _on_main_nav_pressed(2))
 	overlay.add_child(start_btn)
-
-	# DEBUG — Reset all saved progress
-	var reset_btn := Button.new()
-	reset_btn.text       = "🗑  Reset Progress (Debug)"
-	reset_btn.position   = Vector2(14, 720 - 58 - 14)
-	reset_btn.size       = Vector2(260, 46)
-	reset_btn.focus_mode = FOCUS_NONE
-	reset_btn.add_theme_font_override("font",           _font_bold)
-	reset_btn.add_theme_font_size_override("font_size", 14)
-	reset_btn.add_theme_color_override("font_color",    Color(1, 0.6, 0.6))
-	reset_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.28, 0.10, 0.10)))
-	reset_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.40, 0.14, 0.14)))
-	reset_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.20, 0.07, 0.07)))
-	reset_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.28, 0.10, 0.10)))
-	var _reset_state := [false]  # array so lambda mutation persists across calls
-	reset_btn.pressed.connect(func():
-		if not _reset_state[0]:
-			_reset_state[0] = true
-			reset_btn.text = "⚠  CONFIRM RESET? (click again)"
-			reset_btn.add_theme_color_override("font_color", Color(1, 0.85, 0.2))
-			reset_btn.add_theme_stylebox_override("normal", _btn_style(Color(0.55, 0.28, 0.04)))
-			reset_btn.add_theme_stylebox_override("hover",  _btn_style(Color(0.72, 0.36, 0.06)))
-		else:
-			GameData.reset_save()
-			get_tree().reload_current_scene()
-	)
-	overlay.add_child(reset_btn)
-
-	# DEBUG — Add quest tokens
-	var tok_btn := Button.new()
-	tok_btn.text       = "★ +1000 Quest Tokens"
-	tok_btn.position   = Vector2(920, 334)
-	tok_btn.size       = Vector2(240, 44)
-	tok_btn.focus_mode = FOCUS_NONE
-	tok_btn.add_theme_font_override("font",           _font_bold)
-	tok_btn.add_theme_font_size_override("font_size", 14)
-	tok_btn.add_theme_color_override("font_color",    Color(0.88, 0.72, 1.00))
-	tok_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.18, 0.10, 0.32)))
-	tok_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.26, 0.14, 0.46)))
-	tok_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.12, 0.06, 0.22)))
-	tok_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.18, 0.10, 0.32)))
-	tok_btn.pressed.connect(func():
-		GameData.quest_tokens += 1000
-		GameData.save_game()
-	)
-	overlay.add_child(tok_btn)
 
 	call_deferred("_wire_hover_recursive", overlay)
 
@@ -3494,7 +3702,7 @@ func show_main_menu() -> void:
 	_go_flavour_lbl.visible = false
 	for btn in _tutorial_locked_btns:
 		if is_instance_valid(btn):
-			btn.visible = GameData.dq_unlocked
+			btn.visible = GameData.tutorial_complete
 	if is_instance_valid(_dq_main_btn):
 		_dq_main_btn.visible = GameData.dq_unlocked
 	_game_over_screen.visible = true
@@ -3561,10 +3769,10 @@ func _build_upgrades_screen() -> void:
 	back_btn.add_theme_font_override("font",           _font_bold)
 	back_btn.add_theme_font_size_override("font_size", 16)
 	back_btn.add_theme_color_override("font_color",    C_WHITE)
-	back_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.22, 0.22, 0.28)))
-	back_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.30, 0.30, 0.38)))
-	back_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.16, 0.16, 0.20)))
-	back_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.22, 0.22, 0.28)))
+	back_btn.add_theme_stylebox_override("normal",  _btn_tertiary())
+	back_btn.add_theme_stylebox_override("hover",   _btn_tertiary_hover())
+	back_btn.add_theme_stylebox_override("pressed", _btn_tertiary_pressed())
+	back_btn.add_theme_stylebox_override("focus",   _btn_tertiary())
 	back_btn.pressed.connect(func():
 		overlay.visible = false
 		_game_over_screen.visible = true
@@ -3575,7 +3783,7 @@ func _build_upgrades_screen() -> void:
 func _build_placeholder_screen(var_ref: String, title_text: String) -> Control:
 	var overlay := Panel.new()
 	var bg_s := StyleBoxFlat.new()
-	bg_s.bg_color = Color(0.04, 0.04, 0.10)
+	bg_s.bg_color = Color(0.094, 0.086, 0.071)
 	bg_s.corner_radius_top_left = 0; bg_s.corner_radius_top_right = 0
 	bg_s.corner_radius_bottom_left = 0; bg_s.corner_radius_bottom_right = 0
 	overlay.add_theme_stylebox_override("panel", bg_s)
@@ -3599,10 +3807,10 @@ func _build_placeholder_screen(var_ref: String, title_text: String) -> Control:
 	back_btn.add_theme_font_override("font",           _font_bold)
 	back_btn.add_theme_font_size_override("font_size", 18)
 	back_btn.add_theme_color_override("font_color",    C_WHITE)
-	back_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.22, 0.22, 0.28)))
-	back_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.30, 0.30, 0.38)))
-	back_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.16, 0.16, 0.20)))
-	back_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.22, 0.22, 0.28)))
+	back_btn.add_theme_stylebox_override("normal",  _btn_tertiary())
+	back_btn.add_theme_stylebox_override("hover",   _btn_tertiary_hover())
+	back_btn.add_theme_stylebox_override("pressed", _btn_tertiary_pressed())
+	back_btn.add_theme_stylebox_override("focus",   _btn_tertiary())
 	back_btn.pressed.connect(func():
 		overlay.visible = false
 		_game_over_screen.visible = true
@@ -3620,7 +3828,7 @@ func _build_shop_screen() -> void:
 	# ── Outer overlay ────────────────────────────────────────────────────────────
 	var overlay := Panel.new()
 	var bg_s := StyleBoxFlat.new()
-	bg_s.bg_color = Color(0.03, 0.03, 0.09)
+	bg_s.bg_color = Color(0.082, 0.075, 0.063)
 	overlay.add_theme_stylebox_override("panel", bg_s)
 	overlay.position     = Vector2.ZERO
 	overlay.size         = Vector2(1280, 720)
@@ -3645,11 +3853,24 @@ func _build_shop_screen() -> void:
 	overlay.add_child(uline)
 
 	# ── Gem display (shown for tower/hero tabs) ──────────────────────────────────
-	_gacha_gem_lbl = _label("🔷 0", _font_bold, 20, Color(0.50, 0.82, 1.0))
-	_gacha_gem_lbl.position             = Vector2(0, 62)
-	_gacha_gem_lbl.size                 = Vector2(1280, 28)
-	_gacha_gem_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_gacha_gem_lbl = CenterContainer.new()
+	_gacha_gem_lbl.position     = Vector2(0, 62)
+	_gacha_gem_lbl.size         = Vector2(1280, 28)
+	_gacha_gem_lbl.mouse_filter = MOUSE_FILTER_IGNORE
 	overlay.add_child(_gacha_gem_lbl)
+
+	var _gg_row := HBoxContainer.new()
+	_gg_row.add_theme_constant_override("separation", 6)
+	_gg_row.mouse_filter = MOUSE_FILTER_IGNORE
+	_gacha_gem_lbl.add_child(_gg_row)
+
+	_gg_row.add_child(_mk_blue_gem_icon(24.0))
+
+	_gacha_gem_num_lbl = _label("%d" % GameData.blue_gems, _font_bold, 20, Color(0.50, 0.82, 1.0))
+	_gacha_gem_num_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	_gacha_gem_num_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_gacha_gem_num_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	_gg_row.add_child(_gacha_gem_num_lbl)
 
 	# ── Relic token display (shown only for relic tab) ───────────────────────────
 	const GH_D  : int = 22
@@ -3679,10 +3900,11 @@ func _build_shop_screen() -> void:
 	_gacha_tab_tower_btn.add_theme_font_size_override("font_size", 15)
 	_gacha_tab_tower_btn.add_theme_color_override("font_color",    C_WHITE)
 	_gacha_tab_tower_btn.add_theme_stylebox_override("normal",  _btn_style(C_TAB_ACT))
-	_gacha_tab_tower_btn.add_theme_stylebox_override("hover",   _btn_style(C_TAB_ACT.lightened(0.1)))
-	_gacha_tab_tower_btn.add_theme_stylebox_override("pressed", _btn_style(C_TAB_ACT.darkened(0.15)))
+	_gacha_tab_tower_btn.add_theme_stylebox_override("hover",   _btn_hover(C_TAB_ACT))
+	_gacha_tab_tower_btn.add_theme_stylebox_override("pressed", _btn_pressed(C_TAB_ACT))
 	_gacha_tab_tower_btn.add_theme_stylebox_override("focus",   _btn_style(C_TAB_ACT))
 	_gacha_tab_tower_btn.pressed.connect(func(): _gacha_switch_mode("tower"))
+	_gacha_tab_tower_btn.z_index = 1
 	overlay.add_child(_gacha_tab_tower_btn)
 
 	_gacha_tab_hero_btn = Button.new()
@@ -3694,10 +3916,11 @@ func _build_shop_screen() -> void:
 	_gacha_tab_hero_btn.add_theme_font_size_override("font_size", 15)
 	_gacha_tab_hero_btn.add_theme_color_override("font_color",    C_DIM)
 	_gacha_tab_hero_btn.add_theme_stylebox_override("normal",  _btn_style(C_TAB_IDLE))
-	_gacha_tab_hero_btn.add_theme_stylebox_override("hover",   _btn_style(C_TAB_IDLE.lightened(0.1)))
-	_gacha_tab_hero_btn.add_theme_stylebox_override("pressed", _btn_style(C_TAB_IDLE.darkened(0.15)))
+	_gacha_tab_hero_btn.add_theme_stylebox_override("hover",   _btn_hover(C_TAB_IDLE))
+	_gacha_tab_hero_btn.add_theme_stylebox_override("pressed", _btn_pressed(C_TAB_IDLE))
 	_gacha_tab_hero_btn.add_theme_stylebox_override("focus",   _btn_style(C_TAB_IDLE))
 	_gacha_tab_hero_btn.pressed.connect(func(): _gacha_switch_mode("hero"))
+	_gacha_tab_hero_btn.z_index = 1
 	overlay.add_child(_gacha_tab_hero_btn)
 
 	_gacha_tab_quest_btn = Button.new()
@@ -3709,10 +3932,11 @@ func _build_shop_screen() -> void:
 	_gacha_tab_quest_btn.add_theme_font_size_override("font_size", 15)
 	_gacha_tab_quest_btn.add_theme_color_override("font_color",    C_DIM)
 	_gacha_tab_quest_btn.add_theme_stylebox_override("normal",  _btn_style(C_TAB_IDLE))
-	_gacha_tab_quest_btn.add_theme_stylebox_override("hover",   _btn_style(C_TAB_IDLE.lightened(0.1)))
-	_gacha_tab_quest_btn.add_theme_stylebox_override("pressed", _btn_style(C_TAB_IDLE.darkened(0.15)))
+	_gacha_tab_quest_btn.add_theme_stylebox_override("hover",   _btn_hover(C_TAB_IDLE))
+	_gacha_tab_quest_btn.add_theme_stylebox_override("pressed", _btn_pressed(C_TAB_IDLE))
 	_gacha_tab_quest_btn.add_theme_stylebox_override("focus",   _btn_style(C_TAB_IDLE))
 	_gacha_tab_quest_btn.pressed.connect(func(): _gacha_switch_mode("relic"))
+	_gacha_tab_quest_btn.z_index = 1
 	overlay.add_child(_gacha_tab_quest_btn)
 
 	# ── Rarity odds pills ─────────────────────────────────────────────────────────
@@ -3838,13 +4062,9 @@ func _build_shop_screen() -> void:
 	var btn_x0    : int = (1280 - 2 * BTN_W - BTN_GAP) / 2
 
 	_gacha_summon_btn = Button.new()
-	_gacha_summon_btn.text       = "✦  Summon x1    🔷 %d" % GACHA_TOWER_SUMMON_COST
 	_gacha_summon_btn.position   = Vector2(btn_x0, btn_y)
 	_gacha_summon_btn.size       = Vector2(BTN_W, BTN_H)
 	_gacha_summon_btn.focus_mode = FOCUS_NONE
-	_gacha_summon_btn.add_theme_font_override("font",           _font_bold)
-	_gacha_summon_btn.add_theme_font_size_override("font_size", 19)
-	_gacha_summon_btn.add_theme_color_override("font_color",    C_WHITE)
 	_gacha_summon_btn.add_theme_stylebox_override("normal",   _btn_style(Color(0.52, 0.14, 0.06)))
 	_gacha_summon_btn.add_theme_stylebox_override("hover",    _btn_style(Color(0.68, 0.20, 0.09)))
 	_gacha_summon_btn.add_theme_stylebox_override("pressed",  _btn_style(Color(0.36, 0.09, 0.04)))
@@ -3852,15 +4072,14 @@ func _build_shop_screen() -> void:
 	_gacha_summon_btn.add_theme_stylebox_override("disabled", _btn_style(Color(0.22, 0.22, 0.28)))
 	_gacha_summon_btn.pressed.connect(_gacha_on_summon_pressed)
 	overlay.add_child(_gacha_summon_btn)
+	var _sb1 := _mk_summon_btn_content(_gacha_summon_btn, "✦  Summon x1  ", GACHA_TOWER_SUMMON_COST)
+	_gacha_summon_hbox     = _sb1[0]
+	_gacha_summon_cost_lbl = _sb1[1]
 
 	_gacha_summon_10_btn = Button.new()
-	_gacha_summon_10_btn.text       = "✦✦  Summon x10  🔷 %d" % GACHA_TOWER_SUMMON_10_COST
 	_gacha_summon_10_btn.position   = Vector2(btn_x0 + BTN_W + BTN_GAP, btn_y)
 	_gacha_summon_10_btn.size       = Vector2(BTN_W, BTN_H)
 	_gacha_summon_10_btn.focus_mode = FOCUS_NONE
-	_gacha_summon_10_btn.add_theme_font_override("font",           _font_bold)
-	_gacha_summon_10_btn.add_theme_font_size_override("font_size", 19)
-	_gacha_summon_10_btn.add_theme_color_override("font_color",    C_WHITE)
 	_gacha_summon_10_btn.add_theme_stylebox_override("normal",   _btn_style(Color(0.14, 0.36, 0.62)))
 	_gacha_summon_10_btn.add_theme_stylebox_override("hover",    _btn_style(Color(0.20, 0.46, 0.76)))
 	_gacha_summon_10_btn.add_theme_stylebox_override("pressed",  _btn_style(Color(0.09, 0.25, 0.46)))
@@ -3868,6 +4087,9 @@ func _build_shop_screen() -> void:
 	_gacha_summon_10_btn.add_theme_stylebox_override("disabled", _btn_style(Color(0.22, 0.22, 0.28)))
 	_gacha_summon_10_btn.pressed.connect(_gacha_on_summon_10_pressed)
 	overlay.add_child(_gacha_summon_10_btn)
+	var _sb10 := _mk_summon_btn_content(_gacha_summon_10_btn, "✦✦  Summon x10  ", GACHA_TOWER_SUMMON_10_COST)
+	_gacha_summon_10_hbox     = _sb10[0]
+	_gacha_summon_10_cost_lbl = _sb10[1]
 
 	# ── Popups (built hidden) ─────────────────────────────────────────────────────
 	_gacha_build_result_popup(overlay)
@@ -3882,10 +4104,10 @@ func _build_shop_screen() -> void:
 	back_btn.add_theme_font_override("font",           _font_bold)
 	back_btn.add_theme_font_size_override("font_size", 16)
 	back_btn.add_theme_color_override("font_color",    C_WHITE)
-	back_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.22, 0.22, 0.28)))
-	back_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.30, 0.30, 0.38)))
-	back_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.16, 0.16, 0.20)))
-	back_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.22, 0.22, 0.28)))
+	back_btn.add_theme_stylebox_override("normal",  _btn_tertiary())
+	back_btn.add_theme_stylebox_override("hover",   _btn_tertiary_hover())
+	back_btn.add_theme_stylebox_override("pressed", _btn_tertiary_pressed())
+	back_btn.add_theme_stylebox_override("focus",   _btn_tertiary())
 	back_btn.pressed.connect(func():
 		overlay.visible = false
 		_game_over_screen.visible = true
@@ -3895,10 +4117,10 @@ func _build_shop_screen() -> void:
 	# ── Relic panel (overlays gacha content when "relic" tab is active) ──────────
 	var qp := Panel.new()
 	var qp_s := StyleBoxFlat.new()
-	qp_s.bg_color = Color(0.03, 0.03, 0.09)
+	qp_s.bg_color = Color(0.082, 0.075, 0.063)
 	qp.add_theme_stylebox_override("panel", qp_s)
-	qp.position     = Vector2(0, 134)
-	qp.size         = Vector2(1280, 586)
+	qp.position     = Vector2(0, 128)
+	qp.size         = Vector2(1280, 592)
 	qp.mouse_filter = MOUSE_FILTER_STOP
 	qp.visible      = false
 	overlay.add_child(qp)
@@ -3907,39 +4129,25 @@ func _build_shop_screen() -> void:
 	# ── Back button inside relic panel ───────────────────────────────────────────
 	var relic_back_btn := Button.new()
 	relic_back_btn.text       = "<  Back"
-	relic_back_btn.position   = Vector2(30, 528)
+	relic_back_btn.position   = Vector2(30, 534)
 	relic_back_btn.size       = Vector2(140, 44)
 	relic_back_btn.focus_mode = FOCUS_NONE
 	relic_back_btn.add_theme_font_override("font",           _font_bold)
 	relic_back_btn.add_theme_font_size_override("font_size", 16)
 	relic_back_btn.add_theme_color_override("font_color",    C_WHITE)
-	relic_back_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.22, 0.22, 0.28)))
-	relic_back_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.30, 0.30, 0.38)))
-	relic_back_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.16, 0.16, 0.20)))
-	relic_back_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.22, 0.22, 0.28)))
+	relic_back_btn.add_theme_stylebox_override("normal",  _btn_tertiary())
+	relic_back_btn.add_theme_stylebox_override("hover",   _btn_tertiary_hover())
+	relic_back_btn.add_theme_stylebox_override("pressed", _btn_tertiary_pressed())
+	relic_back_btn.add_theme_stylebox_override("focus",   _btn_tertiary())
 	relic_back_btn.pressed.connect(func():
 		overlay.visible = false
 		_game_over_screen.visible = true
 	)
 	qp.add_child(relic_back_btn)
 
-	# ── Relic token balance bar (coin icon + count) ───────────────────────────────
-	const TC_D  : int = 22
-	const TC_GAP: int = 6
-	var _tc := _tok_center("00000 ★", 17, TC_D, TC_GAP, 1280)
-	_relic_tok_coin = _make_token_coin(TC_D)
-	_relic_tok_coin.position = Vector2(_tc[0], 4)
-	qp.add_child(_relic_tok_coin)
-	_relic_token_lbl = _label("%d ★" % GameData.quest_tokens, _font_bold, 17, Color(0.88, 0.72, 1.00))
-	_relic_token_lbl.position             = Vector2(_tc[1], 6)
-	_relic_token_lbl.size                 = Vector2(_tc[2], 22)
-	_relic_token_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	_relic_token_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
-	qp.add_child(_relic_token_lbl)
-
 	# ── Relic wheel arrow ─────────────────────────────────────────────────────────
 	var r_arrow := _label("▼", _font_bold, 28, Color(0.95, 0.18, 0.18))
-	r_arrow.position             = Vector2(CLIP_X, 18)
+	r_arrow.position             = Vector2(CLIP_X, 24)
 	r_arrow.size                 = Vector2(CLIP_W, 32)
 	r_arrow.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	r_arrow.mouse_filter         = MOUSE_FILTER_IGNORE
@@ -3957,7 +4165,7 @@ func _build_shop_screen() -> void:
 	r_clip_s.shadow_color = Color(0.18, 0.04, 0.40, 0.55)
 	r_clip_s.shadow_size  = 12
 	r_clip.add_theme_stylebox_override("panel", r_clip_s)
-	r_clip.position      = Vector2(CLIP_X, 54)
+	r_clip.position      = Vector2(CLIP_X, 60)
 	r_clip.size          = Vector2(CLIP_W, CLIP_H)
 	r_clip.clip_contents = true
 	r_clip.mouse_filter  = MOUSE_FILTER_IGNORE
@@ -3966,7 +4174,7 @@ func _build_shop_screen() -> void:
 
 	var r_cline := ColorRect.new()
 	r_cline.color        = Color(0.95, 0.18, 0.18, 0.72)
-	r_cline.position     = Vector2(CLIP_X + CLIP_W / 2 - 1, 48)
+	r_cline.position     = Vector2(CLIP_X + CLIP_W / 2 - 1, 54)
 	r_cline.size         = Vector2(2, CLIP_H + 12)
 	r_cline.mouse_filter = MOUSE_FILTER_IGNORE
 	r_cline.z_index      = 6
@@ -3974,7 +4182,7 @@ func _build_shop_screen() -> void:
 
 	var r_lfade := ColorRect.new()
 	r_lfade.color        = Color(0.03, 0.03, 0.09, 0.76)
-	r_lfade.position     = Vector2(CLIP_X, 54)
+	r_lfade.position     = Vector2(CLIP_X, 60)
 	r_lfade.size         = Vector2(52, CLIP_H)
 	r_lfade.mouse_filter = MOUSE_FILTER_IGNORE
 	r_lfade.z_index      = 4
@@ -3982,7 +4190,7 @@ func _build_shop_screen() -> void:
 
 	var r_rfade := ColorRect.new()
 	r_rfade.color        = Color(0.03, 0.03, 0.09, 0.76)
-	r_rfade.position     = Vector2(CLIP_X + CLIP_W - 52, 54)
+	r_rfade.position     = Vector2(CLIP_X + CLIP_W - 52, 60)
 	r_rfade.size         = Vector2(52, CLIP_H)
 	r_rfade.mouse_filter = MOUSE_FILTER_IGNORE
 	r_rfade.z_index      = 4
@@ -3998,8 +4206,8 @@ func _build_shop_screen() -> void:
 
 	# ── Spin button ───────────────────────────────────────────────────────────────
 	_relic_spin_btn = Button.new()
-	_relic_spin_btn.text       = "💎  Spin  —  ★ 200"
-	_relic_spin_btn.position   = Vector2((1280 - 340) / 2, 252)
+	_relic_spin_btn.text       = ""
+	_relic_spin_btn.position   = Vector2((1280 - 340) / 2, 258)
 	_relic_spin_btn.size       = Vector2(340, 56)
 	_relic_spin_btn.focus_mode = FOCUS_NONE
 	_relic_spin_btn.add_theme_font_override("font",           _font_bold)
@@ -4012,10 +4220,23 @@ func _build_shop_screen() -> void:
 	_relic_spin_btn.add_theme_stylebox_override("disabled", _btn_style(Color(0.22, 0.22, 0.28)))
 	_relic_spin_btn.pressed.connect(_on_relic_spin_pressed)
 	qp.add_child(_relic_spin_btn)
+	var _spin_hbox := HBoxContainer.new()
+	_spin_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	_spin_hbox.add_theme_constant_override("separation", 6)
+	_spin_hbox.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_spin_hbox.mouse_filter = MOUSE_FILTER_IGNORE
+	var _spin_coin := _make_token_coin(22)
+	_spin_coin.mouse_filter = MOUSE_FILTER_IGNORE
+	_spin_hbox.add_child(_spin_coin)
+	_relic_spin_lbl = _label("Spin  —  ★ 200", _font_bold, 20, C_WHITE)
+	_relic_spin_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_relic_spin_lbl.mouse_filter       = MOUSE_FILTER_IGNORE
+	_spin_hbox.add_child(_relic_spin_lbl)
+	_relic_spin_btn.add_child(_spin_hbox)
 
 	# ── Pool remaining label ──────────────────────────────────────────────────────
 	_relic_pool_lbl = _label("", _font_reg, 15, Color(0.60, 0.60, 0.70))
-	_relic_pool_lbl.position             = Vector2(0, 318)
+	_relic_pool_lbl.position             = Vector2(0, 324)
 	_relic_pool_lbl.size                 = Vector2(1280, 24)
 	_relic_pool_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_relic_pool_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
@@ -4027,8 +4248,8 @@ func _build_shop_screen() -> void:
 	_relic_build_result_popup(overlay)
 
 	overlay.visibility_changed.connect(func():
-		if overlay.visible and is_instance_valid(_gacha_gem_lbl):
-			_gacha_gem_lbl.text = "🔷 %d" % GameData.blue_gems
+		if overlay.visible and is_instance_valid(_gacha_gem_num_lbl):
+			_gacha_gem_num_lbl.text = "%d" % GameData.blue_gems
 		if overlay.visible:
 			_refresh_quest_token_labels()
 			_relic_refresh_spin_state()
@@ -4054,23 +4275,23 @@ func _gacha_switch_mode(mode: String) -> void:
 		var tc : Color = C_TAB_ACT if mode == "tower" else C_TAB_IDLE
 		_gacha_tab_tower_btn.add_theme_color_override("font_color", C_WHITE if mode == "tower" else C_DIM)
 		_gacha_tab_tower_btn.add_theme_stylebox_override("normal", _btn_style(tc))
-		_gacha_tab_tower_btn.add_theme_stylebox_override("hover",  _btn_style(tc.lightened(0.1)))
+		_gacha_tab_tower_btn.add_theme_stylebox_override("hover",  _btn_hover(tc))
 	if is_instance_valid(_gacha_tab_hero_btn):
 		var hc : Color = C_TAB_ACT if is_hero else C_TAB_IDLE
 		_gacha_tab_hero_btn.add_theme_color_override("font_color", C_WHITE if is_hero else C_DIM)
 		_gacha_tab_hero_btn.add_theme_stylebox_override("normal", _btn_style(hc))
-		_gacha_tab_hero_btn.add_theme_stylebox_override("hover",  _btn_style(hc.lightened(0.1)))
+		_gacha_tab_hero_btn.add_theme_stylebox_override("hover",  _btn_hover(hc))
 	if is_instance_valid(_gacha_tab_quest_btn):
 		var qc : Color = C_TAB_ACT if is_relic else C_TAB_IDLE
 		_gacha_tab_quest_btn.add_theme_color_override("font_color", C_WHITE if is_relic else C_DIM)
 		_gacha_tab_quest_btn.add_theme_stylebox_override("normal", _btn_style(qc))
-		_gacha_tab_quest_btn.add_theme_stylebox_override("hover",  _btn_style(qc.lightened(0.1)))
+		_gacha_tab_quest_btn.add_theme_stylebox_override("hover",  _btn_hover(qc))
 	# Swap gem / relic token header
 	if is_instance_valid(_gacha_gem_lbl):
 		_gacha_gem_lbl.visible = not is_relic
-		if not is_relic:
-			_gacha_gem_lbl.text = "🔷 %d" % GameData.blue_gems
-			_gacha_gem_lbl.add_theme_color_override("font_color", Color(0.50, 0.82, 1.00))
+		if not is_relic and is_instance_valid(_gacha_gem_num_lbl):
+			_gacha_gem_num_lbl.text = "%d" % GameData.blue_gems
+			_gacha_gem_num_lbl.add_theme_color_override("font_color", Color(0.50, 0.82, 1.00))
 	if is_instance_valid(_gacha_relic_coin):
 		_gacha_relic_coin.visible = is_relic
 	if is_instance_valid(_gacha_relic_tok_lbl):
@@ -4081,12 +4302,12 @@ func _gacha_switch_mode(mode: String) -> void:
 			_refresh_quest_token_labels()
 			_relic_refresh_spin_state()
 	if not is_relic:
-		if is_instance_valid(_gacha_summon_btn):
-			var c1 : int = GACHA_HERO_SUMMON_COST if is_hero else GACHA_TOWER_SUMMON_COST
-			_gacha_summon_btn.text = "✦  Summon x1    🔷 %d" % c1
-		if is_instance_valid(_gacha_summon_10_btn):
-			var c10 : int = GACHA_HERO_SUMMON_10_COST if is_hero else GACHA_TOWER_SUMMON_10_COST
-			_gacha_summon_10_btn.text = "✦✦  Summon x10  🔷 %d" % c10
+		var c1  : int = GACHA_HERO_SUMMON_COST    if is_hero else GACHA_TOWER_SUMMON_COST
+		var c10 : int = GACHA_HERO_SUMMON_10_COST if is_hero else GACHA_TOWER_SUMMON_10_COST
+		if is_instance_valid(_gacha_summon_cost_lbl):
+			_gacha_summon_cost_lbl.text = " %d" % c1
+		if is_instance_valid(_gacha_summon_10_cost_lbl):
+			_gacha_summon_10_cost_lbl.text = " %d" % c10
 		_gacha_rebuild_strip("")
 
 
@@ -4158,7 +4379,7 @@ func _gacha_make_wheel_card(tower_id: String) -> Control:
 
 	var pbg := Panel.new()
 	var pbs := StyleBoxFlat.new()
-	pbs.bg_color                  = Color(0.06, 0.06, 0.12)
+	pbs.bg_color                  = Color(0.094, 0.086, 0.071)
 	pbs.corner_radius_top_left    = 6; pbs.corner_radius_top_right    = 6
 	pbs.corner_radius_bottom_left = 6; pbs.corner_radius_bottom_right = 6
 	pbg.add_theme_stylebox_override("panel", pbs)
@@ -4317,7 +4538,7 @@ func _gacha_build_result_popup(parent: Control) -> void:
 	ok_btn.add_theme_color_override("font_color",    C_WHITE)
 	ok_btn.add_theme_stylebox_override("normal",  _btn_style(C_BTN))
 	ok_btn.add_theme_stylebox_override("hover",   _btn_style(C_BTN_HOV))
-	ok_btn.add_theme_stylebox_override("pressed", _btn_style(C_BTN.darkened(0.2)))
+	ok_btn.add_theme_stylebox_override("pressed", _btn_pressed(C_BTN))
 	ok_btn.add_theme_stylebox_override("focus",   _btn_style(C_BTN))
 	ok_btn.pressed.connect(func():
 		if is_instance_valid(_gacha_result_panel):
@@ -4422,7 +4643,7 @@ func _gacha_build_multi_panel(parent: Control) -> void:
 	collect_btn.add_theme_color_override("font_color",    C_WHITE)
 	collect_btn.add_theme_stylebox_override("normal",  _btn_style(C_BTN))
 	collect_btn.add_theme_stylebox_override("hover",   _btn_style(C_BTN_HOV))
-	collect_btn.add_theme_stylebox_override("pressed", _btn_style(C_BTN.darkened(0.2)))
+	collect_btn.add_theme_stylebox_override("pressed", _btn_pressed(C_BTN))
 	collect_btn.add_theme_stylebox_override("focus",   _btn_style(C_BTN))
 	collect_btn.pressed.connect(func():
 		if is_instance_valid(_gacha_multi_panel):
@@ -4538,30 +4759,34 @@ func _gacha_on_summon_10_pressed() -> void:
 
 
 func _gacha_flash_gems_red() -> void:
-	if not is_instance_valid(_gacha_gem_lbl):
+	if not is_instance_valid(_gacha_gem_num_lbl):
 		return
-	_gacha_gem_lbl.add_theme_color_override("font_color", C_RED)
+	_gacha_gem_num_lbl.add_theme_color_override("font_color", C_RED)
 	var tw := create_tween()
 	tw.tween_interval(0.6)
 	tw.tween_callback(func():
-		if is_instance_valid(_gacha_gem_lbl):
-			_gacha_gem_lbl.add_theme_color_override("font_color", Color(0.50, 0.82, 1.0))
+		if is_instance_valid(_gacha_gem_num_lbl):
+			_gacha_gem_num_lbl.add_theme_color_override("font_color", Color(0.50, 0.82, 1.0))
 	)
 
 
 func _gacha_disable_summon_btns() -> void:
 	if is_instance_valid(_gacha_summon_btn):    _gacha_summon_btn.disabled    = true
 	if is_instance_valid(_gacha_summon_10_btn): _gacha_summon_10_btn.disabled = true
+	if is_instance_valid(_gacha_summon_hbox):    _gacha_summon_hbox.modulate.a    = 0.45
+	if is_instance_valid(_gacha_summon_10_hbox): _gacha_summon_10_hbox.modulate.a = 0.45
 
 
 func _gacha_enable_summon_btns() -> void:
 	if is_instance_valid(_gacha_summon_btn):    _gacha_summon_btn.disabled    = false
 	if is_instance_valid(_gacha_summon_10_btn): _gacha_summon_10_btn.disabled = false
+	if is_instance_valid(_gacha_summon_hbox):    _gacha_summon_hbox.modulate.a    = 1.0
+	if is_instance_valid(_gacha_summon_10_hbox): _gacha_summon_10_hbox.modulate.a = 1.0
 
 
 func _gacha_refresh_gems() -> void:
-	if is_instance_valid(_gacha_gem_lbl):
-		_gacha_gem_lbl.text = "🔷 %d" % GameData.blue_gems
+	if is_instance_valid(_gacha_gem_num_lbl):
+		_gacha_gem_num_lbl.text = "%d" % GameData.blue_gems
 
 
 func _gacha_spin(result_id: String) -> void:
@@ -4712,6 +4937,18 @@ func _gacha_show_result(tower_id: String, old_level: int, new_level: int) -> voi
 		pop.set_ease(Tween.EASE_OUT)
 		pop.set_trans(Tween.TRANS_BACK)
 		pop.tween_property(_gacha_result_inner, "scale", Vector2(1.0, 1.0), 0.32)
+	# Auto-collect after 1.5 s
+	var auto_tw := create_tween()
+	auto_tw.tween_interval(1.5)
+	auto_tw.tween_callback(func():
+		if is_instance_valid(_gacha_result_panel) and _gacha_result_panel.visible:
+			_gacha_result_panel.visible = false
+			_gacha_spinning = false
+			_gacha_is_multi = false
+			_gacha_enable_summon_btns()
+			_refresh_tower_cards()
+			_refresh_hero_cards()
+	)
 
 
 func _gacha_show_multi_result(level_ups: Array) -> void:
@@ -4759,6 +4996,18 @@ func _gacha_show_multi_result(level_ups: Array) -> void:
 	pop.set_ease(Tween.EASE_OUT)
 	pop.set_trans(Tween.TRANS_BACK)
 	pop.tween_property(panel, "scale", Vector2(1.0, 1.0), 0.35)
+	# Auto-collect after 2 s
+	var auto_tw := create_tween()
+	auto_tw.tween_interval(2.0)
+	auto_tw.tween_callback(func():
+		if is_instance_valid(_gacha_multi_panel) and _gacha_multi_panel.visible:
+			_gacha_multi_panel.visible = false
+			_gacha_spinning = false
+			_gacha_is_multi = false
+			_gacha_enable_summon_btns()
+			_refresh_tower_cards()
+			_refresh_hero_cards()
+	)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # RELIC WHEEL (shop tab)
@@ -4797,12 +5046,8 @@ func _relic_make_wheel_card(relic_id: String, grayed: bool = false) -> Control:
 	ibg.mouse_filter = MOUSE_FILTER_IGNORE
 	card.add_child(ibg)
 
-	var icon_lbl := _label(def.get("icon", "?"), _font_bold, 34, rcol)
-	icon_lbl.position             = Vector2(0, 4)
-	icon_lbl.size                 = Vector2(ICR * 2, ICR * 2)
-	icon_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	icon_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	icon_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	var icon_lbl := _mk_relic_icon(relic_id, ICR * 2)
+	icon_lbl.position = Vector2(0, 0)
 	ibg.add_child(icon_lbl)
 
 	var name_lbl := _label(def.get("name", relic_id), _font_bold, 11, C_WHITE if not grayed else Color(0.45, 0.45, 0.50))
@@ -4855,13 +5100,15 @@ func _relic_refresh_spin_state() -> void:
 		_relic_pool_lbl.text = "✔  All 10 relics collected!"
 		if is_instance_valid(_relic_spin_btn):
 			_relic_spin_btn.disabled = true
-			_relic_spin_btn.text     = "All Relics Collected"
+		if is_instance_valid(_relic_spin_lbl):
+			_relic_spin_lbl.text = "All Relics Collected"
 	else:
 		_relic_pool_lbl.text = "%d relic%s remaining in pool  —  Equal chance for each" % [pool.size(), "s" if pool.size() != 1 else ""]
 		if is_instance_valid(_relic_spin_btn):
 			var can_spin : bool = GameData.quest_tokens >= 200 and not _relic_spinning
 			_relic_spin_btn.disabled = not can_spin
-			_relic_spin_btn.text     = "💎  Spin  —  ★ 200"
+		if is_instance_valid(_relic_spin_lbl):
+			_relic_spin_lbl.text = "Spin  —  ★ 200"
 
 
 func _on_relic_spin_pressed() -> void:
@@ -4945,13 +5192,13 @@ func _relic_show_result(relic_id: String) -> void:
 		return
 	var name_l : Label = _relic_result_pop.get_meta("name_lbl", null)
 	var desc_l : Label = _relic_result_pop.get_meta("desc_lbl", null)
-	var icon_l : Label = _relic_result_pop.get_meta("icon_lbl", null)
-	var ibg_p  : Panel = _relic_result_pop.get_meta("icon_bg",  null)
+	var _icon_host = _relic_result_pop.get_meta("icon_lbl", null)
+	var icon_l : TextureRect = _icon_host.get_meta("tr", null) if is_instance_valid(_icon_host) else null
+	var ibg_p  : Panel       = _relic_result_pop.get_meta("icon_bg",  null)
 	if name_l: name_l.text = def.get("name", relic_id)
 	if desc_l: desc_l.text = GameData.get_relic_effect_text(relic_id, 1)
-	if icon_l: icon_l.text = def.get("icon", "?")
+	if icon_l: icon_l.texture = _load_relic_tex(relic_id)
 	var rcol : Color = def.get("color", C_WHITE)
-	if icon_l: icon_l.add_theme_color_override("font_color", rcol)
 	if ibg_p:
 		var ibs2 := StyleBoxFlat.new()
 		ibs2.bg_color = Color(rcol.r * 0.20, rcol.g * 0.20, rcol.b * 0.20)
@@ -5007,12 +5254,8 @@ func _relic_build_result_popup(parent: Control) -> void:
 	panel.add_child(icon_bg)
 	panel.set_meta("icon_bg", icon_bg)
 
-	var icon_lbl := _label("?", _font_bold, 58, C_WHITE)
-	icon_lbl.position             = Vector2(0, 6)
-	icon_lbl.size                 = Vector2(IBR2 * 2, IBR2 * 2)
-	icon_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	icon_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	icon_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	var icon_lbl := _mk_relic_icon("", IBR2 * 2)
+	icon_lbl.position = Vector2(0, 0)
 	icon_bg.add_child(icon_lbl)
 	panel.set_meta("icon_lbl", icon_lbl)
 
@@ -5062,7 +5305,7 @@ func _relic_build_result_popup(parent: Control) -> void:
 func _build_relics_screen() -> void:
 	var overlay := Panel.new()
 	var bg_s := StyleBoxFlat.new()
-	bg_s.bg_color = Color(0.03, 0.03, 0.09)
+	bg_s.bg_color = Color(0.082, 0.075, 0.063)
 	overlay.add_theme_stylebox_override("panel", bg_s)
 	overlay.position     = Vector2.ZERO
 	overlay.size         = Vector2(1280, 720)
@@ -5155,10 +5398,10 @@ func _build_relics_screen() -> void:
 	back_btn.add_theme_font_override("font",           _font_bold)
 	back_btn.add_theme_font_size_override("font_size", 16)
 	back_btn.add_theme_color_override("font_color",    C_WHITE)
-	back_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.22, 0.22, 0.28)))
-	back_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.30, 0.30, 0.38)))
-	back_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.16, 0.16, 0.20)))
-	back_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.22, 0.22, 0.28)))
+	back_btn.add_theme_stylebox_override("normal",  _btn_tertiary())
+	back_btn.add_theme_stylebox_override("hover",   _btn_tertiary_hover())
+	back_btn.add_theme_stylebox_override("pressed", _btn_tertiary_pressed())
+	back_btn.add_theme_stylebox_override("focus",   _btn_tertiary())
 	back_btn.pressed.connect(func():
 		overlay.visible           = false
 		_game_over_screen.visible = true
@@ -5243,12 +5486,8 @@ func _relic_build_info_popup(parent: Control) -> void:
 	icon_clip.mouse_filter   = MOUSE_FILTER_IGNORE
 	panel.add_child(icon_clip)
 
-	var icon_lbl := _label("?", _font_bold, 38, C_WHITE)
-	icon_lbl.position             = Vector2(0, 0)
-	icon_lbl.size                 = Vector2(ICON_SIZE, ICON_SIZE)
-	icon_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	icon_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	icon_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+	var icon_lbl := _mk_relic_icon("", ICON_SIZE)
+	icon_lbl.position = Vector2(0, 0)
 	icon_clip.add_child(icon_lbl)
 	container.set_meta("icon_lbl", icon_lbl)
 
@@ -5297,13 +5536,13 @@ func _relic_show_info(relic_id: String, collected: bool) -> void:
 	var def  : Dictionary = GameData.get_relic_def(relic_id)
 	if not is_instance_valid(_relic_info_popup):
 		return
-	var icon_l : Label = _relic_info_popup.get_meta("icon_lbl", null)
-	var name_l : Label = _relic_info_popup.get_meta("name_lbl", null)
-	var desc_l : Label = _relic_info_popup.get_meta("desc_lbl", null)
-	var rcol   : Color = def.get("color", C_WHITE) if collected else Color(0.45, 0.45, 0.50)
+	var _icon_host2 = _relic_info_popup.get_meta("icon_lbl", null)
+	var icon_l : TextureRect = _icon_host2.get_meta("tr", null) if is_instance_valid(_icon_host2) else null
+	var name_l : Label       = _relic_info_popup.get_meta("name_lbl", null)
+	var desc_l : Label       = _relic_info_popup.get_meta("desc_lbl", null)
+	var rcol   : Color       = def.get("color", C_WHITE) if collected else Color(0.45, 0.45, 0.50)
 	if icon_l:
-		icon_l.text = def.get("icon", "?")
-		icon_l.add_theme_color_override("font_color", rcol)
+		icon_l.texture = _load_relic_tex(relic_id)
 	if name_l:
 		name_l.text = def.get("name", relic_id)
 		name_l.add_theme_color_override("font_color", C_WHITE if collected else Color(0.65, 0.65, 0.70))
@@ -5356,12 +5595,8 @@ func _relic_make_grid_card(relic_id: String, collected: bool) -> Control:
 	ibg.mouse_filter = MOUSE_FILTER_IGNORE
 	container.add_child(ibg)
 
-	var icon_l := _label(def.get("icon", "?"), _font_bold, 28, rcol)
-	icon_l.position             = Vector2(0, 3)
-	icon_l.size                 = Vector2(GCR * 2, GCR * 2)
-	icon_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	icon_l.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	icon_l.mouse_filter         = MOUSE_FILTER_IGNORE
+	var icon_l := _mk_relic_icon(relic_id, GCR * 2)
+	icon_l.position = Vector2(0, 3)
 	ibg.add_child(icon_l)
 
 	# Name
@@ -5412,8 +5647,8 @@ func _relic_make_grid_card(relic_id: String, collected: bool) -> Control:
 		upg_btn.add_theme_font_size_override("font_size", 10)
 		upg_btn.add_theme_color_override("font_color",    C_WHITE)
 		upg_btn.add_theme_stylebox_override("normal",   _btn_style(upg_col))
-		upg_btn.add_theme_stylebox_override("hover",    _btn_style(upg_col.lightened(0.15)))
-		upg_btn.add_theme_stylebox_override("pressed",  _btn_style(upg_col.darkened(0.2)))
+		upg_btn.add_theme_stylebox_override("hover",    _btn_hover(upg_col))
+		upg_btn.add_theme_stylebox_override("pressed",  _btn_pressed(upg_col))
 		upg_btn.add_theme_stylebox_override("focus",    _btn_style(upg_col))
 		upg_btn.add_theme_stylebox_override("disabled", _btn_style(Color(0.16, 0.16, 0.20)))
 		upg_btn.pressed.connect(func(): _relic_upgrade(relic_id))
@@ -5534,12 +5769,8 @@ func _build_relic_detail_popup(parent: Control) -> void:
 	panel.add_child(icon_bg)
 	panel.set_meta("icon_bg", icon_bg)
 
-	_relic_detail_icon = _label("?", _font_bold, 60, C_WHITE)
-	_relic_detail_icon.position             = Vector2(0, 6)
-	_relic_detail_icon.size                 = Vector2(DR * 2, DR * 2)
-	_relic_detail_icon.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_relic_detail_icon.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	_relic_detail_icon.mouse_filter         = MOUSE_FILTER_IGNORE
+	_relic_detail_icon = _mk_relic_icon("", DR * 2)
+	_relic_detail_icon.position = Vector2(0, 0)
 	icon_bg.add_child(_relic_detail_icon)
 
 	# Right column: name + level + upgrade-to label
@@ -5653,10 +5884,10 @@ func _build_relic_detail_popup(parent: Control) -> void:
 	close_btn.add_theme_font_override("font",           _font_bold)
 	close_btn.add_theme_font_size_override("font_size", 18)
 	close_btn.add_theme_color_override("font_color",    C_WHITE)
-	close_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.22, 0.22, 0.28)))
-	close_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.30, 0.30, 0.38)))
-	close_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.16, 0.16, 0.20)))
-	close_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.22, 0.22, 0.28)))
+	close_btn.add_theme_stylebox_override("normal",  _btn_tertiary())
+	close_btn.add_theme_stylebox_override("hover",   _btn_tertiary_hover())
+	close_btn.add_theme_stylebox_override("pressed", _btn_tertiary_pressed())
+	close_btn.add_theme_stylebox_override("focus",   _btn_tertiary())
 	close_btn.pressed.connect(func():
 		panel.visible = false
 		if is_instance_valid(_relic_detail_backdrop):
@@ -5697,8 +5928,8 @@ func _relic_refresh_detail() -> void:
 		icon_bg.add_theme_stylebox_override("panel", ibs)
 
 	if _relic_detail_icon:
-		_relic_detail_icon.text = def.get("icon", "?")
-		_relic_detail_icon.add_theme_color_override("font_color", rcol)
+		var _dtr : TextureRect = _relic_detail_icon.get_meta("tr", null)
+		if _dtr: _dtr.texture = _load_relic_tex(_relic_detail_id)
 	if _relic_detail_name:
 		_relic_detail_name.text = def.get("name", id)
 	if _relic_detail_level:
@@ -5899,10 +6130,10 @@ func _build_world_map_screen() -> void:
 	back_btn.add_theme_font_override("font",           _font_bold)
 	back_btn.add_theme_font_size_override("font_size", 18)
 	back_btn.add_theme_color_override("font_color",    C_WHITE)
-	back_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.20, 0.20, 0.26)))
-	back_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.28, 0.28, 0.36)))
-	back_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.14, 0.14, 0.18)))
-	back_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.20, 0.20, 0.26)))
+	back_btn.add_theme_stylebox_override("normal",  _btn_tertiary())
+	back_btn.add_theme_stylebox_override("hover",   _btn_tertiary_hover())
+	back_btn.add_theme_stylebox_override("pressed", _btn_tertiary_pressed())
+	back_btn.add_theme_stylebox_override("focus",   _btn_tertiary())
 	back_btn.pressed.connect(func():
 		overlay.visible           = false
 		_game_over_screen.visible = true
@@ -6044,10 +6275,10 @@ func _build_world_detail_screen() -> void:
 	ds_back.add_theme_font_override("font",           _font_bold)
 	ds_back.add_theme_font_size_override("font_size", 17)
 	ds_back.add_theme_color_override("font_color",    C_WHITE)
-	ds_back.add_theme_stylebox_override("normal",  _btn_style(Color(0.20, 0.20, 0.26)))
-	ds_back.add_theme_stylebox_override("hover",   _btn_style(Color(0.28, 0.28, 0.36)))
-	ds_back.add_theme_stylebox_override("pressed", _btn_style(Color(0.14, 0.14, 0.18)))
-	ds_back.add_theme_stylebox_override("focus",   _btn_style(Color(0.20, 0.20, 0.26)))
+	ds_back.add_theme_stylebox_override("normal",  _btn_tertiary())
+	ds_back.add_theme_stylebox_override("hover",   _btn_tertiary_hover())
+	ds_back.add_theme_stylebox_override("pressed", _btn_tertiary_pressed())
+	ds_back.add_theme_stylebox_override("focus",   _btn_tertiary())
 	ds_back.pressed.connect(func():
 		ds.visible = false
 	)
@@ -6062,10 +6293,10 @@ func _build_world_detail_screen() -> void:
 	ds_play.add_theme_font_override("font",           _font_bold)
 	ds_play.add_theme_font_size_override("font_size", 20)
 	ds_play.add_theme_color_override("font_color",    C_WHITE)
-	ds_play.add_theme_stylebox_override("normal",  _btn_style(C_BTN))
-	ds_play.add_theme_stylebox_override("hover",   _btn_style(C_BTN_HOV))
-	ds_play.add_theme_stylebox_override("pressed", _btn_style(C_BTN.darkened(0.25)))
-	ds_play.add_theme_stylebox_override("focus",   _btn_style(C_BTN))
+	ds_play.add_theme_stylebox_override("normal",  _btn_primary())
+	ds_play.add_theme_stylebox_override("hover",   _btn_primary_hover())
+	ds_play.add_theme_stylebox_override("pressed", _btn_primary_pressed())
+	ds_play.add_theme_stylebox_override("focus",   _btn_primary())
 	ds_play.pressed.connect(func():
 		ds.visible = false
 		var world_to_load : int = _wm_selected_world
@@ -6194,7 +6425,7 @@ func _on_world_node_pressed(world_num: int) -> void:
 	# Minimap
 	var wpath   : Array = GameData.get_world_path(world_num)
 	var wisland : Rect2 = GameData.get_world_island(world_num)
-	_wm_detail_minimap.call("setup", wpath, wclr, wisland)
+	_wm_detail_minimap.call("setup", wpath, wclr, wisland, world_num)
 
 	# Modifier rows
 	for child in _wm_detail_mod_box.get_children():
@@ -6225,7 +6456,10 @@ func _refresh_world_map() -> void:
 	# Reset selection state when the map is refreshed (e.g. after debug unlock)
 	if is_instance_valid(_wm_detail_screen) and _wm_detail_screen.visible:
 		_wm_detail_screen.visible = false
-	_wm_canvas.selected_world = -1
+	# Auto-select the highest attackable (active) world on open
+	var _active_w : int = mini(GameData.max_world_unlocked, 10)
+	_wm_selected_world = _active_w
+	_wm_canvas.selected_world = _active_w - 1
 	# Auto-unlock world 2 when the player clears all 10 stages of world 1
 	if GameData.all_time_highest_stage >= 10 and GameData.max_world_unlocked < 2:
 		GameData.max_world_unlocked = 2
@@ -6311,7 +6545,7 @@ func _build_heroes_screen() -> void:
 	# ── Outer overlay ──────────────────────────────────────────────────────────
 	var overlay := Panel.new()
 	var bg_s := StyleBoxFlat.new()
-	bg_s.bg_color = Color(0.04, 0.04, 0.10)
+	bg_s.bg_color = Color(0.094, 0.086, 0.071)
 	overlay.add_theme_stylebox_override("panel", bg_s)
 	overlay.position     = Vector2.ZERO
 	overlay.size         = Vector2(1280, 720)
@@ -6460,10 +6694,10 @@ func _build_heroes_screen() -> void:
 	back_btn.add_theme_font_override("font",           _font_bold)
 	back_btn.add_theme_font_size_override("font_size", 16)
 	back_btn.add_theme_color_override("font_color",    C_WHITE)
-	back_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.14, 0.14, 0.24)))
-	back_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.22, 0.22, 0.36)))
-	back_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.10, 0.10, 0.18)))
-	back_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.14, 0.14, 0.24)))
+	back_btn.add_theme_stylebox_override("normal",  _btn_tertiary())
+	back_btn.add_theme_stylebox_override("hover",   _btn_tertiary_hover())
+	back_btn.add_theme_stylebox_override("pressed", _btn_tertiary_pressed())
+	back_btn.add_theme_stylebox_override("focus",   _btn_tertiary())
 	back_btn.pressed.connect(func():
 		overlay.visible = false
 		_game_over_screen.visible = true
@@ -7087,10 +7321,10 @@ func _hero_build_talent_panel(parent: Control, parent_pw: int, parent_ph: int) -
 	done_btn.add_theme_font_override("font",           _font_bold)
 	done_btn.add_theme_font_size_override("font_size", 15)
 	done_btn.add_theme_color_override("font_color",    C_WHITE)
-	done_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.22, 0.22, 0.28)))
-	done_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.30, 0.30, 0.38)))
-	done_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.16, 0.16, 0.20)))
-	done_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.22, 0.22, 0.28)))
+	done_btn.add_theme_stylebox_override("normal",  _btn_tertiary())
+	done_btn.add_theme_stylebox_override("hover",   _btn_tertiary_hover())
+	done_btn.add_theme_stylebox_override("pressed", _btn_tertiary_pressed())
+	done_btn.add_theme_stylebox_override("focus",   _btn_tertiary())
 	done_btn.pressed.connect(func(): dim.visible = false)
 	panel.add_child(done_btn)
 
@@ -7192,7 +7426,7 @@ func _build_towers_screen() -> void:
 	# ── Outer overlay ──────────────────────────────────────────────────────────
 	var overlay := Panel.new()
 	var bg_s := StyleBoxFlat.new()
-	bg_s.bg_color = Color(0.04, 0.04, 0.10)
+	bg_s.bg_color = Color(0.094, 0.086, 0.071)
 	overlay.add_theme_stylebox_override("panel", bg_s)
 	overlay.position     = Vector2.ZERO
 	overlay.size         = Vector2(1280, 720)
@@ -7335,10 +7569,10 @@ func _build_towers_screen() -> void:
 	back_btn.add_theme_font_override("font",           _font_bold)
 	back_btn.add_theme_font_size_override("font_size", 16)
 	back_btn.add_theme_color_override("font_color",    C_WHITE)
-	back_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.22, 0.22, 0.28)))
-	back_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.30, 0.30, 0.38)))
-	back_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.16, 0.16, 0.20)))
-	back_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.22, 0.22, 0.28)))
+	back_btn.add_theme_stylebox_override("normal",  _btn_tertiary())
+	back_btn.add_theme_stylebox_override("hover",   _btn_tertiary_hover())
+	back_btn.add_theme_stylebox_override("pressed", _btn_tertiary_pressed())
+	back_btn.add_theme_stylebox_override("focus",   _btn_tertiary())
 	back_btn.pressed.connect(func():
 		overlay.visible = false
 		_game_over_screen.visible = true
@@ -7865,7 +8099,7 @@ func _refresh_tower_cards() -> void:
 func _build_daily_quests_screen() -> void:
 	var overlay := Panel.new()
 	var bg_s := StyleBoxFlat.new()
-	bg_s.bg_color = Color(0.04, 0.04, 0.10)
+	bg_s.bg_color = Color(0.094, 0.086, 0.071)
 	overlay.add_theme_stylebox_override("panel", bg_s)
 	overlay.position     = Vector2.ZERO
 	overlay.size         = Vector2(1280, 720)
@@ -8068,8 +8302,8 @@ func _build_daily_quests_screen() -> void:
 	_dq_btn2.add_theme_font_size_override("font_size", 18)
 	_dq_btn2.add_theme_color_override("font_color",    C_WHITE)
 	_dq_btn2.add_theme_stylebox_override("normal",  _btn_style(_q2_col))
-	_dq_btn2.add_theme_stylebox_override("hover",   _btn_style(_q2_col.lightened(0.15)))
-	_dq_btn2.add_theme_stylebox_override("pressed", _btn_style(_q2_col.darkened(0.25)))
+	_dq_btn2.add_theme_stylebox_override("hover",   _btn_hover(_q2_col))
+	_dq_btn2.add_theme_stylebox_override("pressed", _btn_pressed(_q2_col))
 	_dq_btn2.add_theme_stylebox_override("focus",   _btn_style(_q2_col))
 	_dq_btn2.pressed.connect(func():
 		if GameData.dq_mutated_complete:
@@ -8145,8 +8379,8 @@ func _build_daily_quests_screen() -> void:
 	_dq_btn3.add_theme_font_size_override("font_size", 18)
 	_dq_btn3.add_theme_color_override("font_color",    C_WHITE)
 	_dq_btn3.add_theme_stylebox_override("normal",  _btn_style(_q3_col))
-	_dq_btn3.add_theme_stylebox_override("hover",   _btn_style(_q3_col.lightened(0.15)))
-	_dq_btn3.add_theme_stylebox_override("pressed", _btn_style(_q3_col.darkened(0.25)))
+	_dq_btn3.add_theme_stylebox_override("hover",   _btn_hover(_q3_col))
+	_dq_btn3.add_theme_stylebox_override("pressed", _btn_pressed(_q3_col))
 	_dq_btn3.add_theme_stylebox_override("focus",   _btn_style(_q3_col))
 	_dq_btn3.pressed.connect(func():
 		if GameData.dq_sell_complete:
@@ -8173,10 +8407,10 @@ func _build_daily_quests_screen() -> void:
 	back_btn.add_theme_font_override("font",           _font_bold)
 	back_btn.add_theme_font_size_override("font_size", 18)
 	back_btn.add_theme_color_override("font_color",    C_WHITE)
-	back_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.22, 0.22, 0.28)))
-	back_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.32, 0.32, 0.40)))
-	back_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.14, 0.14, 0.18)))
-	back_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.22, 0.22, 0.28)))
+	back_btn.add_theme_stylebox_override("normal",  _btn_tertiary())
+	back_btn.add_theme_stylebox_override("hover",   _btn_tertiary_hover())
+	back_btn.add_theme_stylebox_override("pressed", _btn_tertiary_pressed())
+	back_btn.add_theme_stylebox_override("focus",   _btn_tertiary())
 	back_btn.pressed.connect(func():
 		overlay.visible           = false
 		_game_over_screen.visible = true
@@ -8211,8 +8445,8 @@ func _refresh_daily_quests_screen() -> void:
 			var col2 := Color(0.08, 0.38, 0.14) if GameData.dq_mutated_complete else Color(0.48, 0.20, 0.06)
 			_dq_btn2.text = "✦  Claim" if GameData.dq_mutated_complete else "▶  Start"
 			_dq_btn2.add_theme_stylebox_override("normal",  _btn_style(col2))
-			_dq_btn2.add_theme_stylebox_override("hover",   _btn_style(col2.lightened(0.15)))
-			_dq_btn2.add_theme_stylebox_override("pressed", _btn_style(col2.darkened(0.25)))
+			_dq_btn2.add_theme_stylebox_override("hover",   _btn_hover(col2))
+			_dq_btn2.add_theme_stylebox_override("pressed", _btn_pressed(col2))
 			_dq_btn2.add_theme_stylebox_override("focus",   _btn_style(col2))
 	if is_instance_valid(_dq_check2):
 		_dq_check2.visible = GameData.dq_mutated_claimed
@@ -8228,8 +8462,8 @@ func _refresh_daily_quests_screen() -> void:
 			var col3 := Color(0.08, 0.38, 0.14) if GameData.dq_sell_complete else Color(0.18, 0.38, 0.18)
 			_dq_btn3.text = "✦  Claim" if GameData.dq_sell_complete else "▶  Start"
 			_dq_btn3.add_theme_stylebox_override("normal",  _btn_style(col3))
-			_dq_btn3.add_theme_stylebox_override("hover",   _btn_style(col3.lightened(0.15)))
-			_dq_btn3.add_theme_stylebox_override("pressed", _btn_style(col3.darkened(0.25)))
+			_dq_btn3.add_theme_stylebox_override("hover",   _btn_hover(col3))
+			_dq_btn3.add_theme_stylebox_override("pressed", _btn_pressed(col3))
 			_dq_btn3.add_theme_stylebox_override("focus",   _btn_style(col3))
 	if is_instance_valid(_dq_check3):
 		_dq_check3.visible = GameData.dq_sell_claimed
@@ -8299,8 +8533,8 @@ func _build_victory_screen() -> void:
 		btn.add_theme_color_override("font_color",    C_WHITE)
 		var c := btn_defs[i][1] as Color
 		btn.add_theme_stylebox_override("normal",  _btn_style(c))
-		btn.add_theme_stylebox_override("hover",   _btn_style(c.lightened(0.10)))
-		btn.add_theme_stylebox_override("pressed", _btn_style(c.darkened(0.10)))
+		btn.add_theme_stylebox_override("hover",   _btn_hover(c))
+		btn.add_theme_stylebox_override("pressed", _btn_pressed(c))
 		btn.add_theme_stylebox_override("focus",   _btn_style(c))
 		var capture_i := i
 		btn.pressed.connect(func(): _on_victory_btn(capture_i))
@@ -8496,8 +8730,8 @@ func _rebuild_recipe_cards() -> void:
 		craft_btn.add_theme_font_size_override("font_size", 14)
 		craft_btn.add_theme_color_override("font_color",    C_WHITE)
 		craft_btn.add_theme_stylebox_override("normal",  _btn_style(C_CRAFT))
-		craft_btn.add_theme_stylebox_override("hover",   _btn_style(C_CRAFT.lightened(0.15)))
-		craft_btn.add_theme_stylebox_override("pressed", _btn_style(C_CRAFT.darkened(0.15)))
+		craft_btn.add_theme_stylebox_override("hover",   _btn_hover(C_CRAFT))
+		craft_btn.add_theme_stylebox_override("pressed", _btn_pressed(C_CRAFT))
 		craft_btn.add_theme_stylebox_override("focus",   _btn_style(C_CRAFT))
 		var capture_result_id := (_cached_fusions[fi]["recipe"]["result"]) as String
 		craft_btn.pressed.connect(func():
@@ -9105,22 +9339,22 @@ func _build_settings_gear() -> void:
 	gear_btn.add_theme_stylebox_override("focus",   gs)
 	add_child(gear_btn)
 
-	# Transparent click-catcher to dismiss gear menu on outside click
+	# Semi-transparent backdrop — dims game and blocks clicks outside the panel
 	var catcher := ColorRect.new()
-	catcher.color        = Color(0, 0, 0, 0)
+	catcher.color        = Color(0, 0, 0, 0.55)
 	catcher.position     = Vector2.ZERO
 	catcher.size         = Vector2(1280, 720)
 	catcher.z_index      = 90
-	catcher.mouse_filter = MOUSE_FILTER_PASS
+	catcher.mouse_filter = MOUSE_FILTER_STOP
 	catcher.visible      = false
 	add_child(catcher)
 
-	# Settings popup menu
+	# Settings popup menu — centered
 	_gear_menu = Panel.new()
 	var menu : Panel = _gear_menu
 	menu.visible  = false
 	menu.z_index  = 91
-	menu.position = Vector2(1280 - 200, 720 - 210)
+	menu.position = Vector2((1280 - 188) * 0.5, (720 - 196) * 0.5)
 	menu.size     = Vector2(188, 196)
 	var ms := StyleBoxFlat.new()
 	ms.bg_color = Color(0.10, 0.10, 0.16, 0.97)
@@ -9178,6 +9412,7 @@ func _build_settings_gear() -> void:
 	leave_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.32, 0.07, 0.07)))
 	leave_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.45, 0.10, 0.10)))
 	leave_btn.pressed.connect(func():
+		Engine.time_scale = 1.0
 		menu.visible = false
 		if is_instance_valid(_loot_panel) and _loot_panel.visible:
 			_loot_panel.visible = false
@@ -9191,9 +9426,11 @@ func _build_settings_gear() -> void:
 	catcher.gui_input.connect(func(event):
 		if event is InputEventMouseButton and event.pressed:
 			menu.visible = false
-			catcher.visible = false
 	)
-	menu.visibility_changed.connect(func(): catcher.visible = menu.visible)
+	menu.visibility_changed.connect(func():
+		catcher.visible = menu.visible
+		Engine.time_scale = 0.0 if menu.visible else _speed_factor
+	)
 
 	gear_btn.visible = true   # game starts in active gameplay; signals hide it when overlays open
 	gear_btn.pressed.connect(func(): menu.visible = not menu.visible)
@@ -9291,11 +9528,19 @@ func _flat(bg: Color, corner: int) -> StyleBoxFlat:
 	s.corner_radius_top_right    = corner
 	s.corner_radius_bottom_left  = corner
 	s.corner_radius_bottom_right = corner
+	s.anti_aliasing              = true
+	s.anti_aliasing_size         = 1.0
 	return s
 
 
 func _rounded(bg: Color) -> StyleBoxFlat:
-	return _flat(bg, RADIUS)
+	var s := _flat(bg, RADIUS)
+	s.border_width_top    = 1
+	s.border_width_left   = 1
+	s.border_width_right  = 1
+	s.border_width_bottom = 2
+	s.border_color        = Color(C_GOLD.r, C_GOLD.g, C_GOLD.b, 0.28)
+	return s
 
 
 func _make_arrow_icon() -> Control:
@@ -9317,20 +9562,199 @@ func _make_arrow_icon() -> Control:
 
 
 func _btn_style(bg: Color) -> StyleBoxFlat:
-	var s := _rounded(bg)
-	s.content_margin_left   = 14
-	s.content_margin_right  = 14
-	s.content_margin_top    = 8
-	s.content_margin_bottom = 8
-	# Top border brighter (highlight edge), bottom slightly thicker (shadow edge)
+	var s := _flat(bg, RADIUS)
+	s.anti_aliasing         = true
+	s.anti_aliasing_size    = 1.0
+	s.content_margin_left   = 16
+	s.content_margin_right  = 16
+	s.content_margin_top    = 9
+	s.content_margin_bottom = 9
 	s.border_width_left     = 1
 	s.border_width_right    = 1
 	s.border_width_top      = 2
-	s.border_width_bottom   = 2
-	s.border_color          = Color(1.0, 1.0, 1.0, 0.30)
-	# Drop shadow to give a raised / 3D feel
-	s.shadow_color          = Color(0.0, 0.0, 0.0, 0.50)
-	s.shadow_size           = 3
+	s.border_width_bottom   = 3
+	s.border_color          = Color(C_GOLD.r, C_GOLD.g, C_GOLD.b, 0.55)
+	s.shadow_color          = Color(0.0, 0.0, 0.0, 0.70)
+	s.shadow_size           = 6
+	s.shadow_offset         = Vector2(0.0, 3.0)
+	return s
+
+
+func _load_blue_gem_tex() -> Texture2D:
+	var p := "res://assets/blue_gem.svg"
+	if ResourceLoader.exists(p):
+		return load(p) as Texture2D
+	return null
+
+func _mk_blue_gem_icon(sz: float) -> TextureRect:
+	var tr := TextureRect.new()
+	tr.custom_minimum_size        = Vector2(sz, sz)
+	tr.size                       = Vector2(sz, sz)
+	tr.stretch_mode               = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	tr.expand_mode                = 1  # EXPAND_IGNORE: minimum size 0, won't force native texture size
+	tr.size_flags_horizontal      = Control.SIZE_SHRINK_CENTER
+	tr.size_flags_vertical        = Control.SIZE_SHRINK_CENTER
+	tr.mouse_filter               = MOUSE_FILTER_IGNORE
+	var tex := _load_blue_gem_tex()
+	if tex:
+		tr.texture = tex
+	return tr
+
+
+func _mk_summon_btn_content(btn: Button, left_text: String, cost: int) -> Array:
+	var hbox := HBoxContainer.new()
+	hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	hbox.add_theme_constant_override("separation", 5)
+	hbox.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	hbox.mouse_filter = MOUSE_FILTER_IGNORE
+	var lbl := Label.new()
+	lbl.text = left_text
+	lbl.add_theme_font_override("font", _font_bold)
+	lbl.add_theme_font_size_override("font_size", 19)
+	lbl.add_theme_color_override("font_color", C_WHITE)
+	lbl.mouse_filter = MOUSE_FILTER_IGNORE
+	hbox.add_child(lbl)
+	hbox.add_child(_mk_blue_gem_icon(16.0))
+	var cost_lbl := Label.new()
+	cost_lbl.text = " %d" % cost
+	cost_lbl.add_theme_font_override("font", _font_bold)
+	cost_lbl.add_theme_font_size_override("font_size", 19)
+	cost_lbl.add_theme_color_override("font_color", C_WHITE)
+	cost_lbl.mouse_filter = MOUSE_FILTER_IGNORE
+	hbox.add_child(cost_lbl)
+	btn.add_child(hbox)
+	return [hbox, cost_lbl]
+
+
+func _load_relic_tex(rid: String) -> Texture2D:
+	var p := "res://assets/relics/" + rid + ".svg"
+	if ResourceLoader.exists(p):
+		return load(p) as Texture2D
+	return null
+
+func _mk_relic_icon(rid: String, sz: float) -> Control:
+	var host := Control.new()
+	host.custom_minimum_size = Vector2(sz, sz)
+	host.size         = Vector2(sz, sz)
+	host.mouse_filter = MOUSE_FILTER_IGNORE
+
+	var tr := TextureRect.new()
+	tr.custom_minimum_size = Vector2(sz, sz)
+	tr.size         = Vector2(sz, sz)
+	tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	tr.expand_mode  = TextureRect.EXPAND_FIT_WIDTH_PROPORTIONAL
+	tr.mouse_filter = MOUSE_FILTER_IGNORE
+	if rid != "":
+		var tex := _load_relic_tex(rid)
+		if tex:
+			tr.texture = tex
+	host.add_child(tr)
+	host.set_meta("tr", tr)
+
+	return host
+
+
+func _btn_hover(bg: Color) -> StyleBoxFlat:
+	var s := _btn_style(bg.lightened(0.16))
+	s.border_color  = Color(C_GOLD_HI.r, C_GOLD_HI.g, C_GOLD_HI.b, 0.88)
+	s.shadow_size   = 10
+	s.shadow_color  = Color(C_GOLD.r * 0.45, C_GOLD.g * 0.38, C_GOLD.b * 0.18, 0.72)
+	s.shadow_offset = Vector2(0.0, 3.0)
+	return s
+
+
+func _btn_pressed(bg: Color) -> StyleBoxFlat:
+	var s := _btn_style(bg.darkened(0.32))
+	s.border_color  = Color(C_GOLD.r, C_GOLD.g, C_GOLD.b, 0.22)
+	s.border_width_top    = 3
+	s.border_width_bottom = 1
+	s.shadow_size   = 0
+	s.shadow_color  = Color(0.0, 0.0, 0.0, 0.0)
+	s.shadow_offset = Vector2(0.0, 0.0)
+	return s
+
+
+# ── Semantic button system — stone + gold hierarchy ───────────────────────────
+# PRIMARY  : main actions (Start Game, Start World)  — thick gold border + glow
+# SECONDARY: navigation (nav buttons, DQ, Relics)   — muted gold + arcane hover
+# TERTIARY : low-emphasis (Back, Close, Done)        — near-transparent, faint edge
+
+func _btn_primary() -> StyleBoxFlat:
+	var s := _btn_style(C_STONE_BASE)
+	s.border_color        = Color(C_GOLD.r, C_GOLD.g, C_GOLD.b, 0.92)
+	s.border_width_top    = 2
+	s.border_width_bottom = 4
+	return s
+
+func _btn_primary_hover() -> StyleBoxFlat:
+	var s := _btn_style(C_STONE_BASE.lightened(0.10))
+	s.border_color        = Color(C_GOLD_HI.r, C_GOLD_HI.g, C_GOLD_HI.b, 1.0)
+	s.border_width_top    = 2
+	s.border_width_bottom = 4
+	s.shadow_color        = Color(C_GOLD.r * 0.50, C_GOLD.g * 0.42, C_GOLD.b * 0.20, 0.82)
+	s.shadow_size         = 14
+	s.shadow_offset       = Vector2(0.0, 4.0)
+	return s
+
+func _btn_primary_pressed() -> StyleBoxFlat:
+	var s := _btn_style(C_BG.lightened(0.04))
+	s.border_color        = Color(C_GOLD.r, C_GOLD.g, C_GOLD.b, 0.28)
+	s.border_width_top    = 4
+	s.border_width_bottom = 1
+	s.shadow_size         = 0
+	s.shadow_color        = Color(0.0, 0.0, 0.0, 0.0)
+	return s
+
+func _btn_secondary() -> StyleBoxFlat:
+	var s := _btn_style(C_STONE_BASE)
+	s.border_color = Color(C_GOLD.r, C_GOLD.g, C_GOLD.b, 0.35)
+	return s
+
+func _btn_secondary_hover() -> StyleBoxFlat:
+	var s := _btn_style(C_STONE_BASE.lightened(0.08))
+	s.border_color  = Color(C_ARCANE.r, C_ARCANE.g, C_ARCANE.b, 0.65)
+	s.shadow_color  = Color(C_ARCANE.r * 0.28, C_ARCANE.g * 0.26, C_ARCANE.b * 0.38, 0.52)
+	s.shadow_size   = 8
+	s.shadow_offset = Vector2(0.0, 3.0)
+	return s
+
+func _btn_secondary_pressed() -> StyleBoxFlat:
+	var s := _btn_style(C_BG.lightened(0.04))
+	s.border_color        = Color(C_GOLD.r, C_GOLD.g, C_GOLD.b, 0.12)
+	s.border_width_top    = 3
+	s.border_width_bottom = 1
+	s.shadow_size         = 0
+	s.shadow_color        = Color(0.0, 0.0, 0.0, 0.0)
+	return s
+
+func _btn_tertiary() -> StyleBoxFlat:
+	var s := _flat(Color(0.106, 0.102, 0.090, 0.42), RADIUS)
+	s.border_width_left   = 1; s.border_width_right  = 1
+	s.border_width_top    = 1; s.border_width_bottom = 1
+	s.border_color        = Color(0.235, 0.263, 0.306, 0.45)
+	s.content_margin_left = 16; s.content_margin_right  = 16
+	s.content_margin_top  = 9;  s.content_margin_bottom = 9
+	return s
+
+func _btn_tertiary_hover() -> StyleBoxFlat:
+	var s := _flat(Color(0.165, 0.180, 0.208, 0.58), RADIUS)
+	s.border_width_left   = 1; s.border_width_right  = 1
+	s.border_width_top    = 1; s.border_width_bottom = 2
+	s.border_color        = Color(C_GOLD.r, C_GOLD.g, C_GOLD.b, 0.40)
+	s.shadow_color        = Color(C_GOLD.r * 0.28, C_GOLD.g * 0.24, C_GOLD.b * 0.10, 0.40)
+	s.shadow_size         = 6
+	s.shadow_offset       = Vector2(0.0, 2.0)
+	s.content_margin_left = 16; s.content_margin_right  = 16
+	s.content_margin_top  = 9;  s.content_margin_bottom = 9
+	return s
+
+func _btn_tertiary_pressed() -> StyleBoxFlat:
+	var s := _flat(Color(0.082, 0.075, 0.063, 0.70), RADIUS)
+	s.border_width_left   = 1; s.border_width_right  = 1
+	s.border_width_top    = 2; s.border_width_bottom = 1
+	s.border_color        = Color(0.235, 0.263, 0.306, 0.22)
+	s.content_margin_left = 16; s.content_margin_right  = 16
+	s.content_margin_top  = 9;  s.content_margin_bottom = 9
 	return s
 
 
@@ -9356,7 +9780,6 @@ func show_relic_gold_popup(amount: int) -> void:
 
 func _refresh_quest_token_labels() -> void:
 	var txt : String = "%d ★" % GameData.quest_tokens
-	if is_instance_valid(_relic_token_lbl):       _relic_token_lbl.text       = txt
 	if is_instance_valid(_gacha_relic_tok_lbl):   _gacha_relic_tok_lbl.text   = txt
 	if is_instance_valid(_dq_token_lbl):          _dq_token_lbl.text          = txt
 	if is_instance_valid(_relics_screen_tok_lbl): _relics_screen_tok_lbl.text = txt
@@ -9723,9 +10146,18 @@ class _TurretPreview extends Node2D:
 			27: _pv_rogue()
 			28: _pv_elite_knight()
 			29: _pv_iron_guard()
+			4:  _pv_hero_knight(tc)
 			50: _pv_hero_paladin(tc)
 			51: _pv_hero_rogue(tc)
 			52: _pv_hero_warlock(tc)
+			53: _pv_hero_arcane_scholar(tc)
+			54: _pv_hero_ranger(tc)
+			55: _pv_hero_guardian(tc)
+			56: _pv_hero_blade_dancer(tc)
+			57: _pv_hero_frost_herald(tc)
+			58: _pv_hero_venom_lord(tc)
+			59: _pv_hero_storm_knight(tc)
+			60: _pv_hero_phoenix_archer()
 			_:  _pv_generic(tc)
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
@@ -10242,6 +10674,511 @@ class _TurretPreview extends Node2D:
 		draw_polyline(PackedVector2Array([
 			Vector2(14, -16), Vector2(20, -10), Vector2(16, -4), Vector2(10, -10), Vector2(14, -16)
 		]), tc_l, 1.5)
+
+	func _pv_hero_arcane_scholar(_tc: Color) -> void:
+		var robe   := Color(0.62, 0.10, 0.14); var robe_d := Color(0.38, 0.06, 0.08)
+		var robe_l := Color(0.80, 0.22, 0.24); var gold   := Color(0.90, 0.72, 0.16)
+		var gold_d := Color(0.60, 0.46, 0.08); var skin   := Color(0.94, 0.80, 0.62)
+		var stf    := Color(0.28, 0.18, 0.07); var cx     := Color(0.28, 0.72, 1.00)
+		# Staffs
+		draw_line(Vector2(-18, 22), Vector2(-21, -28), stf, 4.0)
+		draw_line(Vector2(-18, 22), Vector2(-21, -28), stf.lightened(0.25), 1.5)
+		for ry in [-18, -8, 2, 12]:
+			draw_line(Vector2(-24, ry), Vector2(-18, ry), gold_d, 1.0)
+		draw_circle(Vector2(-21, -34), 7.0, cx)
+		draw_circle(Vector2(-24, -37), 3.5, cx.lightened(0.30)); draw_circle(Vector2(-18, -37), 2.5, cx.lightened(0.25))
+		draw_line(Vector2(18, 22), Vector2(21, -28), stf, 4.0)
+		draw_line(Vector2(18, 22), Vector2(21, -28), stf.lightened(0.25), 1.5)
+		for ry in [-18, -8, 2, 12]:
+			draw_line(Vector2(18, ry), Vector2(24, ry), gold_d, 1.0)
+		draw_circle(Vector2(21, -34), 6.0, cx)
+		draw_circle(Vector2(24, -37), 3.0, cx.lightened(0.30)); draw_circle(Vector2(18, -37), 2.5, cx.lightened(0.25))
+		# Robe
+		draw_colored_polygon(PackedVector2Array([Vector2(-14,-10),Vector2(14,-10),Vector2(17,24),Vector2(-17,24)]), robe)
+		draw_colored_polygon(PackedVector2Array([Vector2(5,-10),Vector2(14,-10),Vector2(17,24),Vector2(8,24)]), robe_d)
+		draw_colored_polygon(PackedVector2Array([Vector2(-5,-10),Vector2(5,-10),Vector2(6,24),Vector2(-6,24)]), robe_l)
+		draw_line(Vector2(-17,19), Vector2(17,19), gold, 2.0)
+		draw_line(Vector2(-5,-10), Vector2(-6,24), gold_d, 1.0); draw_line(Vector2(5,-10), Vector2(6,24), gold_d, 1.0)
+		# Pauldrons
+		draw_circle(Vector2(-19,-7), 8, robe_d); draw_arc(Vector2(-19,-7), 8, -PI*0.9, PI*0.1, 10, gold, 1.5)
+		draw_circle(Vector2(-19,-11), 5, robe);  draw_arc(Vector2(-19,-11), 5, -PI, 0, 8, gold, 1.0)
+		draw_circle(Vector2(19,-7), 8, robe_d);  draw_arc(Vector2(19,-7), 8, -PI*0.1, PI*0.9, 10, gold, 1.5)
+		draw_circle(Vector2(19,-11), 5, robe);   draw_arc(Vector2(19,-11), 5, -PI, 0, 8, gold, 1.0)
+		# Belt
+		draw_rect(Rect2(-13,-2,26,5), gold_d); draw_rect(Rect2(-13,-2,26,2), gold)
+		draw_rect(Rect2(-4,-3,8,7), gold); draw_rect(Rect2(-2,-1,4,3), robe_d)
+		# Arms
+		draw_rect(Rect2(-22,-7,10,5), skin); draw_rect(Rect2(12,-7,10,5), skin)
+		# Head
+		draw_circle(Vector2(0,-17), 7, skin)
+		draw_circle(Vector2(-3,-18), 1.5, Color(0.30,0.58,1.00)); draw_circle(Vector2(3,-18), 1.5, Color(0.30,0.58,1.00))
+		draw_colored_polygon(PackedVector2Array([Vector2(-4,-13),Vector2(4,-13),Vector2(3,-9),Vector2(-3,-9)]), Color(0.80,0.70,0.56))
+		# Crown
+		draw_colored_polygon(PackedVector2Array([Vector2(-11,-16),Vector2(11,-16),Vector2(9,-26),Vector2(-9,-26)]), robe_d)
+		draw_rect(Rect2(-10,-28,20,6), robe); draw_line(Vector2(-10,-28), Vector2(10,-28), gold, 1.5); draw_line(Vector2(-10,-22), Vector2(10,-22), gold, 1.5)
+		draw_rect(Rect2(-9,-35,18,8), robe_d); draw_line(Vector2(-9,-35), Vector2(9,-35), gold, 2.0)
+		draw_colored_polygon(PackedVector2Array([Vector2(-8,-35),Vector2(-4,-35),Vector2(-6,-41)]), gold)
+		draw_colored_polygon(PackedVector2Array([Vector2(-2,-35),Vector2(2,-35),Vector2(0,-42)]), gold)
+		draw_colored_polygon(PackedVector2Array([Vector2(4,-35),Vector2(8,-35),Vector2(6,-41)]), gold)
+		draw_circle(Vector2(-6,-31), 2.0, cx); draw_circle(Vector2(0,-31), 2.5, cx); draw_circle(Vector2(6,-31), 2.0, cx)
+		# Static floating books at fixed positions
+		for bi in [0, 1]:
+			var bx : float = -18.0 + bi * 36.0; var by : float = -3.0
+			draw_colored_polygon(PackedVector2Array([Vector2(bx-5,by-4),Vector2(bx+5,by-4),Vector2(bx+5,by+4),Vector2(bx-5,by+4)]), Color(0.48,0.28,0.10))
+			draw_line(Vector2(bx-5,by-4), Vector2(bx-5,by+4), Color(0.28,0.16,0.06), 1.5)
+			draw_circle(Vector2(bx+3,by), 1.5, gold)
+
+	func _pv_hero_ranger(tc: Color) -> void:
+		var tc_d    := tc.darkened(0.38); var tc_l    := tc.lightened(0.28)
+		var leather := Color(0.52, 0.34, 0.16); var leath_d := Color(0.32, 0.20, 0.08)
+		var skin    := Color(0.90, 0.74, 0.58);  var em      := Color(0.18, 0.90, 0.40)
+		var arrow_c := Color(0.72, 0.55, 0.28)
+		# Quiver
+		draw_rect(Rect2(-28,-8,9,24), leath_d); draw_rect(Rect2(-28,-8,9,3), leather)
+		draw_rect(Rect2(-28,-8,9,24), leather, false, 1.5)
+		for qi in range(3):
+			draw_line(Vector2(-25+qi*3,-6), Vector2(-25+qi*3,-18), arrow_c, 1.5)
+			draw_colored_polygon(PackedVector2Array([Vector2(-26+qi*3,-18),Vector2(-24+qi*3,-18),Vector2(-25+qi*3,-22)]), Color(0.70,0.22,0.22))
+		# Boots
+		draw_rect(Rect2(-9,14,8,10), leath_d); draw_rect(Rect2(1,14,8,10), leath_d)
+		draw_line(Vector2(-9,14), Vector2(-1,14), leather, 1.5); draw_line(Vector2(1,14), Vector2(9,14), leather, 1.5)
+		# Cloak body
+		draw_colored_polygon(PackedVector2Array([Vector2(-13,-8),Vector2(13,-8),Vector2(16,22),Vector2(-16,22)]), tc)
+		draw_colored_polygon(PackedVector2Array([Vector2(5,-8),Vector2(13,-8),Vector2(16,22),Vector2(7,22)]), tc_d)
+		# Leather chest harness
+		draw_rect(Rect2(-12,-6,24,10), leather.darkened(0.10)); draw_rect(Rect2(-12,-6,24,3), leather)
+		draw_line(Vector2(-10,-6), Vector2(8,4), leath_d, 2.0)
+		draw_rect(Rect2(-12,4,24,4), leath_d); draw_rect(Rect2(-4,3,8,6), leather)
+		draw_circle(Vector2(0,6), 2.0, Color(0.08,0.55,0.22))
+		# Arms + bracers
+		draw_rect(Rect2(-20,-4,10,5), skin); draw_rect(Rect2(10,-4,10,5), skin)
+		draw_rect(Rect2(-21,-4,11,3), leath_d); draw_rect(Rect2(9,-4,11,3), leath_d)
+		# Face
+		draw_circle(Vector2(0,-17), 7, skin)
+		draw_circle(Vector2(-3,-18), 1.5, em); draw_circle(Vector2(3,-18), 1.5, em)
+		draw_colored_polygon(PackedVector2Array([Vector2(-7,-12),Vector2(7,-12),Vector2(5,-8),Vector2(-5,-8)]), Color(0,0,0,0.22))
+		# Hood
+		draw_colored_polygon(PackedVector2Array([Vector2(-14,-14),Vector2(14,-14),Vector2(11,-24),Vector2(-11,-24)]), tc)
+		draw_colored_polygon(PackedVector2Array([Vector2(-10,-24),Vector2(10,-24),Vector2(7,-34),Vector2(-7,-34)]), tc_d)
+		draw_colored_polygon(PackedVector2Array([Vector2(-5,-34),Vector2(5,-34),Vector2(2,-42),Vector2(-2,-42)]), tc_d)
+		draw_line(Vector2(-14,-14), Vector2(14,-14), tc_l, 1.5)
+		draw_colored_polygon(PackedVector2Array([Vector2(-10,-24),Vector2(-8,-24),Vector2(-6,-37),Vector2(-9,-35)]), Color(0.80,0.72,0.52))
+		draw_circle(Vector2(0,-14), 2.5, em); draw_circle(Vector2(0,-14), 4.5, Color(em.r,em.g,em.b,0.35))
+		# Longbow at rest
+		draw_arc(Vector2(17,-6), 30, -PI*0.55, PI*0.55, 18, leather, 4.0)
+		draw_circle(Vector2(21,-34), 3.5, em); draw_circle(Vector2(21,22), 3.5, em)
+		draw_line(Vector2(21,-34), Vector2(21,22), Color(0.92,0.88,0.72,0.85), 1.5)
+
+	func _pv_hero_guardian(tc: Color) -> void:
+		var tc_d  := tc.darkened(0.40); var tc_l  := tc.lightened(0.22)
+		var crys  := Color(0.40, 0.80, 0.95); var crys_l := Color(0.70, 0.95, 1.00)
+		var moss  := Color(0.28, 0.50, 0.22)
+		# Legs
+		draw_rect(Rect2(-13,10,11,14), tc_d); draw_rect(Rect2(2,10,11,14), tc_d)
+		draw_line(Vector2(-13,10), Vector2(-2,10), tc_l, 2.0); draw_line(Vector2(2,10), Vector2(13,10), tc_l, 2.0)
+		draw_line(Vector2(-9,10), Vector2(-7,22), crys, 1.5); draw_line(Vector2(6,10), Vector2(8,22), crys, 1.5)
+		# Torso
+		draw_colored_polygon(PackedVector2Array([Vector2(-18,-12),Vector2(18,-12),Vector2(15,12),Vector2(-15,12)]), tc)
+		draw_line(Vector2(-10,-12), Vector2(-6,0), tc_d, 1.5); draw_line(Vector2(5,-12), Vector2(9,2), tc_d, 1.5)
+		draw_line(Vector2(-16,-2), Vector2(-8,6), tc_d, 1.0)
+		draw_line(Vector2(0,-12), Vector2(4,4), crys, 2.0); draw_line(Vector2(4,4), Vector2(-2,10), crys, 2.0)
+		draw_circle(Vector2(2,0), 3.5, crys); draw_circle(Vector2(2,0), 6.0, Color(crys.r,crys.g,crys.b,0.28))
+		draw_line(Vector2(-12,-4), Vector2(-6,-4), tc_l, 1.5); draw_line(Vector2(-9,-7), Vector2(-9,-1), tc_l, 1.5)
+		draw_colored_polygon(PackedVector2Array([Vector2(-15,8),Vector2(-10,8),Vector2(-10,12),Vector2(-15,12)]), moss)
+		draw_colored_polygon(PackedVector2Array([Vector2(10,8),Vector2(15,8),Vector2(15,12),Vector2(10,12)]), moss)
+		draw_rect(Rect2(-16,8,32,5), tc_d); draw_line(Vector2(-16,8), Vector2(16,8), tc_l, 2.0)
+		draw_circle(Vector2(0,10), 3.0, crys)
+		# Pauldrons
+		draw_circle(Vector2(-22,-10), 13, tc_d); draw_circle(Vector2(-22,-10), 13, tc_l, false, 2.0); draw_circle(Vector2(-22,-14), 8, tc)
+		draw_colored_polygon(PackedVector2Array([Vector2(-26,-18),Vector2(-22,-18),Vector2(-24,-26)]), crys_l)
+		draw_colored_polygon(PackedVector2Array([Vector2(-20,-20),Vector2(-16,-20),Vector2(-18,-28)]), crys)
+		draw_circle(Vector2(-24,-25), 2.0, Color(1,1,1,0.60))
+		draw_circle(Vector2(22,-10), 13, tc_d); draw_circle(Vector2(22,-10), 13, tc_l, false, 2.0); draw_circle(Vector2(22,-14), 8, tc)
+		draw_colored_polygon(PackedVector2Array([Vector2(22,-18),Vector2(26,-18),Vector2(24,-26)]), crys_l)
+		draw_colored_polygon(PackedVector2Array([Vector2(16,-20),Vector2(20,-20),Vector2(18,-28)]), crys)
+		# Helmet
+		draw_circle(Vector2(0,-20), 11, tc); draw_circle(Vector2(0,-20), 11, tc_d, false, 2.0)
+		draw_rect(Rect2(-10,-25,20,7), tc_d); draw_rect(Rect2(-7,-24,14,5), tc.darkened(0.65))
+		draw_line(Vector2(-10,-25), Vector2(10,-25), tc_l, 2.0); draw_line(Vector2(-10,-18), Vector2(10,-18), tc_l, 1.5)
+		draw_line(Vector2(-6,-22), Vector2(-2,-22), crys, 2.0); draw_line(Vector2(2,-22), Vector2(6,-22), crys, 2.0)
+		draw_line(Vector2(-5,-22), Vector2(-3,-22), crys_l, 3.0); draw_line(Vector2(3,-22), Vector2(5,-22), crys_l, 3.0)
+		draw_rect(Rect2(-10,-30,20,5), tc_d); draw_line(Vector2(-10,-30), Vector2(10,-30), tc_l, 2.0)
+		draw_line(Vector2(-3,-28), Vector2(3,-28), crys, 1.5); draw_line(Vector2(0,-30), Vector2(0,-26), crys, 1.5)
+		# Warhammer at rest
+		draw_line(Vector2(16,-2), Vector2(20,-36), tc.darkened(0.15), 7.0)
+		draw_rect(Rect2(10,-44,24,16), tc); draw_rect(Rect2(10,-44,24,16), tc_d, false, 2.0)
+		draw_line(Vector2(10,-44), Vector2(34,-44), tc_l, 2.0); draw_line(Vector2(10,-28), Vector2(34,-28), tc_l, 1.5)
+		draw_line(Vector2(16,-40), Vector2(28,-40), crys, 2.0)
+
+	func _pv_hero_blade_dancer(_tc: Color) -> void:
+		var silver := Color(0.80, 0.84, 0.92); var silv_d := Color(0.48, 0.50, 0.58)
+		var silv_l := Color(0.94, 0.96, 1.00); var gold   := Color(0.92, 0.76, 0.20)
+		var cloth  := Color(0.96, 0.96, 0.98); var blue_a := Color(0.28, 0.60, 0.95)
+		var rune_c := Color(0.45, 0.78, 1.00); var blade  := Color(0.88, 0.92, 0.98)
+		# Cloth sash
+		draw_colored_polygon(PackedVector2Array([Vector2(-14,6),Vector2(14,6),Vector2(20,26),Vector2(-20,26)]), cloth)
+		draw_line(Vector2(-14,6), Vector2(14,6), gold, 2.0); draw_line(Vector2(-20,26), Vector2(20,26), gold, 1.5)
+		# Legs
+		draw_rect(Rect2(-9,12,8,12), silv_d); draw_rect(Rect2(1,12,8,12), silv_d)
+		draw_line(Vector2(-9,12), Vector2(-1,12), gold, 1.5); draw_line(Vector2(1,12), Vector2(9,12), gold, 1.5)
+		# Torso
+		draw_colored_polygon(PackedVector2Array([Vector2(-12,-10),Vector2(12,-10),Vector2(11,10),Vector2(-11,10)]), silver)
+		draw_colored_polygon(PackedVector2Array([Vector2(-4,-10),Vector2(4,-10),Vector2(4,10),Vector2(-4,10)]), silv_l)
+		draw_line(Vector2(-12,-10), Vector2(12,-10), gold, 2.0); draw_line(Vector2(-11,10), Vector2(11,10), gold, 1.5)
+		draw_line(Vector2(-2,-8), Vector2(2,-8), rune_c, 1.5); draw_line(Vector2(0,-8), Vector2(0,6), rune_c, 1.5)
+		draw_line(Vector2(-3,-2), Vector2(3,-2), rune_c, 1.0)
+		# Pauldrons
+		draw_colored_polygon(PackedVector2Array([Vector2(-20,-8),Vector2(-10,-8),Vector2(-10,-2),Vector2(-20,-2)]), silver)
+		draw_line(Vector2(-20,-8), Vector2(-10,-8), gold, 1.5)
+		draw_colored_polygon(PackedVector2Array([Vector2(10,-8),Vector2(20,-8),Vector2(20,-2),Vector2(10,-2)]), silver)
+		draw_line(Vector2(10,-8), Vector2(20,-8), gold, 1.5)
+		draw_rect(Rect2(-21,-6,9,5), silver); draw_rect(Rect2(12,-6,9,5), silver)
+		# Face + hair
+		draw_circle(Vector2(0,-18), 7, Color(0.90,0.78,0.60))
+		draw_circle(Vector2(-3,-19), 1.5, Color(0.20,0.35,0.70)); draw_circle(Vector2(3,-19), 1.5, Color(0.20,0.35,0.70))
+		draw_rect(Rect2(-8,-25,16,3), silver); draw_line(Vector2(-8,-25), Vector2(8,-25), gold, 1.5)
+		draw_circle(Vector2(0,-26), 2.5, blue_a); draw_circle(Vector2(0,-26), 4.0, Color(blue_a.r,blue_a.g,blue_a.b,0.25))
+		draw_colored_polygon(PackedVector2Array([Vector2(-7,-25),Vector2(7,-25),Vector2(5,-32),Vector2(-5,-32)]), Color(0.92,0.88,0.78))
+		# Swords at rest
+		draw_line(Vector2(13,8), Vector2(22,-24), blade, 4.5)
+		draw_line(Vector2(13,8), Vector2(22,-24), Color(silv_l.r,silv_l.g,silv_l.b,0.30), 1.5)
+		for _ri in range(3):
+			draw_line(Vector2(15,-4+_ri*-6), Vector2(20,-4+_ri*-6), Color(rune_c.r,rune_c.g,rune_c.b,0.72), 1.2)
+		draw_line(Vector2(9,6), Vector2(18,6), gold, 2.5)
+		draw_line(Vector2(-13,8), Vector2(-22,-24), blade, 4.5)
+		draw_line(Vector2(-13,8), Vector2(-22,-24), Color(silv_l.r,silv_l.g,silv_l.b,0.30), 1.5)
+		for _ri in range(3):
+			draw_line(Vector2(-16,-4+_ri*-6), Vector2(-21,-4+_ri*-6), Color(rune_c.r,rune_c.g,rune_c.b,0.72), 1.2)
+		draw_line(Vector2(-9,6), Vector2(-18,6), gold, 2.5)
+
+	func _pv_hero_frost_herald(_tc: Color) -> void:
+		var ice    := Color(0.85, 0.96, 1.00); var frost  := Color(0.42, 0.82, 1.00)
+		var deep   := Color(0.18, 0.48, 0.80); var cyan_l := Color(0.20, 0.92, 1.00)
+		var silver := Color(0.78, 0.84, 0.92); var snow   := Color(0.95, 0.98, 1.00)
+		var stf    := Color(0.20, 0.38, 0.58); var skin   := Color(0.88, 0.94, 1.00)
+		# Robes
+		draw_colored_polygon(PackedVector2Array([Vector2(-9,-10),Vector2(9,-10),Vector2(13,24),Vector2(-13,24)]), deep)
+		draw_colored_polygon(PackedVector2Array([Vector2(-5,-10),Vector2(5,-10),Vector2(7,24),Vector2(-7,24)]), ice)
+		draw_line(Vector2(-13,18), Vector2(13,18), ice, 1.5)
+		for _rx in range(6):
+			var _rxx := -12.0 + _rx * 5.0
+			draw_line(Vector2(_rxx,18), Vector2(_rxx,22), frost, 1.0)
+			draw_line(Vector2(_rxx-1.5,20), Vector2(_rxx+1.5,20), frost, 1.0)
+		# Crystal shoulder armor
+		draw_colored_polygon(PackedVector2Array([Vector2(-20,-8),Vector2(-8,-8),Vector2(-8,-1),Vector2(-20,-1)]), frost)
+		draw_line(Vector2(-20,-8), Vector2(-8,-8), ice, 2.5)
+		draw_colored_polygon(PackedVector2Array([Vector2(-18,-8),Vector2(-15,-8),Vector2(-16,-18)]), ice)
+		draw_colored_polygon(PackedVector2Array([Vector2(-13,-8),Vector2(-10,-8),Vector2(-11,-15)]), ice)
+		draw_colored_polygon(PackedVector2Array([Vector2(8,-8),Vector2(20,-8),Vector2(20,-1),Vector2(8,-1)]), frost)
+		draw_line(Vector2(8,-8), Vector2(20,-8), ice, 2.5)
+		draw_colored_polygon(PackedVector2Array([Vector2(13,-8),Vector2(16,-8),Vector2(14,-18)]), ice)
+		draw_colored_polygon(PackedVector2Array([Vector2(10,-8),Vector2(13,-8),Vector2(11,-15)]), ice)
+		draw_rect(Rect2(-22,-6,10,5), skin); draw_rect(Rect2(12,-6,10,5), skin)
+		# Face + beard
+		draw_circle(Vector2(0,-18), 7, skin)
+		draw_circle(Vector2(-3,-19), 1.5, cyan_l); draw_circle(Vector2(3,-19), 1.5, cyan_l)
+		draw_colored_polygon(PackedVector2Array([Vector2(-5,-13),Vector2(5,-13),Vector2(7,-4),Vector2(-7,-4)]), snow)
+		draw_colored_polygon(PackedVector2Array([Vector2(-4,-4),Vector2(4,-4),Vector2(5,8),Vector2(-5,8)]), snow)
+		draw_colored_polygon(PackedVector2Array([Vector2(-3,8),Vector2(3,8),Vector2(2,16),Vector2(-2,16)]), snow)
+		# Hood
+		draw_colored_polygon(PackedVector2Array([Vector2(-10,-15),Vector2(10,-15),Vector2(8,-26),Vector2(-8,-26)]), deep)
+		draw_colored_polygon(PackedVector2Array([Vector2(-6,-26),Vector2(6,-26),Vector2(4,-36),Vector2(-4,-36)]), deep)
+		draw_line(Vector2(-10,-15), Vector2(10,-15), ice, 2.0); draw_circle(Vector2(0,-16), 2.5, frost)
+		# Ice crown (static position)
+		draw_rect(Rect2(-9,-44,18,4), deep); draw_line(Vector2(-9,-44), Vector2(9,-44), ice, 2.0)
+		for _ci2 in range(5):
+			var _cx2 := -8.0 + _ci2 * 4.0; var _cht := 4 + (3 if _ci2 % 2 == 0 else 0)
+			draw_colored_polygon(PackedVector2Array([Vector2(_cx2,-44),Vector2(_cx2+3.0,-44),Vector2(_cx2+1.5,-44-_cht)]), ice if _ci2 % 2 == 0 else frost)
+		draw_circle(Vector2(-4,-42), 2.0, cyan_l); draw_circle(Vector2(0,-42), 2.5, cyan_l); draw_circle(Vector2(4,-42), 2.0, cyan_l)
+		# Frost staff
+		draw_line(Vector2(-18,22), Vector2(-22,-28), stf, 5.0); draw_line(Vector2(-18,22), Vector2(-22,-28), ice, 1.5)
+		draw_rect(Rect2(-20,-6,10,5), skin)
+		draw_colored_polygon(PackedVector2Array([Vector2(-26,-28),Vector2(-18,-28),Vector2(-20,-40),Vector2(-24,-40)]), frost)
+		draw_colored_polygon(PackedVector2Array([Vector2(-24,-40),Vector2(-20,-40),Vector2(-22,-48)]), ice)
+		draw_colored_polygon(PackedVector2Array([Vector2(-26,-30),Vector2(-30,-36),Vector2(-26,-38)]), ice)
+		draw_colored_polygon(PackedVector2Array([Vector2(-18,-30),Vector2(-14,-36),Vector2(-18,-38)]), ice)
+		draw_circle(Vector2(-22,-34), 7.0, frost.lightened(0.30)); draw_circle(Vector2(-22,-34), 7.0, deep, false, 2.0)
+		draw_circle(Vector2(-25,-37), 2.5, Color(1,1,1,0.55))
+
+	func _pv_hero_venom_lord(tc: Color) -> void:
+		var venom  := Color(0.12, 0.82, 0.18); var acid   := Color(0.65, 0.96, 0.08)
+		var dark   := Color(0.05, 0.12, 0.06); var dark_l := Color(0.12, 0.24, 0.14)
+		var scale  := Color(0.08, 0.48, 0.14)
+		# Legs
+		draw_rect(Rect2(-10,12,9,12), dark); draw_rect(Rect2(1,12,9,12), dark)
+		draw_line(Vector2(-10,12), Vector2(-1,12), scale, 1.5); draw_line(Vector2(1,12), Vector2(10,12), scale, 1.5)
+		for _li in range(3):
+			draw_arc(Vector2(-5,14+_li*4), 5, 0, PI, 6, scale, 1.5)
+			draw_arc(Vector2(5,14+_li*4), 5, 0, PI, 6, scale, 1.5)
+		# Scale torso
+		draw_colored_polygon(PackedVector2Array([Vector2(-13,-12),Vector2(13,-12),Vector2(11,14),Vector2(-11,14)]), dark)
+		for _row in range(3):
+			for _col in range(3):
+				draw_arc(Vector2(-8.0+_col*8.0,-10.0+_row*8.0), 5, 0, PI, 6, scale, 1.5)
+		draw_circle(Vector2(0,0), 5.5, tc); draw_circle(Vector2(0,0), 5.5, venom, false, 1.5)
+		draw_line(Vector2(-13,-12), Vector2(13,-12), acid, 2.0)
+		draw_rect(Rect2(-12,11,24,4), dark); draw_line(Vector2(-12,11), Vector2(12,11), acid, 1.5)
+		# Claw arms
+		draw_rect(Rect2(-22,-6,10,6), dark); draw_rect(Rect2(12,-6,10,6), dark)
+		draw_line(Vector2(-22,-4), Vector2(-12,-4), scale, 1.5); draw_line(Vector2(12,-4), Vector2(22,-4), scale, 1.5)
+		# Head
+		draw_colored_polygon(PackedVector2Array([Vector2(-11,-28),Vector2(11,-28),Vector2(13,-14),Vector2(-13,-14)]), dark)
+		draw_line(Vector2(-11,-24), Vector2(11,-24), scale, 1.5)
+		draw_rect(Rect2(-8,-18,16,4), dark_l)
+		draw_line(Vector2(-6,-18), Vector2(-4,-14), Color(0.90,0.92,0.72), 2.0)
+		draw_line(Vector2(4,-18), Vector2(6,-14), Color(0.90,0.92,0.72), 2.0)
+		draw_circle(Vector2(-4,-24), 2.5, acid); draw_circle(Vector2(4,-24), 2.5, acid)
+		draw_line(Vector2(-4,-26), Vector2(-4,-22), dark, 1.5); draw_line(Vector2(4,-26), Vector2(4,-22), dark, 1.5)
+		# Toxic crown
+		draw_rect(Rect2(-9,-30,18,4), dark); draw_line(Vector2(-9,-30), Vector2(9,-30), acid, 2.0)
+		draw_colored_polygon(PackedVector2Array([Vector2(-7,-30),Vector2(-3,-30),Vector2(-5,-38)]), venom)
+		draw_colored_polygon(PackedVector2Array([Vector2(-1,-30),Vector2(1,-30),Vector2(0,-40)]), acid)
+		draw_colored_polygon(PackedVector2Array([Vector2(3,-30),Vector2(7,-30),Vector2(5,-38)]), venom)
+		draw_circle(Vector2(-5,-36), 2.0, acid); draw_circle(Vector2(0,-38), 2.5, venom); draw_circle(Vector2(5,-36), 2.0, acid)
+		# Venom staff at rest
+		draw_line(Vector2(18,22), Vector2(22,-28), dark_l, 5.0); draw_line(Vector2(18,22), Vector2(22,-28), venom, 1.5)
+		draw_rect(Rect2(12,-6,10,5), dark)
+		draw_colored_polygon(PackedVector2Array([Vector2(18,-28),Vector2(26,-28),Vector2(28,-22),Vector2(16,-22)]), dark)
+		draw_colored_polygon(PackedVector2Array([Vector2(19,-28),Vector2(25,-28),Vector2(22,-34)]), venom)
+		draw_circle(Vector2(22,-34), 3.5, Color(venom.r,venom.g,venom.b,0.70))
+		draw_circle(Vector2(22,-34), 2.0, Color(acid.r,acid.g,acid.b,0.90))
+
+	func _pv_hero_storm_knight(_tc: Color) -> void:
+		var steel   := Color(0.35, 0.38, 0.44); var steel_l := Color(0.58, 0.62, 0.70)
+		var steel_d := Color(0.18, 0.20, 0.26); var elec    := Color(0.28, 0.70, 1.00)
+		var elec_l  := Color(0.80, 0.96, 1.00); var elec_y  := Color(0.92, 0.96, 0.20)
+		# Greaves
+		draw_rect(Rect2(-12,12,10,12), steel_d); draw_rect(Rect2(2,12,10,12), steel_d)
+		draw_rect(Rect2(-12,12,10,4), steel); draw_rect(Rect2(2,12,10,4), steel)
+		draw_line(Vector2(-12,12), Vector2(-2,12), steel_l, 2.0); draw_line(Vector2(2,12), Vector2(12,12), steel_l, 2.0)
+		draw_line(Vector2(-9,12), Vector2(-5,22), elec_y, 1.5); draw_line(Vector2(4,12), Vector2(8,22), elec_y, 1.5)
+		# Breastplate
+		draw_colored_polygon(PackedVector2Array([Vector2(-14,-12),Vector2(14,-12),Vector2(12,12),Vector2(-12,12)]), steel)
+		draw_colored_polygon(PackedVector2Array([Vector2(4,-12),Vector2(14,-12),Vector2(12,12),Vector2(4,12)]), steel_d)
+		draw_colored_polygon(PackedVector2Array([Vector2(2,-10),Vector2(-4,-2),Vector2(-1,-2),Vector2(-2,8),Vector2(4,0),Vector2(1,0)]), elec_y)
+		draw_line(Vector2(-14,-12), Vector2(14,-12), steel_l, 2.0); draw_line(Vector2(-12,12), Vector2(12,12), elec_y, 1.5)
+		draw_rect(Rect2(-13,10,26,4), steel_d); draw_circle(Vector2(0,12), 3.0, elec_y)
+		# Pauldrons
+		draw_circle(Vector2(-19,-9), 10, steel_d); draw_circle(Vector2(-19,-9), 10, steel_l, false, 2.0)
+		draw_arc(Vector2(-19,-9), 10, -PI, 0, 12, elec, 2.0); draw_circle(Vector2(-19,-13), 6, steel)
+		draw_circle(Vector2(19,-9), 10, steel_d);  draw_circle(Vector2(19,-9), 10, steel_l, false, 2.0)
+		draw_arc(Vector2(19,-9), 10, -PI, 0, 12, elec, 2.0);   draw_circle(Vector2(19,-13), 6, steel)
+		# Helm
+		draw_circle(Vector2(0,-20), 11, steel); draw_circle(Vector2(0,-20), 11, steel_d, false, 2.0)
+		draw_rect(Rect2(-10,-25,20,7), steel_d); draw_rect(Rect2(-6,-24,12,5), Color(0.08,0.08,0.12))
+		draw_line(Vector2(-10,-25), Vector2(10,-25), steel_l, 2.0); draw_line(Vector2(-10,-18), Vector2(10,-18), steel_l, 1.5)
+		draw_circle(Vector2(-3,-22), 2.0, elec); draw_circle(Vector2(3,-22), 2.0, elec)
+		draw_rect(Rect2(-9,-30,18,5), steel_d); draw_line(Vector2(-9,-30), Vector2(9,-30), steel_l, 2.0)
+		draw_colored_polygon(PackedVector2Array([Vector2(1,-30),Vector2(-3,-30),Vector2(-5,-38),Vector2(-1,-35),Vector2(3,-40),Vector2(1,-35),Vector2(4,-32)]), elec_y)
+		# Shield
+		var _sh := PackedVector2Array([Vector2(-32,-16),Vector2(-16,-16),Vector2(-16,8),Vector2(-24,20),Vector2(-32,8)])
+		draw_colored_polygon(_sh, steel_d)
+		draw_polyline(_sh + PackedVector2Array([_sh[0]]), steel_l, 2.0)
+		draw_colored_polygon(PackedVector2Array([Vector2(-24,-14),Vector2(-27,-6),Vector2(-25,-6),Vector2(-25,6),Vector2(-22,0),Vector2(-24,0)]), elec_y)
+		# Sword at rest
+		draw_line(Vector2(14,-4), Vector2(16,-44), steel_d, 8.0)
+		draw_line(Vector2(14,-4), Vector2(16,-44), steel,   5.0)
+		draw_line(Vector2(14,-4), Vector2(16,-44), elec_l,  1.5)
+		draw_line(Vector2(7,-6), Vector2(23,-6), steel, 5.0); draw_line(Vector2(7,-6), Vector2(23,-6), elec_y, 1.5)
+		draw_circle(Vector2(14,-1), 4.5, steel_d); draw_circle(Vector2(14,-1), 3.0, elec)
+		draw_line(Vector2(18,-18), Vector2(14,-24), elec_l, 1.5); draw_line(Vector2(14,-24), Vector2(18,-30), elec_l, 1.5)
+
+	func _pv_hero_phoenix_archer() -> void:
+		var crim   := Color(0.88, 0.16, 0.05); var crim_d := Color(0.45, 0.06, 0.02)
+		var crim_l := Color(0.98, 0.45, 0.20); var gold   := Color(0.96, 0.72, 0.10)
+		var fire   := Color(0.98, 0.52, 0.05); var flame  := Color(1.00, 0.88, 0.30)
+		var skin   := Color(0.90, 0.72, 0.52)
+		# Energy wings (static semi-transparent)
+		draw_colored_polygon(PackedVector2Array([Vector2(-8,-8),Vector2(-8,10),Vector2(-28,18),Vector2(-32,0),Vector2(-24,-14)]), Color(crim.r,crim.g,crim.b,0.35))
+		draw_colored_polygon(PackedVector2Array([Vector2(8,-8),Vector2(8,10),Vector2(28,18),Vector2(32,0),Vector2(24,-14)]), Color(crim.r,crim.g,crim.b,0.35))
+		draw_line(Vector2(-8,0), Vector2(-32,0), Color(flame.r,flame.g,flame.b,0.40), 1.5)
+		draw_line(Vector2(8,0), Vector2(32,0), Color(flame.r,flame.g,flame.b,0.40), 1.5)
+		# Legs
+		draw_rect(Rect2(-9,13,8,11), crim_d); draw_rect(Rect2(1,13,8,11), crim_d)
+		draw_line(Vector2(-9,13), Vector2(-1,13), gold, 1.5); draw_line(Vector2(1,13), Vector2(9,13), gold, 1.5)
+		# Torso
+		draw_colored_polygon(PackedVector2Array([Vector2(-12,-10),Vector2(12,-10),Vector2(10,12),Vector2(-10,12)]), crim)
+		draw_colored_polygon(PackedVector2Array([Vector2(-4,-10),Vector2(4,-10),Vector2(4,12),Vector2(-4,12)]), crim_l.darkened(0.15))
+		draw_line(Vector2(-12,-10), Vector2(12,-10), gold, 2.0); draw_line(Vector2(-10,12), Vector2(10,12), gold, 1.5)
+		draw_line(Vector2(-3,-8), Vector2(0,-2), flame, 1.5); draw_line(Vector2(3,-8), Vector2(0,-2), flame, 1.5)
+		draw_line(Vector2(0,-2), Vector2(0,6), fire, 1.5); draw_circle(Vector2(0,-2), 2.0, Color(flame.r,flame.g,flame.b,0.80))
+		# Pauldrons
+		draw_colored_polygon(PackedVector2Array([Vector2(-20,-8),Vector2(-10,-8),Vector2(-10,-2),Vector2(-20,-2)]), crim)
+		draw_colored_polygon(PackedVector2Array([Vector2(-18,-8),Vector2(-14,-8),Vector2(-15,-16)]), fire)
+		draw_line(Vector2(-20,-8), Vector2(-10,-8), gold, 1.5)
+		draw_colored_polygon(PackedVector2Array([Vector2(10,-8),Vector2(20,-8),Vector2(20,-2),Vector2(10,-2)]), crim)
+		draw_colored_polygon(PackedVector2Array([Vector2(12,-8),Vector2(16,-8),Vector2(15,-16)]), fire)
+		draw_line(Vector2(10,-8), Vector2(20,-8), gold, 1.5)
+		draw_rect(Rect2(-22,-6,10,5), skin); draw_rect(Rect2(12,-6,10,5), skin)
+		# Face + crown
+		draw_circle(Vector2(0,-18), 7, skin)
+		draw_circle(Vector2(-3,-19), 1.5, Color(0.85,0.35,0.10)); draw_circle(Vector2(3,-19), 1.5, Color(0.85,0.35,0.10))
+		draw_rect(Rect2(-8,-32,16,4), crim_d); draw_line(Vector2(-8,-32), Vector2(8,-32), gold, 2.0)
+		draw_colored_polygon(PackedVector2Array([Vector2(-6,-32),Vector2(-3,-32),Vector2(-4,-39)]), crim_l)
+		draw_colored_polygon(PackedVector2Array([Vector2(-1,-32),Vector2(1,-32),Vector2(0,-42)]), flame)
+		draw_colored_polygon(PackedVector2Array([Vector2(3,-32),Vector2(6,-32),Vector2(4,-39)]), crim_l)
+		draw_circle(Vector2(0,-40), 2.5, Color(flame.r,flame.g,flame.b,0.80))
+		# Fiery bow at rest
+		draw_arc(Vector2(16,-5), 26, -PI*0.55, PI*0.55, 18, crim, 4.5)
+		draw_arc(Vector2(16,-5), 26, -PI*0.55, PI*0.55, 18, Color(fire.r,fire.g,fire.b,0.60), 2.0)
+		draw_circle(Vector2(20,-30), 3.5, fire); draw_circle(Vector2(20,20), 3.5, fire)
+		draw_line(Vector2(20,-30), Vector2(20,20), Color(flame.r,flame.g,flame.b,0.85), 1.5)
+
+	func _pv_hero_knight(tc: Color) -> void:
+		var b        := 0.0
+		var silver   := tc
+		var silver_d := tc.darkened(0.38)
+		var silver_l := tc.lightened(0.32)
+		var gold     := Color(0.96, 0.80, 0.18)
+		var gold_d   := Color(0.66, 0.52, 0.08)
+		var royal    := Color(0.08, 0.16, 0.52)
+		var royal_l  := Color(0.22, 0.40, 0.80)
+		var glow     := Color(0.28, 0.68, 1.00)
+		var glow_l   := Color(0.70, 0.92, 1.00)
+		var leather  := Color(0.48, 0.30, 0.12)
+		# Ground shadow
+		draw_circle(Vector2(0, 25), 16, Color(0, 0, 0, 0.24))
+		# Cape (drawn first — behind everything)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-12, -6 + b), Vector2(12, -6 + b),
+			Vector2(17,  22 + b), Vector2(-17, 22 + b)
+		]), royal)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-12, -6 + b), Vector2(-5, -6 + b),
+			Vector2(-7,  22 + b), Vector2(-17, 22 + b)
+		]), royal_l)
+		draw_line(Vector2(-1, -4 + b), Vector2(-3, 22 + b), royal_l, 1.5)
+		draw_line(Vector2(-17, 22 + b), Vector2(17, 22 + b), gold_d, 2.0)
+		draw_polyline(PackedVector2Array([
+			Vector2(-12, -6 + b), Vector2(12, -6 + b),
+			Vector2(17, 22 + b), Vector2(-17, 22 + b)
+		]), Color(gold.r, gold.g, gold.b, 0.45), 1.5)
+		# Legs
+		draw_rect(Rect2(-12, 4 + b, 11, 10), silver)
+		draw_rect(Rect2(  1, 4 + b, 11, 10), silver)
+		draw_rect(Rect2(-12, 4 + b, 11, 10), silver_d, false, 1.5)
+		draw_rect(Rect2(  1, 4 + b, 11, 10), silver_d, false, 1.5)
+		draw_line(Vector2(-8, 5 + b), Vector2(-8, 13 + b), silver_l, 1.5)
+		draw_line(Vector2(5,  5 + b), Vector2(5,  13 + b), silver_l, 1.5)
+		draw_line(Vector2(-12, 14 + b), Vector2(-1, 14 + b), gold, 2.5)
+		draw_line(Vector2(  1, 14 + b), Vector2(12, 14 + b), gold, 2.5)
+		draw_rect(Rect2(-12, 14 + b, 11, 9), silver_d)
+		draw_rect(Rect2(  1, 14 + b, 11, 9), silver_d)
+		draw_line(Vector2(-7, 15 + b), Vector2(-7, 22 + b), silver_l, 1.5)
+		draw_line(Vector2( 6, 15 + b), Vector2( 6, 22 + b), silver_l, 1.5)
+		draw_rect(Rect2(-13, 23 + b, 12, 4), gold_d)
+		draw_rect(Rect2(  1, 23 + b, 12, 4), gold_d)
+		draw_circle(Vector2(-7, 14 + b), 2, Color(glow.r, glow.g, glow.b, 0.70))
+		draw_circle(Vector2( 6, 14 + b), 2, Color(glow.r, glow.g, glow.b, 0.70))
+		# Waist
+		draw_rect(Rect2(-13, 3 + b, 26, 4), silver_d)
+		draw_line(Vector2(-13, 3 + b), Vector2(13, 3 + b), gold, 2.5)
+		draw_line(Vector2(-13, 7 + b), Vector2(13, 7 + b), gold_d, 1.5)
+		draw_rect(Rect2(-4, 3 + b, 8, 4), gold)
+		draw_circle(Vector2(0, 5 + b), 2, glow)
+		draw_circle(Vector2(0, 5 + b), 1, glow_l)
+		# Breastplate
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-14, -12 + b), Vector2(14, -12 + b),
+			Vector2( 12,   4 + b), Vector2(-12,   4 + b)
+		]), silver)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-14, -12 + b), Vector2(0, -12 + b),
+			Vector2(  0,   4 + b), Vector2(-14,  4 + b)
+		]), silver_l.lerp(silver, 0.72))
+		draw_polyline(PackedVector2Array([
+			Vector2(-14, -12 + b), Vector2(14, -12 + b),
+			Vector2( 12,   4 + b), Vector2(-12,   4 + b), Vector2(-14, -12 + b)
+		]), silver_d, 2.0)
+		draw_line(Vector2(0, -12 + b), Vector2(0, 4 + b), silver_d, 1.5)
+		draw_line(Vector2(-14, -12 + b), Vector2(14, -12 + b), gold, 4.0)
+		draw_rect(Rect2(-2, -10 + b, 4, 13), gold_d)
+		draw_rect(Rect2(-7, -6 + b, 14, 4),  gold_d)
+		draw_rect(Rect2(-1, -10 + b, 2, 13), gold)
+		draw_rect(Rect2(-7, -5 + b, 14, 2),  gold)
+		# Pauldrons
+		draw_circle(Vector2(-19, -9 + b), 11, silver)
+		draw_circle(Vector2( 19, -9 + b), 11, silver)
+		draw_circle(Vector2(-19, -9 + b), 11, silver_d, false, 2.5)
+		draw_circle(Vector2( 19, -9 + b), 11, silver_d, false, 2.5)
+		draw_circle(Vector2(-21, -12 + b), 4, silver_l)
+		draw_circle(Vector2( 17, -12 + b), 4, silver_l)
+		draw_arc(Vector2(-19, -9 + b), 11, -PI * 0.95, PI * 0.1, 14, gold, 2.5)
+		draw_arc(Vector2( 19, -9 + b), 11, -PI * 0.1, PI * 0.95, 14, gold, 2.5)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-30, -7 + b), Vector2(-10, -7 + b),
+			Vector2(-10,  1 + b), Vector2(-30,  1 + b)
+		]), silver_d)
+		draw_line(Vector2(-30, -7 + b), Vector2(-10, -7 + b), gold, 2.0)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(10, -7 + b), Vector2(30, -7 + b),
+			Vector2(30,  1 + b), Vector2(10,  1 + b)
+		]), silver_d)
+		draw_line(Vector2(10, -7 + b), Vector2(30, -7 + b), gold, 2.0)
+		draw_circle(Vector2(-19, -9 + b), 5, Color(glow.r, glow.g, glow.b, 0.40))
+		draw_circle(Vector2( 19, -9 + b), 5, Color(glow.r, glow.g, glow.b, 0.40))
+		draw_circle(Vector2(-19, -9 + b), 2, glow_l)
+		draw_circle(Vector2( 19, -9 + b), 2, glow_l)
+		# Tower shield (left)
+		var sh := PackedVector2Array([
+			Vector2(-36, -16 + b), Vector2(-14, -16 + b),
+			Vector2(-12,  10 + b), Vector2(-21,  24 + b), Vector2(-34,  10 + b)
+		])
+		draw_colored_polygon(sh, royal)
+		var sh2 := PackedVector2Array([
+			Vector2(-34, -13 + b), Vector2(-16, -13 + b),
+			Vector2(-14,   8 + b), Vector2(-21,  20 + b), Vector2(-32,  8 + b)
+		])
+		draw_colored_polygon(sh2, Color(0.10, 0.20, 0.58))
+		draw_polyline(sh + PackedVector2Array([sh[0]]), gold, 3.5)
+		draw_polyline(sh2 + PackedVector2Array([sh2[0]]), gold_d, 1.5)
+		draw_line(Vector2(-25, -10 + b), Vector2(-25, 16 + b), gold, 3.5)
+		draw_line(Vector2(-34,  3 + b),  Vector2(-14,  3 + b), gold, 3.5)
+		draw_line(Vector2(-25, -10 + b), Vector2(-25, 16 + b), Color(1.0, 0.95, 0.60), 1.4)
+		draw_line(Vector2(-34,  3 + b),  Vector2(-14,  3 + b), Color(1.0, 0.95, 0.60), 1.4)
+		draw_circle(Vector2(-25, 3 + b), 7, Color(glow.r, glow.g, glow.b, 0.30))
+		draw_circle(Vector2(-25, 3 + b), 5, glow)
+		draw_circle(Vector2(-25, 3 + b), 2, glow_l)
+		draw_circle(Vector2(-36, -16 + b), 3, gold); draw_circle(Vector2(-14, -16 + b), 3, gold)
+		draw_circle(Vector2(-36, -16 + b), 1, Color(1.0, 0.95, 0.70)); draw_circle(Vector2(-14, -16 + b), 1, Color(1.0, 0.95, 0.70))
+		# Helmet
+		draw_circle(Vector2(0, -22 + b), 11, silver)
+		draw_circle(Vector2(0, -22 + b), 11, silver_d, false, 2.5)
+		draw_circle(Vector2(-3, -26 + b), 4, silver_l)
+		draw_rect(Rect2(-11, -26 + b, 22, 8), silver_d)
+		draw_rect(Rect2(-11, -26 + b, 22, 2), silver)
+		draw_rect(Rect2(-10, -24 + b, 7, 3), Color(0.04, 0.06, 0.18))
+		draw_rect(Rect2(  3, -24 + b, 7, 3), Color(0.04, 0.06, 0.18))
+		draw_rect(Rect2(-10, -24 + b, 7, 3), Color(glow.r, glow.g, glow.b, 0.80), false, 1.0)
+		draw_rect(Rect2(  3, -24 + b, 7, 3), Color(glow.r, glow.g, glow.b, 0.80), false, 1.0)
+		draw_line(Vector2(-7, -23 + b), Vector2(-5, -23 + b), glow_l, 1.5)
+		draw_line(Vector2( 6, -23 + b), Vector2( 8, -23 + b), glow_l, 1.5)
+		draw_line(Vector2(-11, -19 + b), Vector2(11, -19 + b), gold, 3.0)
+		# Crown
+		draw_rect(Rect2(-3, -33 + b, 6, 12), silver)
+		draw_rect(Rect2(-3, -33 + b, 6, 12), silver_d, false, 1.5)
+		draw_colored_polygon(PackedVector2Array([Vector2(-6, -33 + b), Vector2(-3, -33 + b), Vector2(-5, -40 + b)]), gold)
+		draw_colored_polygon(PackedVector2Array([Vector2(-2, -33 + b), Vector2( 2, -33 + b), Vector2(0, -42 + b)]), gold)
+		draw_colored_polygon(PackedVector2Array([Vector2( 3, -33 + b), Vector2( 6, -33 + b), Vector2(5, -40 + b)]), gold)
+		draw_circle(Vector2(-5, -40 + b), 2, glow); draw_circle(Vector2( 0, -42 + b), 2, glow); draw_circle(Vector2( 5, -40 + b), 2, glow)
+		draw_rect(Rect2(-5, -41 + b, 10, 13), Color(0.18, 0.48, 0.90, 0.88))
+		draw_rect(Rect2(-4, -43 + b,  8, 10), Color(0.32, 0.65, 1.00, 0.92))
+		draw_rect(Rect2(-2, -44 + b,  4,  6), Color(0.58, 0.82, 1.00, 0.80))
+		# Sword at rest (right side)
+		draw_rect(Rect2(13, -7 + b, 8, 6), leather)
+		draw_rect(Rect2(13, -34 + b, 9, 42), Color(glow.r, glow.g, glow.b, 0.18))
+		draw_rect(Rect2(14, -34 + b, 7, 40), silver)
+		draw_rect(Rect2(14, -34 + b, 7, 40), silver_d, false, 1.5)
+		draw_line(Vector2(17, -33 + b), Vector2(17, 5 + b), silver_l, 2.0)
+		draw_line(Vector2(15, -26 + b), Vector2(20, -26 + b), Color(glow.r, glow.g, glow.b, 0.85), 1.8)
+		draw_line(Vector2(15, -20 + b), Vector2(20, -20 + b), Color(glow.r, glow.g, glow.b, 0.85), 1.8)
+		draw_line(Vector2(15, -14 + b), Vector2(20, -14 + b), Color(glow.r, glow.g, glow.b, 0.85), 1.8)
+		draw_rect(Rect2(6, -6 + b, 22, 5), gold)
+		draw_rect(Rect2(6, -6 + b, 22, 5), gold_d, false, 1.5)
+		draw_circle(Vector2(6,  -4 + b), 3, gold_d); draw_circle(Vector2(28, -4 + b), 3, gold_d)
+		draw_circle(Vector2(17, 8 + b), 5, gold)
+		draw_circle(Vector2(17, 8 + b), 3, Color(1.0, 0.95, 0.62))
+		draw_circle(Vector2(17, 8 + b), 1, glow_l)
 
 	func _pv_blade_assassin() -> void:
 		var dark  := Color(0.07, 0.05, 0.12); var cloak := Color(0.16, 0.10, 0.26)

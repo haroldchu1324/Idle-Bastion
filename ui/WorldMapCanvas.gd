@@ -416,6 +416,10 @@ func _draw_world_nodes() -> void:
 		# Reset transform
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
+		# Sword icon floats above the active (attackable) world
+		if state == "active":
+			_draw_sword_icon(c)
+
 		# Burst particles (absolute coords, drawn after transform reset)
 		for pp in _burst_particles[i]:
 			var plife : float = pp[2] / pp[3]
@@ -618,6 +622,42 @@ func _draw_mountains(center: Vector2, count: int, sz: float) -> void:
 		]), Color(0.93, 0.95, 0.98, 0.88))
 		draw_line(pk + Vector2(-sz, sz * 0.78), pk + Vector2(sz, sz * 0.78),
 			Color(0.40, 0.38, 0.36), 1.0)
+
+# ── Sword icon (floats above the active/attackable world node) ───────────────
+func _draw_sword_icon(c: Vector2) -> void:
+	var bob : float   = sin(_pulse * TAU * 0.85) * 3.5
+	var s   : Vector2 = c + Vector2(0.0, -56.0 + bob)
+
+	# Pulsing glow halo
+	var ga : float = 0.55 + sin(_pulse * TAU * 1.6) * 0.28
+	draw_circle(s, 16.0, Color(1.0, 0.88, 0.18, ga * 0.30))
+	draw_circle(s, 10.0, Color(1.0, 0.95, 0.45, ga * 0.20))
+
+	# Blade — tapered polygon pointing up
+	draw_colored_polygon(PackedVector2Array([
+		s + Vector2(-2.5,  8.0),
+		s + Vector2(-0.8, -13.0),
+		s + Vector2( 0.0, -16.0),
+		s + Vector2( 0.8, -13.0),
+		s + Vector2( 2.5,  8.0),
+	]), Color(0.84, 0.90, 1.00, 0.97))
+	draw_line(s + Vector2(0.0, -14.0), s + Vector2(0.0, 7.0),
+		Color(1.0, 1.0, 1.0, 0.48), 1.0)
+
+	# Guard
+	draw_rect(Rect2(s.x - 8.5, s.y + 6.5, 17.0, 3.5),
+		Color(0.88, 0.74, 0.20, 0.96))
+	draw_line(s + Vector2(-8.5, 6.5), s + Vector2(8.5, 6.5),
+		Color(1.0, 0.92, 0.48, 0.60), 1.0)
+
+	# Grip
+	draw_rect(Rect2(s.x - 1.8, s.y + 10.0, 3.6, 8.5),
+		Color(0.48, 0.30, 0.14, 0.94))
+
+	# Pommel
+	draw_circle(s + Vector2(0.0, 20.5), 3.8, Color(0.88, 0.72, 0.22, 0.96))
+	draw_circle(s + Vector2(0.0, 20.5), 1.6, Color(1.0, 0.94, 0.56, 0.82))
+
 
 # ── Forest cluster ────────────────────────────────────────────────────────────
 func _draw_forest(center: Vector2, count: int, sz: float) -> void:

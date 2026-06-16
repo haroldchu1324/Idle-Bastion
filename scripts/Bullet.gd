@@ -91,7 +91,7 @@ func _process(delta: float) -> void:
 
 	var dir  : Vector2 = _target.position - position
 	var dist : float   = dir.length()
-	var hit_r : float  = 30.0 if bullet_type == "sword" else (25.0 if bullet_type == "tw_slash" else (15.0 if bullet_type == "sniper_dart" else 8.0))
+	var hit_r : float  = 30.0 if bullet_type == "sword" else (25.0 if bullet_type == "tw_slash" else (30.0 if bullet_type == "sniper_dart" else 8.0))
 	# Hit if close enough, or if we overshot (moving away after being very close)
 	if dist < hit_r or (dist > _prev_dist and _prev_dist < hit_r * 3.0):
 		if bullet_type == "tw_slash":
