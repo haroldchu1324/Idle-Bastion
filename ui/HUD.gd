@@ -143,6 +143,7 @@ var _info_counter_bg    : Panel
 # Screens
 var _tutorial_locked_btns   : Array   = []   # nav buttons hidden until dq_unlocked (first loss)
 var _dq_main_btn            : Button  = null
+var _dq_stat                : Control = null
 var _game_over_screen       : Control
 var _run_results_screen     : Control
 var _run_results_loot_grid  : Control = null
@@ -3535,7 +3536,7 @@ func _build_game_over_screen() -> void:
 	# ── Background ───────────────────────────────────────────────────────────
 	var overlay := Panel.new()
 	var bg_s := StyleBoxFlat.new()
-	bg_s.bg_color = Color(0.072, 0.065, 0.055)   # deep stone floor
+	bg_s.bg_color = Color(0.078, 0.072, 0.090)   # matches statue image backgrounds
 	overlay.add_theme_stylebox_override("panel", bg_s)
 	overlay.position     = Vector2.ZERO
 	overlay.size         = Vector2(1280, 720)
@@ -3546,20 +3547,12 @@ func _build_game_over_screen() -> void:
 
 	# Atmospheric top vignette (warm blood-red for game-over mood)
 	var top_band := ColorRect.new()
-	top_band.color        = Color(0.48, 0.07, 0.07, 0.32)
+	top_band.color        = Color(0.48, 0.07, 0.07, 0.22)
 	top_band.position     = Vector2.ZERO
 	top_band.size         = Vector2(1280, 155)
 	top_band.mouse_filter = MOUSE_FILTER_IGNORE
 	overlay.add_child(top_band)
 
-	# Subtle stone floor horizontal bands (atmosphere)
-	for i in range(3):
-		var band := ColorRect.new()
-		band.color        = Color(1, 1, 1, 0.018 - float(i) * 0.004)
-		band.position     = Vector2(0, 175.0 + float(i) * 180.0)
-		band.size         = Vector2(1280, 1)
-		band.mouse_filter = MOUSE_FILTER_IGNORE
-		overlay.add_child(band)
 
 	# Bottom warm ambient (torch glow from ground)
 	var bot_glow := ColorRect.new()
@@ -3623,18 +3616,29 @@ func _build_game_over_screen() -> void:
 			func(): _on_main_nav_pressed(nd["idx"]),
 			Vector2(sx, TOP_Y), Vector2(SW, SH), nd["phase"]
 		)
-		if i > 0:
-			stat.visible = GameData.tutorial_complete
-			_tutorial_locked_btns.append(stat)
+		stat.set_locked(!GameData.tutorial_complete)
+		_tutorial_locked_btns.append(stat)
 		overlay.add_child(stat)
 
-	# ── BOTTOM ROW — Relics statue + Dragon (Start Game) statue ─────────────
-	# Relics: left-center  |  Dragon: right-center (larger, steps forward)
+	# ── BOTTOM ROW — Quests | Relics | Start Game ────────────────────────────
+	const QW : int = 165; const QH : int = 250
 	const RW : int = 165; const RH : int = 250
 	const DW : int = 215; const DH : int = 268
+	const BOT_GAP : int = 35
+	const BOT_X : int = (1280 - QW - BOT_GAP - RW - BOT_GAP - DW) / 2
 
-	# Center the pair: total span = RW + 40 + DW = 420, centered in 1280 → x start = 430
-	const PAIR_X : int = (1280 - RW - 40 - DW) / 2   # ≈ 430
+	var quests_stat := _mk_statue(
+		"quests", "Daily Quests",
+		func():
+			_game_over_screen.visible = false
+			if is_instance_valid(_daily_quests_screen):
+				_refresh_daily_quests_screen()
+				_daily_quests_screen.visible = true,
+		Vector2(BOT_X, 420), Vector2(QW, QH), 0.30
+	)
+	quests_stat.set_locked(!GameData.dq_unlocked)
+	_dq_stat = quests_stat
+	overlay.add_child(quests_stat)
 
 	var relics_stat := _mk_statue(
 		"relics", "Relics",
@@ -3643,40 +3647,18 @@ func _build_game_over_screen() -> void:
 			if is_instance_valid(_relic_screen):
 				_refresh_relics_screen()
 				_relic_screen.visible = true,
-		Vector2(PAIR_X, 420), Vector2(RW, RH), 0.55
+		Vector2(BOT_X + QW + BOT_GAP, 420), Vector2(RW, RH), 0.55
 	)
+	relics_stat.set_locked(!GameData.tutorial_complete)
+	_tutorial_locked_btns.append(relics_stat)
 	overlay.add_child(relics_stat)
 
 	var dragon_stat := _mk_statue(
 		"start", "Start Game",
 		func(): _on_main_nav_pressed(2),
-		Vector2(PAIR_X + RW + 40, 405), Vector2(DW, DH), 1.40
+		Vector2(BOT_X + QW + BOT_GAP + RW + BOT_GAP, 405), Vector2(DW, DH), 1.40
 	)
 	overlay.add_child(dragon_stat)
-
-	# ── Daily Quests — small secondary button (top-right, conditional) ───────
-	var dq_btn := Button.new()
-	dq_btn.text         = "📅  Daily Quests"
-	dq_btn.position     = Vector2(990, 192)
-	dq_btn.size         = Vector2(220, 50)
-	dq_btn.focus_mode   = FOCUS_NONE
-	dq_btn.pivot_offset = Vector2(110, 25)
-	dq_btn.add_theme_font_override("font",           _font_bold)
-	dq_btn.add_theme_font_size_override("font_size", 16)
-	dq_btn.add_theme_color_override("font_color",    C_WHITE)
-	dq_btn.add_theme_stylebox_override("normal",  _btn_secondary())
-	dq_btn.add_theme_stylebox_override("hover",   _btn_secondary_hover())
-	dq_btn.add_theme_stylebox_override("pressed", _btn_secondary_pressed())
-	dq_btn.add_theme_stylebox_override("focus",   _btn_secondary())
-	dq_btn.visible = GameData.dq_unlocked
-	dq_btn.pressed.connect(func():
-		_game_over_screen.visible = false
-		if is_instance_valid(_daily_quests_screen):
-			_refresh_daily_quests_screen()
-			_daily_quests_screen.visible = true
-	)
-	overlay.add_child(dq_btn)
-	_dq_main_btn = dq_btn
 
 	call_deferred("_wire_hover_recursive", overlay)
 
@@ -3702,9 +3684,9 @@ func show_main_menu() -> void:
 	_go_flavour_lbl.visible = false
 	for btn in _tutorial_locked_btns:
 		if is_instance_valid(btn):
-			btn.visible = GameData.tutorial_complete
-	if is_instance_valid(_dq_main_btn):
-		_dq_main_btn.visible = GameData.dq_unlocked
+			btn.set_locked(!GameData.tutorial_complete)
+	if is_instance_valid(_dq_stat):
+		_dq_stat.set_locked(!GameData.dq_unlocked)
 	_game_over_screen.visible = true
 
 
@@ -10104,15 +10086,22 @@ class _StatueBtn extends Control:
 	const WL  := Color(0.88, 0.60, 0.16, 0.22)    # warm torch under-light
 	const GL  := Color(1.00, 0.96, 0.80)           # hover glow ivory
 
-	var _type  : String   = ""
-	var _lbl   : String   = ""
-	var _cb    : Callable
-	var _font  : Font
-	var _hover : bool    = false
-	var _ga    : float   = 0.0   # glow alpha 0→1
-	var _phase : float   = 0.0   # per-statue random phase offset
-	var _fly   : float   = 0.0   # current idle float y
-	var _gtw   : Tween   = null
+	var _type    : String    = ""
+	var _lbl     : String    = ""
+	var _cb      : Callable
+	var _font    : Font
+	var _texture : Texture2D = null
+	var _locked   : bool     = false
+	var _lock_tex : Texture2D = null
+	var _hover   : bool    = false
+	var _ga      : float   = 0.0   # glow alpha 0→1
+	var _phase   : float   = 0.0   # per-statue random phase offset
+	var _fly     : float   = 0.0   # current idle float y
+	var _gtw     : Tween   = null
+
+	func set_locked(v: bool) -> void:
+		_locked = v
+		queue_redraw()
 
 	func setup(tp: String, lbl: String, cb: Callable, fnt: Font, phase_off: float) -> void:
 		_type  = tp
@@ -10121,11 +10110,19 @@ class _StatueBtn extends Control:
 		_font  = fnt
 		_phase = phase_off
 		mouse_filter = MOUSE_FILTER_STOP
+		focus_mode   = FOCUS_NONE
 		pivot_offset = size / 2.0
 		mouse_entered.connect(_on_enter)
 		mouse_exited.connect(_on_exit)
+		var tex_path := "res://assets/statues/statue_%s.png" % tp
+		if ResourceLoader.exists(tex_path):
+			_texture = load(tex_path) as Texture2D
+		var lock_path := "res://assets/statues/padlock.png"
+		if ResourceLoader.exists(lock_path):
+			_lock_tex = load(lock_path) as Texture2D
 
 	func _on_enter() -> void:
+		if _locked: return
 		_hover = true
 		if is_instance_valid(_gtw): _gtw.kill()
 		_gtw = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
@@ -10134,6 +10131,7 @@ class _StatueBtn extends Control:
 		stw.tween_property(self, "scale", Vector2(1.06, 1.06), 0.12)
 
 	func _on_exit() -> void:
+		if _locked: return
 		_hover = false
 		if is_instance_valid(_gtw): _gtw.kill()
 		_gtw = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
@@ -10142,6 +10140,7 @@ class _StatueBtn extends Control:
 		stw.tween_property(self, "scale", Vector2(1.0, 1.0), 0.14)
 
 	func _gui_input(ev: InputEvent) -> void:
+		if _locked: return
 		if ev is InputEventMouseButton and ev.button_index == MOUSE_BUTTON_LEFT and ev.pressed:
 			_cb.call()
 
@@ -10152,15 +10151,43 @@ class _StatueBtn extends Control:
 
 	func _draw() -> void:
 		var w := size.x; var h := size.y
+		if _texture:
+			_draw_from_texture(w, h)
+		else:
+			_draw_nameplate(w, h)
+			match _type:
+				"upgrades": _draw_knight(w, h)
+				"shop":     _draw_shop(w, h)
+				"worldmap": _draw_worldmap(w, h)
+				"heroes":   _draw_hero(w, h)
+				"towers":   _draw_towers(w, h)
+				"relics":   _draw_relics(w, h)
+				"start":    _draw_dragon(w, h)
+		if _locked:
+			_draw_locked_overlay(w, h)
+
+	func _draw_locked_overlay(w: float, h: float) -> void:
+		if not _lock_tex:
+			return
+		var area_h : float   = h - 38.0
+		var ts     : Vector2 = _lock_tex.get_size()
+		var sc     : float   = min(w / ts.x, area_h / ts.y) * 0.80
+		var dw     : float   = ts.x * sc
+		var dh     : float   = ts.y * sc
+		var dx     : float   = (w - dw) * 0.5
+		var dy     : float   = (area_h - dh) * 0.5
+		draw_texture_rect(_lock_tex, Rect2(dx, dy, dw, dh), false, Color(1, 1, 1, 0.72))
+
+	func _draw_from_texture(w: float, h: float) -> void:
+		var area_h : float   = h - 42.0          # reserve bottom 42px for nameplate
+		var ts     : Vector2 = _texture.get_size()
+		var sc     : float   = min(w / ts.x, area_h / ts.y)
+		var dw     : float   = ts.x * sc
+		var dh     : float   = ts.y * sc
+		var dx     : float   = (w - dw) * 0.5
+		var dy     : float   = (area_h - dh) * 0.5 + _fly
+		draw_texture_rect(_texture, Rect2(dx, dy, dw, dh), false)
 		_draw_nameplate(w, h)
-		match _type:
-			"upgrades": _draw_knight(w, h)
-			"shop":     _draw_shop(w, h)
-			"worldmap": _draw_worldmap(w, h)
-			"heroes":   _draw_hero(w, h)
-			"towers":   _draw_towers(w, h)
-			"relics":   _draw_relics(w, h)
-			"start":    _draw_dragon(w, h)
 
 	# ── Drawing helpers ──────────────────────────────────────────────────────
 	func _tri(a: Vector2, b: Vector2, c: Vector2, col: Color) -> void:
