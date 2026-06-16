@@ -82,82 +82,82 @@ var PATH : Array = []
 
 # ── Stage definitions ─────────────────────────────────────────────────────────
 const STAGES : Array = [
-	# Stage 1  (old totals: 15 / 21 / 36g)
+	# Stage 1  — 80 px/s
 	{ "waves": [
 		[8,  12.0,  80.0,  2],
-		[10, 17.0,  85.0,  2],
-		[13, 22.0,  90.0,  3],
-	], "boss": [250.0,  50.0, 100] },
-	# Stage 2  (old totals: 28 / 36 / 55g)
+		[10, 17.0,  80.0,  2],
+		[13, 22.0,  80.0,  3],
+	], "boss": [250.0,   50.0, 100] },
+	# Stage 2  — 90 px/s
 	{ "waves": [
 		[10, 26.0,  90.0,  3],
-		[13, 34.0,  95.0,  3],
-		[15, 43.0, 100.0,  4],
-	], "boss": [500.0,  48.0, 150] },
-	# Stage 3  (old totals: 40 / 50 / 72 / 60g)
+		[13, 34.0,  90.0,  3],
+		[15, 43.0,  90.0,  4],
+	], "boss": [500.0,   48.0, 150] },
+	# Stage 3  — 95 px/s
 	{ "waves": [
 		[11,  53.0,  95.0,  4],
-		[14,  66.0, 100.0,  4],
-		[17,  82.0, 105.0,  4],
-		[15,  96.0, 108.0,  4],
-	], "boss": [950.0,  46.0, 200] },
-	# Stage 4  (old totals: 60 / 84 / 98 / 96g)
+		[14,  66.0,  95.0,  4],
+		[17,  82.0,  95.0,  4],
+		[15,  96.0,  95.0,  4],
+	], "boss": [950.0,   46.0, 200] },
+	# Stage 4  — 100 px/s
 	{ "waves": [
 		[15, 108.0, 100.0,  4],
-		[17, 130.0, 105.0,  5],
-		[20, 154.0, 110.0,  5],
-		[17, 180.0, 113.0,  6],
-	], "boss": [1600.0, 44.0, 250] },
-	# Stage 5  (old totals: 96 / 112 / 144 / 126 / 180g)
+		[17, 130.0, 100.0,  5],
+		[20, 154.0, 100.0,  5],
+		[17, 180.0, 100.0,  6],
+	], "boss": [1600.0,  44.0, 250] },
+	# Stage 5  — 108 px/s
 	{ "waves": [
 		[18, 198.0, 108.0,  5],
-		[20, 228.0, 112.0,  6],
-		[23, 264.0, 116.0,  6],
-		[20, 300.0, 119.0,  6],
-		[26, 342.0, 122.0,  7],
-	], "boss": [2600.0, 42.0, 300] },
-	# Stage 6  (old totals: 126 / 160 / 180 / 176 / 220g)
+		[20, 228.0, 108.0,  6],
+		[23, 264.0, 108.0,  6],
+		[20, 300.0, 108.0,  6],
+		[26, 342.0, 108.0,  7],
+	], "boss": [2600.0,  42.0, 300] },
+	# Stage 6  — 115 px/s
 	{ "waves": [
 		[21, 360.0, 115.0,  6],
-		[23, 414.0, 119.0,  7],
-		[26, 474.0, 123.0,  7],
-		[23, 540.0, 126.0,  8],
-		[28, 612.0, 129.0,  8],
-	], "boss": [4000.0, 40.0, 350] },
-	# Stage 7  (old totals: 176 / 216 / 240 / 234 / 286g)
+		[23, 414.0, 115.0,  7],
+		[26, 474.0, 115.0,  7],
+		[23, 540.0, 115.0,  8],
+		[28, 612.0, 115.0,  8],
+	], "boss": [4000.0,  40.0, 350] },
+	# Stage 7  — 122 px/s
 	{ "waves": [
 		[23,  648.0, 122.0,  8],
-		[26,  738.0, 126.0,  8],
-		[28,  840.0, 130.0,  9],
-		[26,  954.0, 133.0,  9],
-		[30, 1080.0, 136.0, 10],
-	], "boss": [6200.0, 38.0, 400] },
-	# Stage 8  (old totals: 234 / 280 / 308 / 300 / 360 / 352g)
+		[26,  738.0, 122.0,  8],
+		[28,  840.0, 122.0,  9],
+		[26,  954.0, 122.0,  9],
+		[30, 1080.0, 122.0, 10],
+	], "boss": [6200.0,  38.0, 400] },
+	# Stage 8  — 128 px/s
 	{ "waves": [
 		[26, 1140.0, 128.0,  9],
-		[28, 1296.0, 132.0, 10],
-		[30, 1464.0, 136.0, 10],
-		[28, 1656.0, 139.0, 11],
-		[32, 1872.0, 142.0, 11],
-		[30, 2112.0, 144.0, 12],
-	], "boss": [9000.0, 36.0, 450] },
-	# Stage 9  (old totals: 300 / 352 / 384 / 374 / 442 / 432g)
+		[28, 1296.0, 128.0, 10],
+		[30, 1464.0, 128.0, 10],
+		[28, 1656.0, 128.0, 11],
+		[32, 1872.0, 128.0, 11],
+		[30, 2112.0, 128.0, 12],
+	], "boss": [9000.0,  36.0, 450] },
+	# Stage 9  — 135 px/s
 	{ "waves": [
 		[28, 2220.0, 135.0, 11],
-		[30, 2520.0, 139.0, 12],
-		[32, 2856.0, 143.0, 12],
-		[30, 3240.0, 146.0, 12],
-		[34, 3672.0, 149.0, 13],
-		[32, 4152.0, 151.0, 13],
+		[30, 2520.0, 135.0, 12],
+		[32, 2856.0, 135.0, 12],
+		[30, 3240.0, 135.0, 12],
+		[34, 3672.0, 135.0, 13],
+		[32, 4152.0, 135.0, 13],
 	], "boss": [13000.0, 34.0, 500] },
-	# Stage 10 — Final  (old totals: 374 / 432 / 468 / 456 / 532 / 520g)
+	# Stage 10 — Final — 142 px/s
 	{ "waves": [
 		[30, 4320.0, 142.0, 12],
-		[32, 4920.0, 146.0, 13],
-		[34, 5580.0, 150.0, 14],
-		[32, 6360.0, 153.0, 14],
-		[36, 7200.0, 156.0, 15],
-		[34, 8160.0, 158.0, 15],
+		[32, 4920.0, 142.0, 13],
+		[34, 5580.0, 142.0, 14],
+		[32, 6360.0, 142.0, 14],
+		[36, 7200.0, 142.0, 15],
+		[34, 8160.0, 142.0, 15],
 	], "boss": [22000.0, 30.0, 600] },
 ]
 
@@ -176,6 +176,8 @@ var _wave_remaining    : Dictionary = {}   # wave_id → remaining enemy count
 var _enemies_killed    : int   = 0
 var _bosses_killed     : int   = 0
 var _gems_this_run     : int   = 0
+var _relic_wave_count       : int  = 0    # total waves started this run (for bloodlust_tide every-5)
+var _relic_first_place_done : bool = false  # founders_pledge: first tower placed this stage?
 var _spawn_queue   : Array = []
 var _spawn_timer   : float = 0.0
 var _wave_start_lives : Dictionary = {}  # wid → lives at wave start (for hercules perfect-clear check)
@@ -185,6 +187,7 @@ var _boss_timer           : float = 0.0
 var _boss_ref             : Node2D = null
 var _spawning_done        : bool  = false
 var _pending_boss_reward  : bool  = false
+var _pending_card_anim    : Array = []
 var _game_over     : bool  = false
 var _game_left     : bool  = false
 
@@ -205,6 +208,7 @@ var _info_refresh_timer  : float      = 0.0
 
 func _ready() -> void:
 	PATH = GameData.get_world_path(GameData.selected_world)
+	_build_grid.setup_world(GameData.selected_world, PATH)
 	MapBuilder.new().build(_terrain)
 	_hud.setup(self)
 	_hud.wave_pressed.connect(_on_wave_btn_pressed)
@@ -215,20 +219,33 @@ func _ready() -> void:
 	_hud.recipe_fusion_requested.connect(_on_recipe_fusion_requested)
 	_hud.upgrade_merge_requested.connect(_on_upgrade_merge_requested)
 	_hud.debug_gold_requested.connect(func(): _gold += 10000; _refresh_hud())
+	_hud.debug_skip_stage_requested.connect(_on_debug_skip_stage)
 	_hud.sell_tower_requested.connect(_on_sell_tower_requested)
 	_hud.debug_summon_requested.connect(_on_debug_summon_requested)
 	GameData.current_run_highest_stage = 0
 	GameData.reset_run_buffs()
+	# Reset per-run daily quest counters
+	GameData.dq_sell_run_count = 0
 	_hud.buff_chosen.connect(_on_buff_chosen)
 	_hud.game_left.connect(_on_game_left)
 	_gold  = 100
 	_lives = 20
 	_refresh_hud()
 	_spawn_knight()
+	if not GameData.launching_into_game:
+		_hud.show_main_menu()
+	elif not GameData.tutorial_complete and GameData.selected_world == 1:
+		_hud.start_tutorial()
+	GameData.launching_into_game = false
 
 
 func _spawn_knight() -> void:
+	if GameData.selected_hero_id == "" or not GameData.HERO_DEFS.has(GameData.selected_hero_id):
+		return
+	# Prefer centre of island; fall back to first open tile if that one is path-blocked.
 	var tile := Vector2i(4, 2)
+	if not _build_grid.can_place(tile):
+		tile = _find_hero_spawn()
 	_build_grid.place(tile)
 	var tower : Node2D = TOWER_SCENE.instantiate()
 	add_child(tower)
@@ -249,6 +266,20 @@ func _spawn_knight() -> void:
 	_tower_map[tile] = tower
 
 
+func _find_hero_spawn() -> Vector2i:
+	# Simple scan: prefer rows nearest the vertical centre.
+	var cols : int = _build_grid._cols
+	var rows : int = _build_grid._rows
+	for r in range(rows):
+		var row : int = (rows / 2) + (r / 2 + 1) * (1 if r % 2 == 0 else -1)
+		row = clamp(row, 0, rows - 1)
+		for c in range(cols):
+			var t := Vector2i(c, row)
+			if _build_grid.can_place(t):
+				return t
+	return Vector2i(0, 0)
+
+
 func _process(delta: float) -> void:
 	if _game_over or _game_left:
 		return
@@ -256,14 +287,15 @@ func _process(delta: float) -> void:
 
 	if _drag_pending_tile != Vector2i(-1, -1) and not is_instance_valid(_held_tower):
 		if mp.distance_to(_press_position) > BuildGrid.TILE_SIZE * 0.5:
-			_pick_up_tower(_drag_pending_tile)
+			if not _hud.tutorial_block_drag:
+				_pick_up_tower(_drag_pending_tile)
 			_drag_pending_tile = Vector2i(-1, -1)
 
 	if is_instance_valid(_held_tower):
 		_held_tower.position = mp + Vector2(0, -12)
 
-	# Refresh selected tower stats panel so World Tree buffs stay current
-	if is_instance_valid(_selected_tower):
+	# Refresh selected tower stats panel only when already open (user clicked i)
+	if is_instance_valid(_selected_tower) and _hud.is_tower_info_visible():
 		_info_refresh_timer -= delta
 		if _info_refresh_timer <= 0.0:
 			_info_refresh_timer = 0.25
@@ -301,6 +333,10 @@ func start_wave() -> void:
 
 	if _wave_in_stage < total_waves:
 		_wave_in_stage += 1
+		# Relic: Bloodlust Tide — every 5th wave globally
+		_relic_wave_count += 1
+		if GameData.relics_collected.has("bloodlust_tide") and _relic_wave_count % 5 == 0:
+			_trigger_bloodlust_tide()
 		# First wave of a new stage: start the Poison Cloud if a Venom Drake exists.
 		if _wave_in_stage == 1:
 			var vd_pos : Vector2 = _get_venom_drake_pos()
@@ -329,9 +365,12 @@ func _start_boss_wave(boss_def: Array) -> void:
 	_wave_active = true
 	var enemy : Node2D = ENEMY_SCENE.instantiate()
 	add_child(enemy)
-	var spd  : float = boss_def[1] * GameData.relic_enemy_slow_mult()
-	var gold : float = boss_def[2] * GameData.total_gold_drop_mult()
-	enemy.setup(PATH, boss_def[0], spd, gold, true, 0, _stage)
+	var w    : int   = GameData.selected_world
+	var hp   : float = boss_def[0] * GameData.world_hp_mult(w)
+	var spd  : float = boss_def[1] * GameData.relic_enemy_slow_mult() * GameData.world_spd_mult(w)
+	var gold : float = boss_def[2] * GameData.total_gold_drop_mult() * GameData.world_gold_mult(w)
+	enemy.setup(PATH, hp, spd, gold, true, 0, _stage)
+	enemy.melee_resist = GameData.world_melee_resist(w)
 	enemy.died.connect(_on_boss_died)
 	enemy.reached_end.connect(_on_boss_reached_end)
 	_boss_ref = enemy
@@ -346,35 +385,73 @@ func _spawn_next_enemy() -> void:
 	var wid   : int        = entry["wave_id"]
 	var enemy : Node2D = ENEMY_SCENE.instantiate()
 	add_child(enemy)
-	var etype : int = int((_stage - 1) / 2.0)
-	var spd  : float = def[2] * GameData.relic_enemy_slow_mult()
-	var gold : float = def[3] * GameData.total_gold_drop_mult()
-	enemy.setup(PATH, def[1], spd, gold, false, etype, _stage)
+	var w     : int   = GameData.selected_world
+	var etype : int   = int((_stage - 1) / 2.0)
+	var hp    : float = def[1] * GameData.world_hp_mult(w)
+	var spd   : float = def[2] * GameData.relic_enemy_slow_mult() * GameData.world_spd_mult(w)
+	var gold  : float = def[3] * GameData.total_gold_drop_mult() * GameData.world_gold_mult(w)
+	enemy.setup(PATH, hp, spd, gold, false, etype, _stage)
+	enemy.melee_resist = GameData.world_melee_resist(w)
 	enemy.wave_id = wid
 	_wave_remaining[wid] = _wave_remaining.get(wid, 0) + 1   # safe: key may have been erased if tower one-shotted earlier spawns
-	enemy.died.connect(func(r: float): _on_enemy_died(r); _on_wave_enemy_removed(wid))
-	enemy.reached_end.connect(func(): _on_enemy_reached_end(); _on_wave_enemy_removed(wid))
+	enemy.died.connect(func(r: float): _on_enemy_died(r, enemy); _on_wave_enemy_removed(wid))
+	enemy.reached_end.connect(func(): _on_enemy_reached_end(enemy); _on_wave_enemy_removed(wid))
 	_enemies_alive += 1
 	if _spawn_queue.is_empty():
 		_spawning_done = true
 		_refresh_hud()
 
 
-func _on_enemy_died(reward: float) -> void:
+func _on_enemy_died(reward: float, dead_enemy: Node2D = null) -> void:
 	_gold          += reward
 	_enemies_alive -= 1
 	_enemies_killed += 1
 	GameData.blue_gems += 1
 	_gems_this_run     += 1
 	_hud.refresh_gems()
+	# Daily quest 1: kill progress
+	if not GameData.dq_kills_complete:
+		GameData.dq_kills_progress = mini(GameData.dq_kills_progress + 1, GameData.DQ_KILL_TARGET)
+		if GameData.dq_kills_progress >= GameData.DQ_KILL_TARGET:
+			GameData.dq_kills_complete = true
+	# Skeleton respawn modifier (world modifier + mutated daily quest override)
+	var skel_chance : float = maxf(
+		GameData.world_skeleton_chance(GameData.selected_world),
+		0.20 if GameData.dq_mode == "mutated_w1" else 0.0
+	)
+	if skel_chance > 0.0 and is_instance_valid(dead_enemy) and not dead_enemy.is_boss:
+		if randf() < skel_chance:
+			_spawn_skeleton_from(dead_enemy)
+	# ── Relic: every-10-kill procs ────────────────────────────────────────────
+	if _enemies_killed % 10 == 0:
+		_apply_relic_kill_procs()
 	_check_wave_done()
 	_refresh_hud()
 	_try_show_boss_reward()
 
 
-func _on_enemy_reached_end() -> void:
+func _spawn_skeleton_from(src: Node2D) -> void:
+	# Spawn a skeleton at the entrance (index 0) with 50% of src's max_hp and same speed
+	var skel : Node2D = ENEMY_SCENE.instantiate()
+	add_child(skel)
+	var skel_hp  : float = src.max_hp * 0.5
+	var skel_spd : float = src.speed
+	skel.setup(PATH, skel_hp, skel_spd, 0.0, false, 2, src.boss_stage)  # type 2 = skeleton
+	skel.melee_resist = src.melee_resist
+	_enemies_alive += 1
+	skel.died.connect(func(r: float): _on_enemy_died(r))
+	skel.reached_end.connect(func(): _on_enemy_reached_end(skel))
+
+
+func _on_enemy_reached_end(enemy: Node2D = null) -> void:
 	_lives         -= 1
 	_enemies_alive -= 1
+	# Relic: Castle Tax — bonus gold per hit the escaping enemy absorbed
+	if enemy != null and GameData.relics_collected.has("castle_tax"):
+		var lv        : int = GameData.get_relic_level("castle_tax")
+		var ct_amount : int = maxi(lv, enemy.hits_taken * lv)
+		_gold += ct_amount
+		_hud.show_relic_gold_popup(ct_amount)
 	_check_lives()
 	_check_wave_done()
 	_refresh_hud()
@@ -422,8 +499,8 @@ func _clear_poison_cloud() -> void:
 
 func _spawn_infernal_serpent(dmg: float) -> void:
 	var serpent : Node2D = SERPENT_SCENE.new()
+	serpent.setup(dmg, PATH)   # must be before add_child so _ready() sees the path
 	add_child(serpent)
-	serpent.setup(dmg)
 
 
 func _on_wave_enemy_removed(wid: int) -> void:
@@ -442,6 +519,37 @@ func _on_wave_enemy_removed(wid: int) -> void:
 					tw._hercules_wave_bonus += 5.0
 
 
+func _get_all_towers() -> Array:
+	var result : Array = []
+	for tile in _tower_map:
+		var tw = _tower_map[tile]
+		if is_instance_valid(tw):
+			result.append(tw)
+	return result
+
+
+func _apply_relic_kill_procs() -> void:
+	var towers : Array = _get_all_towers()
+	if GameData.relics_collected.has("gold_rush"):
+		var gr_amount : int = GameData.get_relic_level("gold_rush")
+		_gold += gr_amount
+		_hud.show_relic_gold_popup(gr_amount)
+	if GameData.relics_collected.has("power_surge") and not towers.is_empty():
+		towers[randi() % towers.size()]._relic_dmg_bonus += float(GameData.get_relic_level("power_surge"))
+	if GameData.relics_collected.has("swift_wind") and not towers.is_empty():
+		towers[randi() % towers.size()]._relic_rate_bonus += GameData.get_relic_level("swift_wind") * 0.05
+
+
+func _trigger_bloodlust_tide() -> void:
+	var bonus : float = GameData.get_relic_level("bloodlust_tide") * 0.20
+	for tw in _get_all_towers():
+		tw._relic_rate_bonus += bonus
+	_refresh_hud()
+	await get_tree().create_timer(10.0, true).timeout
+	for tw in _get_all_towers():
+		tw._relic_rate_bonus = maxf(0.0, tw._relic_rate_bonus - bonus)
+
+
 func _check_wave_done() -> void:
 	if _boss_active:
 		return
@@ -450,6 +558,7 @@ func _check_wave_done() -> void:
 		_spawning_done = false
 		_clear_ice_zones()
 		_refresh_hud()
+		GameData.save_game()   # persist kill progress after every wave
 
 
 func _on_boss_died(reward: float) -> void:
@@ -461,6 +570,14 @@ func _on_boss_died(reward: float) -> void:
 	GameData.blue_gems += boss_gems
 	_gems_this_run     += boss_gems
 	_hud.refresh_gems()
+	# Store card drops for stages 8, 9, 10 — animation fires after buff is chosen
+	var boss_pos : Vector2 = _boss_ref.global_position if is_instance_valid(_boss_ref) else Vector2(512, 325)
+	var cards    : Array   = _roll_boss_cards(_stage)
+	for card in cards:
+		GameData.run_pending_cards.append(card)
+		_pending_card_anim.append(card)
+	if not cards.is_empty():
+		_hud.show_boss_card_idle(cards, boss_pos)
 	_boss_active           = false
 	_boss_ref              = null
 	_wave_active           = false
@@ -472,7 +589,40 @@ func _on_boss_died(reward: float) -> void:
 	_try_show_boss_reward()
 
 
-var _pre_reward_time_scale : float = 1.0
+func _roll_gacha_rarity() -> String:
+	var r : int = randi() % 100
+	if r < 1:   return "legendary"
+	if r < 5:   return "epic"
+	if r < 25:  return "rare"
+	return "common"
+
+
+func _roll_boss_cards(stage: int) -> Array:
+	var cards : Array = []
+	var n_towers : int = 0
+	var n_heroes : int = 0
+	if stage == 8:
+		n_towers = randi_range(1, 2)
+	elif stage == 9:
+		n_towers = randi_range(2, 3)
+	elif stage == 10:
+		n_towers = randi_range(3, 4)
+		n_heroes = 1
+	for _i in n_towers:
+		var rarity := _roll_gacha_rarity()
+		var pool   := SummonSystem.get_pool(rarity)
+		cards.append({"type": "tower", "id": pool[randi() % pool.size()], "rarity": rarity})
+	for _i in n_heroes:
+		var rarity := _roll_gacha_rarity()
+		var pool   := GameData.heroes_of_rarity(rarity)
+		if pool.is_empty():
+			pool = GameData.heroes_of_rarity("common")
+		cards.append({"type": "hero", "id": pool[randi() % pool.size()], "rarity": rarity})
+	return cards
+
+
+var _pre_reward_time_scale      : float = 1.0
+var _special_tiles_tut_pending  : bool  = false
 
 func _try_show_boss_reward() -> void:
 	if not _pending_boss_reward:
@@ -493,8 +643,18 @@ func _try_show_boss_reward() -> void:
 	_cancel_hold()
 	_deselect_tower()
 	_hud.hide_wave_btn()
-	# Final stage — no buff cards, go straight to victory
+	# Final stage — no buff cards.
+	# Fly the boss-drop chips first, then show the victory screen.
 	if _stage >= STAGES.size():
+		_pending_card_anim.clear()
+		await get_tree().create_timer(0.5, true).timeout
+		if _game_left or _game_over:
+			return
+		_hud.fly_loot_cards_to_bag()
+		# Wait long enough for all chips to land (up to 5 chips × 0.15s stagger + 1.0s flight)
+		await get_tree().create_timer(2.0, true).timeout
+		if _game_left:
+			return
 		_advance_stage()
 		return
 	var rarity : String = GameData.roll_rarity(_stage)
@@ -509,6 +669,8 @@ func _on_game_left() -> void:
 	_spawn_queue.clear()
 	_wave_start_lives.clear()
 	Engine.time_scale = 1.0
+	GameData.apply_run_cards()
+	GameData.save_game()   # persist kill progress when leaving mid-run
 	# Kill every enemy node so their processes stop and no signals fire late
 	for e in get_tree().get_nodes_in_group("enemies"):
 		if is_instance_valid(e):
@@ -531,13 +693,36 @@ func _on_buff_chosen(buff_id: String) -> void:
 		_turret_roll_cost = maxi(1, _turret_roll_cost - 5)
 		_rare_roll_cost   = maxi(1, _rare_roll_cost   - 5)
 		_epic_roll_cost   = maxi(1, _epic_roll_cost   - 5)
-		_hud.update_pull_cost(_turret_roll_cost)
-		_hud.update_rare_cost(_rare_roll_cost)
-		_hud.update_epic_cost(_epic_roll_cost)
+		_refresh_roll_costs()
 	_advance_stage()
+	_fire_card_anim_deferred()
+	if _build_grid._tiles_animating:
+		_hud.block_input_for_tile_anim()
+		await _build_grid.tiles_animation_done
+		_hud.unblock_input_tile_anim()
+	if _special_tiles_tut_pending:
+		_special_tiles_tut_pending = false
+		var tile_rects : Dictionary = {}
+		for tile in _build_grid.special_tiles:
+			var kind : String = _build_grid.special_tiles[tile]
+			tile_rects[kind] = Rect2(
+				_build_grid._island.position.x + tile.x * _build_grid.TILE_SIZE,
+				_build_grid._island.position.y + tile.y * _build_grid.TILE_SIZE,
+				_build_grid.TILE_SIZE, _build_grid.TILE_SIZE)
+		_hud.show_special_tiles_tutorial(tile_rects)
+		await _hud.special_tiles_tutorial_closed
 	_hud.show_wave_btn()
 	if not _game_over:
 		_refresh_hud()
+
+
+func _fire_card_anim_deferred() -> void:
+	if _pending_card_anim.is_empty():
+		return
+	_pending_card_anim.clear()
+	await get_tree().create_timer(0.5, true).timeout
+	if not _game_left and not _game_over:
+		_hud.fly_loot_cards_to_bag()
 
 
 func _on_boss_reached_end() -> void:
@@ -583,7 +768,10 @@ func _trigger_game_over() -> void:
 	_game_over = true
 	_lives      = 0
 	Engine.time_scale = 0.0
+	GameData.apply_run_cards()
 	GameData.run_gold = int(_gold)
+	GameData.dq_mode  = ""
+	GameData.dq_unlocked = true
 	if _stage > GameData.current_run_highest_stage:
 		GameData.current_run_highest_stage = _stage
 	if GameData.current_run_highest_stage > GameData.all_time_highest_stage:
@@ -594,6 +782,9 @@ func _trigger_game_over() -> void:
 	for tower in _tower_map.values():
 		if is_instance_valid(tower) and not tower.tower_data.is_empty():
 			turrets.append(tower.tower_data)
+	_hud.hide_sell_btn()
+	_hud.hide_upgrade_popup()
+	_hud.flush_idle_chips_to_loot()
 	_hud.show_run_results(_stage, _enemies_killed, _bosses_killed, gems_earned, turrets, false, _wave_in_stage)
 
 
@@ -605,23 +796,61 @@ func _on_start_battle_pressed() -> void:
 func _trigger_victory() -> void:
 	_game_over = true
 	Engine.time_scale = 0.0
+	GameData.apply_run_cards()
 	GameData.run_gold = int(_gold)
 	GameData.current_run_highest_stage = 10
 	if 10 > GameData.all_time_highest_stage:
 		GameData.all_time_highest_stage = 10
+	# Daily quest completion on victory
+	if GameData.dq_mode == "mutated_w1":
+		GameData.dq_mutated_complete = true
+	elif GameData.dq_mode == "sell_w1" and GameData.dq_sell_run_count >= GameData.DQ_SELL_TARGET:
+		GameData.dq_sell_complete = true
+	GameData.dq_mode = ""
 	var gems_earned : int = _calc_gems()
 	GameData.save_game()
 	var turrets : Array = []
 	for tower in _tower_map.values():
 		if is_instance_valid(tower) and not tower.tower_data.is_empty():
 			turrets.append(tower.tower_data)
+	_hud.flush_idle_chips_to_loot()
 	_hud.show_run_results(_stage, _enemies_killed, _bosses_killed, gems_earned, turrets, true, _wave_in_stage)
 
 
 func _advance_stage() -> void:
 	_wave_in_stage = 0
+	# Relic: War Spoils — end of each stage, gain a random common tower (or gold if full)
+	if GameData.relics_collected.has("war_spoils") and _stage <= STAGES.size():
+		var free_tiles : Array = _get_free_tiles()
+		if not free_tiles.is_empty():
+			_place_turret_random(SummonSystem.roll_by_pool("common"))
+		else:
+			var ws_amount : int = 20 + GameData.get_relic_level("war_spoils") * 5
+			_gold += ws_amount
+			_hud.show_relic_gold_popup(ws_amount)
 	if _stage <= STAGES.size():
 		_stage += 1
+	if _stage == 5:
+		_setup_special_tiles()
+	# Relic: Treasury — gain level×5% of current gold at the start of each new stage
+	if GameData.relics_collected.has("treasury") and _stage <= STAGES.size():
+		var tr_amount : int = int(_gold * GameData.get_relic_level("treasury") * 0.05)
+		_gold += tr_amount
+		if tr_amount > 0:
+			get_tree().create_timer(1.0, true).timeout.connect(
+				func(): _hud.show_relic_gold_popup(tr_amount), CONNECT_ONE_SHOT)
+	# Relic: Rite of Five — auto-summon a rare tower at stage 5 (and multiples by level)
+	if GameData.relics_collected.has("rite_of_five") and _stage <= STAGES.size():
+		var lv  : int  = GameData.get_relic_level("rite_of_five")
+		var trigger : bool = (lv >= 4 and _stage % 5 == 0) \
+			or (lv == 3 and _stage in [5, 10, 15]) \
+			or (lv == 2 and _stage in [5, 10]) \
+			or (lv == 1 and _stage == 5)
+		if trigger:
+			_place_turret_random(SummonSystem.roll_by_pool("rare"))
+	# Relic: Founder's Pledge — reset first-place flag each stage, refresh displayed costs
+	_relic_first_place_done = false
+	_refresh_roll_costs()
 	var reached : int = min(_stage, 10)
 	if reached > GameData.current_run_highest_stage:
 		GameData.current_run_highest_stage = reached
@@ -644,6 +873,7 @@ func _update_upgrade_indicators() -> void:
 		if id == "" or rarity == "legendary" or rarity == "fusion":
 			continue
 		counts[id] = counts.get(id, 0) + 1
+	var first_upgradeable : Node2D = null
 	for tile in _tower_map:
 		var tw = _tower_map[tile]
 		if not is_instance_valid(tw):
@@ -651,6 +881,17 @@ func _update_upgrade_indicators() -> void:
 		var id     : String = tw.tower_data.get("id", "")
 		var rarity : String = tw.tower_data.get("rarity", "")
 		tw.can_upgrade = counts.get(id, 0) >= 3 and rarity != "legendary" and rarity != "fusion"
+		if tw.can_upgrade and first_upgradeable == null:
+			first_upgradeable = tw
+	if first_upgradeable != null and not GameData.merge_tutorial_seen:
+		GameData.merge_tutorial_seen = true
+		_show_merge_tutorial_delayed(first_upgradeable)
+
+
+func _show_merge_tutorial_delayed(tower: Node2D) -> void:
+	await get_tree().create_timer(1.0).timeout
+	if is_instance_valid(tower):
+		_hud.show_merge_tutorial(tower.position)
 
 
 func _count_same_type_on_map(id: String) -> int:
@@ -752,6 +993,7 @@ func _refresh_hud() -> void:
 				 boss_hp, boss_max_hp)
 	_hud.update_recipe_notifications(SummonSystem.get_available_recipe_fusions(_tower_map), _get_all_owned_turret_ids())
 	_update_upgrade_indicators()
+	_refresh_roll_costs()
 
 
 # ── Gacha roll system ─────────────────────────────────────────────────────────
@@ -760,6 +1002,23 @@ const TURRET_ROLL_COST_BASE : int = 40
 var   _turret_roll_cost     : int = 40
 var   _rare_roll_cost       : int = SummonSystem.RARE_SUMMON_COST
 var   _epic_roll_cost       : int = SummonSystem.EPIC_SUMMON_COST
+
+func _relic_roll_discount() -> int:
+	var disc : int = 0
+	# Merchant's Deal: every roll costs level fewer gold
+	if GameData.relics_collected.has("merchants_deal"):
+		disc += GameData.get_relic_level("merchants_deal")
+	# Founder's Pledge: first tower placed each stage is additionally discounted
+	if not _relic_first_place_done and GameData.relics_collected.has("founders_pledge"):
+		disc += GameData.get_relic_level("founders_pledge")
+	return disc
+
+
+func _refresh_roll_costs() -> void:
+	var disc : int = _relic_roll_discount()
+	_hud.update_pull_cost(maxi(1, _turret_roll_cost - disc), disc)
+	_hud.update_rare_cost(maxi(1, _rare_roll_cost   - disc), disc)
+	_hud.update_epic_cost(maxi(1, _epic_roll_cost   - disc), disc)
 
 func _get_turret_pool() -> Array:
 	var pool : Array = []
@@ -777,16 +1036,19 @@ func _get_turret_pool() -> Array:
 
 
 func _on_roll_rare_requested() -> void:
-	if _gold < _rare_roll_cost:
-		_hud.show_roll_error("Not enough gold! (need %dg)" % _rare_roll_cost)
+	var disc : int = _relic_roll_discount()
+	var cost : int = maxi(1, _rare_roll_cost - disc)
+	if _gold < cost:
+		_hud.show_roll_error("Not enough gold! (need %dg)" % cost)
 		return
 	var free : Array = _get_free_tiles()
 	if free.is_empty():
 		_hud.show_roll_error("Map is full! Move or wait.")
 		return
-	_gold -= _rare_roll_cost
+	_gold -= cost
 	_rare_roll_cost += 3
-	_hud.update_rare_cost(_rare_roll_cost)
+	_relic_first_place_done = true
+	_refresh_roll_costs()
 	var raw : Dictionary = SummonSystem.roll_by_pool("rare")
 	_place_turret_random(raw)
 	_hud.show_turret_result(raw)
@@ -794,16 +1056,19 @@ func _on_roll_rare_requested() -> void:
 
 
 func _on_roll_epic_requested() -> void:
-	if _gold < _epic_roll_cost:
-		_hud.show_roll_error("Not enough gold! (need %dg)" % _epic_roll_cost)
+	var disc : int = _relic_roll_discount()
+	var cost : int = maxi(1, _epic_roll_cost - disc)
+	if _gold < cost:
+		_hud.show_roll_error("Not enough gold! (need %dg)" % cost)
 		return
 	var free : Array = _get_free_tiles()
 	if free.is_empty():
 		_hud.show_roll_error("Map is full! Move or wait.")
 		return
-	_gold -= _epic_roll_cost
+	_gold -= cost
 	_epic_roll_cost += 5
-	_hud.update_epic_cost(_epic_roll_cost)
+	_relic_first_place_done = true
+	_refresh_roll_costs()
 	var raw : Dictionary = SummonSystem.roll_by_pool("epic")
 	_place_turret_random(raw)
 	_hud.show_turret_result(raw)
@@ -811,18 +1076,27 @@ func _on_roll_epic_requested() -> void:
 
 
 func _on_roll_turret_requested() -> void:
-	if _gold < _turret_roll_cost:
-		_hud.show_roll_error("Not enough gold! (need %d)" % _turret_roll_cost)
+	var disc : int = _relic_roll_discount()
+	var cost : int = maxi(1, _turret_roll_cost - disc)
+	if _gold < cost:
+		_hud.show_roll_error("Not enough gold! (need %d)" % cost)
 		return
 	var free : Array = _get_free_tiles()
 	if free.is_empty():
 		_hud.show_roll_error("Map is full! Move or wait.")
 		return
-	_gold -= _turret_roll_cost
+	_gold -= cost
 	_turret_roll_cost += 1
-	_hud.update_pull_cost(_turret_roll_cost)
-	var raw : Dictionary = SummonSystem.roll_by_pool("common")
+	_relic_first_place_done = true
+	_refresh_roll_costs()
+	var raw : Dictionary
+	if not GameData.tutorial_complete and GameData.selected_world == 1:
+		raw = SummonSystem.TURRET_DEFS["archer"].duplicate()
+	else:
+		raw = SummonSystem.roll_by_pool("common")
 	_place_turret_random(raw)
+	if not GameData.tutorial_complete and GameData.selected_world == 1:
+		_build_grid.tutorial_lock_tile = Vector2i(1, 0)
 	_hud.show_turret_result(raw)
 	_refresh_hud()
 
@@ -883,6 +1157,7 @@ func _place_turret_random(data: Dictionary) -> void:
 	tower.serpent_summon.connect(func(dmg: float): _spawn_infernal_serpent(dmg))
 	tower.drop_from_sky(_build_grid.tile_center(tile))
 	_tower_map[tile] = tower
+	_apply_tile_bonus(tower, tile)
 	# If a Venom Drake is placed mid-stage, start the cloud immediately.
 	if data.get("effect", "") == "poison_cloud" and _wave_in_stage > 0:
 		_spawn_or_reset_poison_cloud(_build_grid.tile_center(tile))
@@ -890,12 +1165,58 @@ func _place_turret_random(data: Dictionary) -> void:
 
 func _get_free_tiles() -> Array:
 	var tiles : Array = []
-	for c in range(BuildGrid.COLS):
-		for r in range(BuildGrid.ROWS):
+	for c in range(_build_grid._cols):
+		for r in range(_build_grid._rows):
 			var t := Vector2i(c, r)
 			if _build_grid.can_place(t):
 				tiles.append(t)
 	return tiles
+
+
+# ── Special tile bonuses (World 2 Stage 5) ────────────────────────────────────
+
+func _setup_special_tiles() -> void:
+	if GameData.selected_world != 2 or not _build_grid.special_tiles.is_empty():
+		return
+	var buildable : Array = []
+	for c in range(_build_grid._cols):
+		for r in range(_build_grid._rows):
+			var t := Vector2i(c, r)
+			if not _build_grid._path_blocked.has(t):
+				buildable.append(t)
+	buildable.shuffle()
+	if buildable.size() < 3:
+		return
+	_build_grid.special_tiles[buildable[0]] = "red"
+	_build_grid.special_tiles[buildable[1]] = "blue"
+	_build_grid.special_tiles[buildable[2]] = "green"
+	if not GameData.special_tiles_seen:
+		GameData.special_tiles_seen    = true
+		_special_tiles_tut_pending     = true
+		GameData.save_game()
+		_build_grid.start_tile_animation()
+	for tile in _build_grid.special_tiles:
+		if _tower_map.has(tile) and is_instance_valid(_tower_map[tile]):
+			_apply_tile_bonus(_tower_map[tile], tile)
+
+
+func _apply_tile_bonus(tower: Node2D, tile: Vector2i) -> void:
+	var bonus : String = _build_grid.special_tiles.get(tile, "")
+	match bonus:
+		"red":
+			tower._tile_dmg_bonus = 0.30
+		"blue":
+			tower._tile_range_bonus = 35.0
+			tower.attack_range     += 35.0
+		"green":
+			tower._tile_spd_bonus = 0.25
+
+
+func _remove_tile_bonus(tower: Node2D) -> void:
+	tower.attack_range     -= tower._tile_range_bonus
+	tower._tile_dmg_bonus   = 0.0
+	tower._tile_range_bonus = 0.0
+	tower._tile_spd_bonus   = 0.0
 
 
 # ── Tower placement (click-select) ────────────────────────────────────────────
@@ -921,6 +1242,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	var mp : Vector2 = get_viewport().get_mouse_position()
 
 	if event.pressed:
+		if _hud.tutorial_lock_unit_btns:
+			return
+
 		var info_open : bool = is_instance_valid(_selected_tower)
 
 		if not _build_grid.is_in_grid(mp):
@@ -947,10 +1271,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not is_instance_valid(_held_tower):
 		if is_instance_valid(_selected_tower) and mp.distance_to(_press_position) <= _CLICK_MAX_DIST:
 			var _merge_cnt := _count_same_type_on_map(_selected_tower.tower_data.get("id", ""))
-			_hud.show_tower_info(_selected_tower, _merge_cnt)
-			var _is_hero : bool = GameData.HERO_DEFS.has(_selected_tower.tower_data.get("id", ""))
-			if not _is_hero or _hud.DEBUG:
-				_hud.show_sell_btn(_selected_tower.position)
+			_hud.show_unit_btns(_selected_tower.position, _selected_tower, _merge_cnt)
 			if _selected_tower.can_upgrade:
 				_hud.show_upgrade_popup(_selected_tower.position)
 		return
@@ -973,6 +1294,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _pick_up_tower(tile: Vector2i) -> void:
 	var tower : Node2D = _tower_map[tile]
+	_remove_tile_bonus(tower)
 	_tower_map.erase(tile)
 	_build_grid.unplace(tile)
 	_held_from_tile = tile
@@ -982,21 +1304,32 @@ func _pick_up_tower(tile: Vector2i) -> void:
 
 
 func _place_held_tower(tile: Vector2i) -> void:
+	var was_moved := tile != _held_from_tile
 	_build_grid.place(tile)
 	_tower_map[tile] = _held_tower
+	_apply_tile_bonus(_held_tower, tile)
 	_held_tower.move_to(_build_grid.tile_center(tile))
 	_held_tower = null
 	_held_from_tile = Vector2i(-1, -1)
 	_hud.update_recipe_notifications(SummonSystem.get_available_recipe_fusions(_tower_map), _get_all_owned_turret_ids())
+	if _build_grid.tutorial_lock_tile != Vector2i(-1, -1):
+		_build_grid.tutorial_lock_tile = Vector2i(-1, -1)
+		_hud.tower_moved_tutorial.emit()
+	elif was_moved and not GameData.tutorial_complete and GameData.selected_world == 1:
+		_hud.tower_moved_tutorial.emit()
 
 
 func _swap_towers(other_tile: Vector2i) -> void:
 	var other_tower : Node2D = _tower_map[other_tile]
-	_build_grid.place(_held_from_tile)
-	_tower_map[_held_from_tile] = other_tower
-	other_tower.move_to(_build_grid.tile_center(_held_from_tile))
+	_remove_tile_bonus(other_tower)
+	var from_tile : Vector2i = _held_from_tile
+	_build_grid.place(from_tile)
+	_tower_map[from_tile] = other_tower
+	other_tower.move_to(_build_grid.tile_center(from_tile))
 	_tower_map[other_tile] = _held_tower
 	_held_tower.move_to(_build_grid.tile_center(other_tile))
+	_apply_tile_bonus(other_tower, from_tile)
+	_apply_tile_bonus(_held_tower, other_tile)
 	_held_tower     = null
 	_held_from_tile = Vector2i(-1, -1)
 	_hud.update_recipe_notifications(SummonSystem.get_available_recipe_fusions(_tower_map), _get_all_owned_turret_ids())
@@ -1007,6 +1340,7 @@ func _cancel_hold() -> void:
 		return
 	_build_grid.place(_held_from_tile)
 	_tower_map[_held_from_tile] = _held_tower
+	_apply_tile_bonus(_held_tower, _held_from_tile)
 	_held_tower.move_to(_build_grid.tile_center(_held_from_tile))
 	_held_tower = null
 	_held_from_tile = Vector2i(-1, -1)
@@ -1046,6 +1380,9 @@ func _on_sell_tower_requested() -> void:
 	_build_grid.unplace(sell_tile)
 	_selected_tower = null
 	_gold += 25
+	# Daily quest 3: count tower sells in sell_w1 mode
+	if GameData.dq_mode == "sell_w1":
+		GameData.dq_sell_run_count += 1
 	if sold_effect == "poison_cloud" and not _check_venom_drake_exists():
 		_clear_poison_cloud()
 	_hud.hide_tower_info()
@@ -1065,6 +1402,20 @@ func _on_debug_summon_requested(tower_id: String) -> void:
 	raw["fire_rate"] = raw["fire_rate"] * GameData.final_fire_rate_mult(tidx)
 	_place_turret_random(raw)
 	_hud.show_notification("🐛 Summoned %s" % raw.get("name", tower_id))
+	_refresh_hud()
+
+
+func _on_debug_skip_stage(target: int) -> void:
+	if _game_over or _game_left:
+		return
+	_stage         = target
+	_wave_in_stage = 0
+	_wave_active   = false
+	_gold          += 5000
+	GameData.current_run_highest_stage = maxi(GameData.current_run_highest_stage, target - 1)
+	if target >= 5:
+		_setup_special_tiles()
+	_hud.show_notification("🐛 Skipped to Stage %d" % target)
 	_refresh_hud()
 
 

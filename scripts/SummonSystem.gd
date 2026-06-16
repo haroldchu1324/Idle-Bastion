@@ -75,7 +75,7 @@ const TURRET_DEFS : Dictionary = {
 	# ── Common ────────────────────────────────────────────────────────────────
 	"archer": {
 		"id": "archer", "name": "Archer", "rarity": "common", "idx": 0,
-		"desc": "Focused shots — each\nconsecutive hit deals +50% dmg.",
+		"desc": "Focused shots — consecutive hits\non the same target stack +50% dmg,\nup to 2×.",
 		"cost": 0, "damage": 5.0, "range": 200.0, "fire_rate": 1.0,
 		"color": Color(0.35, 0.75, 0.25), "effect": "focused_shot",
 	},
@@ -155,8 +155,8 @@ const TURRET_DEFS : Dictionary = {
 	},
 	"infernal_core": {
 		"id": "infernal_core", "name": "Infernal Core", "rarity": "epic", "idx": 10,
-		"desc": "Locks beam on one target.\nDamage ramps +50% over 5s.",
-		"cost": 0, "damage": 27.0, "range": 200.0, "fire_rate": 1.0,
+		"desc": "Locks beam on one target.\nDamage ramps 1x to 2x over 5s.",
+		"cost": 0, "damage": 25.0, "range": 200.0, "fire_rate": 1.0,
 		"color": Color(1.00, 0.25, 0.10), "effect": "lock_beam",
 	},
 	"ballista": {

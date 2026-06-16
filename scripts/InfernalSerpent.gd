@@ -2,9 +2,8 @@ extends Node2D
 # ─────────────────────────────────────────────────────────────────────────────
 # InfernalSerpent.gd
 # Summoned battlefield creature from the Infernal Serpent fusion tower (5% proc).
-# Enters top-left, travels counter-clockwise one full lap, then exits.
-# Rendered above terrain (z=1); enemies render above serpent (they default z=0
-# but are added earlier in the scene tree so draw on top at same z).
+# Travels the reverse of the current world's enemy path, one pass only.
+# Rendered above terrain (z=1).
 # ─────────────────────────────────────────────────────────────────────────────
 
 const SPEED       : float = 270.0    # px/s ≈ 4.5 tiles/s
@@ -13,16 +12,6 @@ const SEG_DIST    : float = 18.0     # px between samples
 const HEAD_R      : float = 14.0
 const MOUTH_R     : float = 22.0     # bite hitbox radius
 const PORTAL_DIST : float = 120.0
-
-# Counter-clockwise lap: enter top-left → south → east → north → exit top-left
-const LAP_PATH : Array = [
-	Vector2(-40.0, 140.0),   # entrance (off-screen left)
-	Vector2(250.0, 140.0),   # top of inner-left wall
-	Vector2(250.0, 500.0),   # bottom inner-left corner
-	Vector2(850.0, 500.0),   # bottom-right corner
-	Vector2(850.0, 140.0),   # top-right corner
-	Vector2(-40.0, 140.0),   # back to entrance (exit)
-]
 
 # ── State ──────────────────────────────────────────────────────────────────────
 var _damage    : float = 100.0
@@ -34,18 +23,68 @@ var _hit_set   : Array = []
 var _embers    : Array = []
 var _bite_fx   : Array = []
 
-func setup(dmg: float) -> void:
-	_damage = dmg
+# Computed in setup() from the world's enemy path (reversed, one pass)
+var _lap_path  : Array = []
+
+# Call BEFORE add_child so _ready() sees the computed path.
+func setup(dmg: float, enemy_path: Array = []) -> void:
+	_damage   = dmg
+	_lap_path = _make_serpent_path(enemy_path)
+
+# Build the serpent's travel path: the enemy road reversed so the serpent
+# moves from the enemy EXIT back to the enemy ENTRY.
+# For worlds with repeated loops (W1, W5-W9), we extract one circuit.
+# For figure-8 / crossing paths (W3, W8, W10) where the repeated waypoint
+# is a mid-map crossing rather than a loop repetition, we use the full path.
+static func _make_serpent_path(enemy_path: Array) -> Array:
+	if enemy_path.size() < 2:
+		return [Vector2(-40,140), Vector2(250,140), Vector2(250,500),
+				Vector2(850,500), Vector2(850,140), Vector2(-40,140)]
+
+	# Find the first repeated waypoint (marks where a loop closes or a road crosses itself).
+	var cutoff : int = enemy_path.size()
+	for i in range(1, enemy_path.size()):
+		var found : bool = false
+		for j in range(i):
+			if enemy_path[i].distance_to(enemy_path[j]) < 5.0:
+				found = true
+				break
+		if found:
+			cutoff = i
+			break
+
+	var one_pass : Array
+	if cutoff < enemy_path.size():
+		var remaining : int = enemy_path.size() - cutoff
+		# If remaining points after cutoff are fewer than 60% of the circuit
+		# length, the repeated point is a road crossing (figure-8 / end-revisit),
+		# NOT a repeated loop.  Use the full path to avoid a diagonal shortcut.
+		if remaining * 10 < cutoff * 6:
+			one_pass = enemy_path.duplicate()
+		else:
+			# True repeated loop — extract one circuit and close back to entry.
+			one_pass = enemy_path.slice(0, cutoff)
+			if (one_pass as Array).back().distance_to(enemy_path[0]) > 5.0:
+				one_pass.append(enemy_path[0])
+	else:
+		one_pass = enemy_path.duplicate()
+
+	# Reverse so serpent travels from exit → entry, opposite to enemies.
+	(one_pass as Array).reverse()
+	return one_pass
 
 func _ready() -> void:
 	z_index = 1
+	# _lap_path should already be set by setup(); build cumulative lengths now.
+	if _lap_path.is_empty():
+		_lap_path = _make_serpent_path([])
 	_build_path_data()
 
 func _build_path_data() -> void:
 	_cum_lens = [0.0]
 	var t : float = 0.0
-	for i in range(LAP_PATH.size() - 1):
-		t += LAP_PATH[i].distance_to(LAP_PATH[i + 1])
+	for i in range(_lap_path.size() - 1):
+		t += (_lap_path[i] as Vector2).distance_to(_lap_path[i + 1] as Vector2)
 		_cum_lens.append(t)
 	_total_len = t
 
@@ -56,9 +95,10 @@ func _path_pos(dist: float) -> Vector2:
 		if dist <= _cum_lens[i + 1]:
 			var seg_len : float = _cum_lens[i + 1] - _cum_lens[i]
 			if seg_len < 0.001:
-				return LAP_PATH[i + 1]
-			return LAP_PATH[i].lerp(LAP_PATH[i + 1], (dist - _cum_lens[i]) / seg_len)
-	return LAP_PATH[-1]
+				return _lap_path[i + 1]
+			return (_lap_path[i] as Vector2).lerp(_lap_path[i + 1] as Vector2,
+					(dist - _cum_lens[i]) / seg_len)
+	return _lap_path[-1]
 
 func _path_dir(dist: float) -> Vector2:
 	var p0 := _path_pos(dist)
@@ -128,11 +168,11 @@ func _draw() -> void:
 func _draw_portals() -> void:
 	var in_t : float = 1.0 - clampf(_traveled / PORTAL_DIST, 0.0, 1.0)
 	if in_t > 0.005:
-		_draw_portal(LAP_PATH[0], in_t)
+		_draw_portal(_lap_path[0], in_t)
 	var exit_start := _total_len - PORTAL_DIST
 	if _traveled > exit_start:
 		var ex_t := clampf((_traveled - exit_start) / PORTAL_DIST, 0.0, 1.0)
-		_draw_portal(LAP_PATH[-1], ex_t)
+		_draw_portal(_lap_path[-1], ex_t)
 
 func _draw_portal(pos: Vector2, intensity: float) -> void:
 	var pulse := 0.88 + sin(_anim_time * 9.0) * 0.12
@@ -175,7 +215,7 @@ func _draw_body() -> void:
 		pos += perp * wob
 		seg_data.append({"pos": pos, "perp": perp, "dir": dir, "w": w, "frac": frac})
 
-	if seg_data.size() < 2:
+	if seg_data.size() < 4:
 		var hsd : float = _traveled
 		if hsd >= 0.0 and hsd <= _total_len:
 			var hd := _path_dir(hsd)

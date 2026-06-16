@@ -1,0 +1,17 @@
+<svg viewBox="-8 -10 176 176" xmlns="http://www.w3.org/2000/svg">
+<path d="M 42,145 C 54,122 70,98 90,74 C 108,52 124,32 132,18 C 120,34 106,54 94,76 C 80,100 66,124 58,148 Z" fill="#e8eef8" stroke="#b0c0d8" stroke-width="1.5"/>
+<path d="M 52,145 C 62,122 76,100 94,78 C 110,58 124,38 130,22 C 118,40 104,60 92,82 C 76,106 62,128 56,152 Z" fill="#c8d8ec" opacity="0.6"/>
+<line x1="54" y1="146" x2="126" y2="24" stroke="#8090a8" stroke-width="3" stroke-linecap="round"/>
+<path d="M 44,146 L50,130 C 58,114 68,98 78,84" fill="none" stroke="#b0c8e0" stroke-width="1.2" opacity="0.65"/>
+<path d="M 58,136 L63,120 C 70,104 80,88 90,74" fill="none" stroke="#b0c8e0" stroke-width="1.2" opacity="0.55"/>
+<path d="M 58,34 C 44,46 32,60 26,76 C 22,88 24,98 32,104" fill="none" stroke="#60a8d0" stroke-width="2.5" stroke-linecap="round" opacity="0.9"/>
+<path d="M 44,26 C 32,42 22,58 20,78" fill="none" stroke="#40a0d8" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+<path d="M 98,134 C 112,120 122,106 126,88 C 130,72 126,60 118,56" fill="none" stroke="#60a8d0" stroke-width="2.5" stroke-linecap="round" opacity="0.9"/>
+<path d="M 112,142 C 126,126 134,108 136,88" fill="none" stroke="#40a0d8" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+<circle cx="50" cy="52" r="5" fill="#80d0f0" opacity="0.9"/>
+<circle cx="112" cy="118" r="4.5" fill="#80d0f0" opacity="0.8"/>
+<circle cx="34" cy="102" r="3.5" fill="#a0e0ff" opacity="0.95"/>
+<circle cx="126" cy="70" r="3.5" fill="#a0e0ff" opacity="0.95"/>
+<circle cx="140" cy="88" r="2.5" fill="#c0f0ff" opacity="0.8"/>
+<circle cx="18" cy="80" r="2.5" fill="#c0f0ff" opacity="0.7"/>
+</svg>

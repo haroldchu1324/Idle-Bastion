@@ -2,19 +2,19 @@
 extends Control
 
 # ── Debug toggle — set false before exporting ─────────────────────────────────
-const DEBUG : bool = true
+const DEBUG : bool = false
 
 const NODE_R     : float = 36.0
 const CENTER_R   : float = 48.0
 const SPECIAL_R  : float = 42.0
 const LINE_W     : float = 3.5
-const C_LOCKED     := Color(0.13, 0.13, 0.18)
-const C_LOCKED_BDR := Color(0.30, 0.30, 0.38)
-const C_AVAIL_BDR  := Color(0.90, 0.82, 0.28)
-const C_DONE_BDR   := Color(1.00, 0.92, 0.50)
-const C_LINE_OFF   := Color(0.22, 0.22, 0.28)
-const C_LINE_ON    := Color(0.72, 0.65, 0.22)
-const C_GEM        := Color(0.45, 0.75, 1.0)
+const C_LOCKED     := Color(0.137, 0.125, 0.102)   # dark stone
+const C_LOCKED_BDR := Color(0.333, 0.306, 0.255)   # worn stone border
+const C_AVAIL_BDR  := Color(0.847, 0.702, 0.365)   # royal gold #D8B35D
+const C_DONE_BDR   := Color(0.949, 0.851, 0.545)   # highlight gold #F2D98B
+const C_LINE_OFF   := Color(0.235, 0.216, 0.176)   # dim stone line
+const C_LINE_ON    := Color(0.847, 0.702, 0.365)   # royal gold line
+const C_GEM        := Color(0.298, 0.608, 0.910)   # arcane blue #4C9BE8
 const TIER_COSTS   : Array = [15, 25, 40]
 
 var _nodes       : Array      = []
@@ -41,18 +41,25 @@ func setup(bold: Font, reg: Font) -> void:
 
 func _build_gem_label() -> void:
 	if is_instance_valid(_gem_lbl):
-		_gem_lbl.text = "🔷  %d gems" % GameData.blue_gems
+		_gem_lbl.text = "%d gems" % GameData.blue_gems
 		return
+	var hbox := HBoxContainer.new()
+	hbox.position = Vector2(1280 - 260, 8)
+	hbox.size     = Vector2(242, 38)
+	hbox.alignment = BoxContainer.ALIGNMENT_END
+	hbox.add_theme_constant_override("separation", 5)
+	hbox.z_index = 5
+	hbox.mouse_filter = MOUSE_FILTER_IGNORE
+	add_child(hbox)
+	hbox.add_child(_mk_blue_gem_icon(24.0))
 	_gem_lbl = Label.new()
-	_gem_lbl.position = Vector2(1280 - 230, 12)
-	_gem_lbl.size     = Vector2(210, 36)
-	_gem_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_gem_lbl.add_theme_font_override("font", _font_bold)
 	_gem_lbl.add_theme_font_size_override("font_size", 20)
 	_gem_lbl.add_theme_color_override("font_color", C_GEM)
 	_gem_lbl.z_index = 5
-	add_child(_gem_lbl)
-	_gem_lbl.text = "🔷  %d gems" % GameData.blue_gems
+	_gem_lbl.mouse_filter = MOUSE_FILTER_IGNORE
+	hbox.add_child(_gem_lbl)
+	_gem_lbl.text = "%d gems" % GameData.blue_gems
 
 
 func _build_reset_btn() -> void:
@@ -115,7 +122,7 @@ func _build_reset_btn() -> void:
 		GameData.blue_gems += 1000
 		GameData.save_game()
 		if is_instance_valid(_gem_lbl):
-			_gem_lbl.text = "🔷  %d gems" % GameData.blue_gems
+			_gem_lbl.text = "%d gems" % GameData.blue_gems
 		if is_instance_valid(_popup):
 			var nd := _get_active_node()
 			if not nd.is_empty():
@@ -136,7 +143,7 @@ func _on_reset_pressed() -> void:
 	GameData.upgrade_purchases = {}
 	GameData.save_game()
 	if is_instance_valid(_gem_lbl):
-		_gem_lbl.text = "🔷  %d gems" % GameData.blue_gems
+		_gem_lbl.text = "%d gems" % GameData.blue_gems
 	_close_popup()
 	_active_id = ""
 	queue_redraw()
@@ -567,18 +574,19 @@ func _open_popup(nd: Dictionary) -> void:
 		btn.disabled = true
 		bs.bg_color = Color(0.20, 0.20, 0.26)
 	elif GameData.blue_gems < cost:
-		btn.text = "🔷  Need %d gems  (you have %d)" % [cost, GameData.blue_gems]
 		btn.disabled = true
 		bs.bg_color = Color(0.35, 0.14, 0.14)
+		_add_gem_content_to_btn(btn, "Need ", " %d  (you have %d)" % [cost, GameData.blue_gems], 16.0)
+		btn.add_theme_color_override("font_color_disabled", Color(0.80, 0.60, 0.60))
 	else:
-		btn.text = "⬆  Upgrade  —  🔷 %d gems" % cost
 		btn.disabled = false
 		bs.bg_color = Color(0.18, 0.38, 0.60)
+		_add_gem_content_to_btn(btn, "⬆  Upgrade  — ", " %d gems" % cost, 16.0)
 		btn.add_theme_color_override("font_color", Color(1, 1, 1))
 		btn.pressed.connect(func():
 			if GameData.try_buy_upgrade(nd["id"], nd["max_tiers"], cost):
 				if is_instance_valid(_gem_lbl):
-					_gem_lbl.text = "🔷  %d gems" % GameData.blue_gems
+					_gem_lbl.text = "%d gems" % GameData.blue_gems
 				queue_redraw()
 				_open_popup(nd)
 		)
@@ -605,3 +613,46 @@ func _close_popup() -> void:
 	if is_instance_valid(_popup):
 		_popup.queue_free()
 		_popup = null
+
+
+func _load_blue_gem_tex() -> Texture2D:
+	var p := "res://assets/blue_gem.svg"
+	if ResourceLoader.exists(p):
+		return load(p) as Texture2D
+	return null
+
+
+func _mk_blue_gem_icon(sz: float) -> TextureRect:
+	var tr := TextureRect.new()
+	tr.custom_minimum_size = Vector2(sz, sz)
+	tr.size         = Vector2(sz, sz)
+	tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	tr.expand_mode  = TextureRect.EXPAND_FIT_WIDTH_PROPORTIONAL
+	tr.mouse_filter = MOUSE_FILTER_IGNORE
+	var tex := _load_blue_gem_tex()
+	if tex:
+		tr.texture = tex
+	return tr
+
+
+func _add_gem_content_to_btn(btn: Button, left_text: String, right_text: String, sz: float) -> void:
+	btn.text = ""
+	var hbox := HBoxContainer.new()
+	hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	hbox.add_theme_constant_override("separation", 4)
+	hbox.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	hbox.mouse_filter = MOUSE_FILTER_IGNORE
+	var lbl := Label.new()
+	lbl.text = left_text
+	lbl.add_theme_font_override("font", _font_bold)
+	lbl.add_theme_font_size_override("font_size", 14)
+	lbl.mouse_filter = MOUSE_FILTER_IGNORE
+	hbox.add_child(lbl)
+	hbox.add_child(_mk_blue_gem_icon(sz))
+	var r_lbl := Label.new()
+	r_lbl.text = right_text
+	r_lbl.add_theme_font_override("font", _font_bold)
+	r_lbl.add_theme_font_size_override("font_size", 14)
+	r_lbl.mouse_filter = MOUSE_FILTER_IGNORE
+	hbox.add_child(r_lbl)
+	btn.add_child(hbox)
