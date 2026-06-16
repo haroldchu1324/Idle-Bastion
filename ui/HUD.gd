@@ -3524,13 +3524,18 @@ func _build_run_results_screen() -> void:
 	overlay.add_child(cont_btn)
 
 
+func _mk_statue(tp: String, lbl: String, cb: Callable, pos: Vector2, sz: Vector2, phase: float) -> _StatueBtn:
+	var s := _StatueBtn.new()
+	s.position = pos
+	s.size     = sz
+	s.setup(tp, lbl, cb, _font_bold, phase)
+	return s
+
 func _build_game_over_screen() -> void:
-	# Full-screen main page shown on game over
+	# ── Background ───────────────────────────────────────────────────────────
 	var overlay := Panel.new()
 	var bg_s := StyleBoxFlat.new()
-	bg_s.bg_color = Color(0.094, 0.086, 0.071)
-	bg_s.corner_radius_top_left = 0; bg_s.corner_radius_top_right = 0
-	bg_s.corner_radius_bottom_left = 0; bg_s.corner_radius_bottom_right = 0
+	bg_s.bg_color = Color(0.072, 0.065, 0.055)   # deep stone floor
 	overlay.add_theme_stylebox_override("panel", bg_s)
 	overlay.position     = Vector2.ZERO
 	overlay.size         = Vector2(1280, 720)
@@ -3539,91 +3544,125 @@ func _build_game_over_screen() -> void:
 	add_child(overlay)
 	_game_over_screen = overlay
 
-	# Dark vignette gradient bands for atmosphere
+	# Atmospheric top vignette (warm blood-red for game-over mood)
 	var top_band := ColorRect.new()
-	top_band.color    = Color(0.55, 0.08, 0.08, 0.35)
-	top_band.position = Vector2.ZERO
-	top_band.size     = Vector2(1280, 180)
+	top_band.color        = Color(0.48, 0.07, 0.07, 0.32)
+	top_band.position     = Vector2.ZERO
+	top_band.size         = Vector2(1280, 155)
 	top_band.mouse_filter = MOUSE_FILTER_IGNORE
 	overlay.add_child(top_band)
 
-	# Title
-	_go_title_lbl = _label("💀  IDLE BASTION", _font_bold, 52, C_WHITE)
-	var title : Label = _go_title_lbl
-	title.position             = Vector2(0, 28)
+	# Subtle stone floor horizontal bands (atmosphere)
+	for i in range(3):
+		var band := ColorRect.new()
+		band.color        = Color(1, 1, 1, 0.018 - float(i) * 0.004)
+		band.position     = Vector2(0, 175.0 + float(i) * 180.0)
+		band.size         = Vector2(1280, 1)
+		band.mouse_filter = MOUSE_FILTER_IGNORE
+		overlay.add_child(band)
+
+	# Bottom warm ambient (torch glow from ground)
+	var bot_glow := ColorRect.new()
+	bot_glow.color        = Color(0.72, 0.42, 0.10, 0.06)
+	bot_glow.position     = Vector2(0, 620)
+	bot_glow.size         = Vector2(1280, 100)
+	bot_glow.mouse_filter = MOUSE_FILTER_IGNORE
+	overlay.add_child(bot_glow)
+
+	# ── Title ────────────────────────────────────────────────────────────────
+	_go_title_lbl = _label("🛡  IDLE BASTION", _font_bold, 52, C_WHITE)
+	var title := _go_title_lbl
+	title.position             = Vector2(0, 22)
 	title.size                 = Vector2(1280, 70)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
 	title.mouse_filter         = MOUSE_FILTER_IGNORE
 	overlay.add_child(title)
 
-	# Subtitle / stage info
+	# Subtitle decorative line under title
+	var title_line := ColorRect.new()
+	title_line.color        = Color(C_GOLD, 0.40)
+	title_line.position     = Vector2(420, 95)
+	title_line.size         = Vector2(440, 1)
+	title_line.mouse_filter = MOUSE_FILTER_IGNORE
+	overlay.add_child(title_line)
+
+	# Game-over subtitles (hidden by default, shown via show_game_over())
 	_go_stage_lbl = _label("Stage 1 reached", _font_bold, 22, Color(0.85, 0.55, 0.55))
-	_go_stage_lbl.position             = Vector2(0, 106)
+	_go_stage_lbl.position             = Vector2(0, 102)
 	_go_stage_lbl.size                 = Vector2(1280, 34)
 	_go_stage_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_go_stage_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
 	overlay.add_child(_go_stage_lbl)
 
 	_go_flavour_lbl = _label("Your kingdom has fallen…", _font_reg, 16, Color(0.55, 0.42, 0.42))
-	_go_flavour_lbl.position             = Vector2(0, 140)
+	_go_flavour_lbl.position             = Vector2(0, 136)
 	_go_flavour_lbl.size                 = Vector2(1280, 26)
 	_go_flavour_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_go_flavour_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
 	overlay.add_child(_go_flavour_lbl)
 
-	# Horizontal divider
-	var hdiv := ColorRect.new()
-	hdiv.color    = Color(1, 1, 1, 0.07)
-	hdiv.position = Vector2(120, 178)
-	hdiv.size     = Vector2(1040, 2)
-	hdiv.mouse_filter = MOUSE_FILTER_IGNORE
-	overlay.add_child(hdiv)
+	# ── TOP ROW — 5 navigation statues ──────────────────────────────────────
+	# Evenly spaced across the full width.  Stat size: 158 × 240
+	const SW : int = 158; const SH : int = 240
+	const SW_GAP : int = (1280 - 5 * SW) / 6   # ~43 px
+	const TOP_Y  : int = 160
 
-	# Nav buttons — left-center column (Upgrades, Shop, World Map)
-	const NAV_BTN_W : int = 260
-	const NAV_BTN_H : int = 64
-	const NAV_BTN_X : int = 100
-	const NAV_BTN_GAP : int = 20
-	var nav_data : Array = [
-		"⚔  Upgrades",
-		"🛒  Shop",
-		"🗺  World Map",
-		"🦸  Heroes",
-		"🗼  Towers",
+	var nav_defs : Array = [
+		{"type": "upgrades", "lbl": "Upgrades",  "idx": 0, "phase": 0.00},
+		{"type": "shop",     "lbl": "Shop",       "idx": 1, "phase": 0.95},
+		{"type": "worldmap", "lbl": "World Map",  "idx": 2, "phase": 1.72},
+		{"type": "heroes",   "lbl": "Heroes",     "idx": 3, "phase": 2.55},
+		{"type": "towers",   "lbl": "Towers",     "idx": 4, "phase": 3.30},
 	]
-	var nav_start_y : int = 240
-	for ni in range(nav_data.size()):
-		var btn_y   : int = nav_start_y + ni * (NAV_BTN_H + NAV_BTN_GAP)
-		var nav_btn := Button.new()
-		nav_btn.text         = nav_data[ni]
-		nav_btn.position     = Vector2(NAV_BTN_X, btn_y)
-		nav_btn.size         = Vector2(NAV_BTN_W, NAV_BTN_H)
-		nav_btn.focus_mode   = FOCUS_NONE
-		nav_btn.pivot_offset = Vector2(NAV_BTN_W / 2.0, NAV_BTN_H / 2.0)
-		nav_btn.add_theme_font_override("font",           _font_bold)
-		nav_btn.add_theme_font_size_override("font_size", 20)
-		nav_btn.add_theme_color_override("font_color",    C_WHITE)
-		nav_btn.add_theme_stylebox_override("normal",  _btn_secondary())
-		nav_btn.add_theme_stylebox_override("hover",   _btn_secondary_hover())
-		nav_btn.add_theme_stylebox_override("pressed", _btn_secondary_pressed())
-		nav_btn.add_theme_stylebox_override("focus",   _btn_secondary())
-		var cap_ni := ni
-		nav_btn.pressed.connect(func(): _on_main_nav_pressed(cap_ni))
-		if ni > 0:
-			nav_btn.visible = GameData.tutorial_complete
-			_tutorial_locked_btns.append(nav_btn)
-		overlay.add_child(nav_btn)
+	for i in range(nav_defs.size()):
+		var nd  : Dictionary = nav_defs[i]
+		var sx  : int = SW_GAP + i * (SW + SW_GAP)
+		var stat := _mk_statue(
+			nd["type"], nd["lbl"],
+			func(): _on_main_nav_pressed(nd["idx"]),
+			Vector2(sx, TOP_Y), Vector2(SW, SH), nd["phase"]
+		)
+		if i > 0:
+			stat.visible = GameData.tutorial_complete
+			_tutorial_locked_btns.append(stat)
+		overlay.add_child(stat)
 
-	# "Daily Quests" button — top-right of black area
+	# ── BOTTOM ROW — Relics statue + Dragon (Start Game) statue ─────────────
+	# Relics: left-center  |  Dragon: right-center (larger, steps forward)
+	const RW : int = 165; const RH : int = 250
+	const DW : int = 215; const DH : int = 268
+
+	# Center the pair: total span = RW + 40 + DW = 420, centered in 1280 → x start = 430
+	const PAIR_X : int = (1280 - RW - 40 - DW) / 2   # ≈ 430
+
+	var relics_stat := _mk_statue(
+		"relics", "Relics",
+		func():
+			_game_over_screen.visible = false
+			if is_instance_valid(_relic_screen):
+				_refresh_relics_screen()
+				_relic_screen.visible = true,
+		Vector2(PAIR_X, 420), Vector2(RW, RH), 0.55
+	)
+	overlay.add_child(relics_stat)
+
+	var dragon_stat := _mk_statue(
+		"start", "Start Game",
+		func(): _on_main_nav_pressed(2),
+		Vector2(PAIR_X + RW + 40, 405), Vector2(DW, DH), 1.40
+	)
+	overlay.add_child(dragon_stat)
+
+	# ── Daily Quests — small secondary button (top-right, conditional) ───────
 	var dq_btn := Button.new()
 	dq_btn.text         = "📅  Daily Quests"
-	dq_btn.position     = Vector2(920, 195)
-	dq_btn.size         = Vector2(240, 58)
+	dq_btn.position     = Vector2(990, 192)
+	dq_btn.size         = Vector2(220, 50)
 	dq_btn.focus_mode   = FOCUS_NONE
-	dq_btn.pivot_offset = Vector2(120, 29)
+	dq_btn.pivot_offset = Vector2(110, 25)
 	dq_btn.add_theme_font_override("font",           _font_bold)
-	dq_btn.add_theme_font_size_override("font_size", 18)
+	dq_btn.add_theme_font_size_override("font_size", 16)
 	dq_btn.add_theme_color_override("font_color",    C_WHITE)
 	dq_btn.add_theme_stylebox_override("normal",  _btn_secondary())
 	dq_btn.add_theme_stylebox_override("hover",   _btn_secondary_hover())
@@ -3638,45 +3677,6 @@ func _build_game_over_screen() -> void:
 	)
 	overlay.add_child(dq_btn)
 	_dq_main_btn = dq_btn
-
-	# "Relics" button — below Daily Quests
-	var relics_btn := Button.new()
-	relics_btn.text         = "💎  Relics"
-	relics_btn.position     = Vector2(920, 268)
-	relics_btn.size         = Vector2(240, 58)
-	relics_btn.focus_mode   = FOCUS_NONE
-	relics_btn.pivot_offset = Vector2(120, 29)
-	relics_btn.add_theme_font_override("font",           _font_bold)
-	relics_btn.add_theme_font_size_override("font_size", 18)
-	relics_btn.add_theme_color_override("font_color",    C_WHITE)
-	relics_btn.add_theme_stylebox_override("normal",  _btn_secondary())
-	relics_btn.add_theme_stylebox_override("hover",   _btn_secondary_hover())
-	relics_btn.add_theme_stylebox_override("pressed", _btn_secondary_pressed())
-	relics_btn.add_theme_stylebox_override("focus",   _btn_secondary())
-	relics_btn.pressed.connect(func():
-		_game_over_screen.visible = false
-		if is_instance_valid(_relic_screen):
-			_refresh_relics_screen()
-			_relic_screen.visible = true
-	)
-	overlay.add_child(relics_btn)
-
-	# "Start Game" button — bottom right
-	var start_btn := Button.new()
-	start_btn.text         = ">  Start Game"
-	start_btn.position     = Vector2(1280 - 260 - 40, 720 - 80 - 40)
-	start_btn.size         = Vector2(260, 80)
-	start_btn.pivot_offset = Vector2(130, 40)
-	start_btn.focus_mode   = FOCUS_NONE
-	start_btn.add_theme_font_override("font",           _font_bold)
-	start_btn.add_theme_font_size_override("font_size", 26)
-	start_btn.add_theme_color_override("font_color",    C_WHITE)
-	start_btn.add_theme_stylebox_override("normal",  _btn_primary())
-	start_btn.add_theme_stylebox_override("hover",   _btn_primary_hover())
-	start_btn.add_theme_stylebox_override("pressed", _btn_primary_pressed())
-	start_btn.add_theme_stylebox_override("focus",   _btn_primary())
-	start_btn.pressed.connect(func(): _on_main_nav_pressed(2))
-	overlay.add_child(start_btn)
 
 	call_deferred("_wire_hover_recursive", overlay)
 
@@ -10087,6 +10087,533 @@ func show_boss_buff_cards(buffs: Array, stage: int) -> void:
 				)
 			)
 		)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# INNER CLASS — interactive stone statue menu button
+# ══════════════════════════════════════════════════════════════════════════════
+
+class _StatueBtn extends Control:
+	# ── Stone palette ──────────────────────────────────────────────────────────
+	const SC  := Color(0.40, 0.36, 0.30)          # stone mid-tone
+	const SD  := Color(0.20, 0.17, 0.13)          # stone deep shadow
+	const SL  := Color(0.58, 0.53, 0.44)          # stone lit face
+	const SE  := Color(0.68, 0.62, 0.52)          # stone sharp edge catch
+	const MS  := Color(0.28, 0.38, 0.18, 0.55)    # aged moss
+	const NP  := Color(0.26, 0.23, 0.19)          # nameplate stone
+	const WL  := Color(0.88, 0.60, 0.16, 0.22)    # warm torch under-light
+	const GL  := Color(1.00, 0.96, 0.80)           # hover glow ivory
+
+	var _type  : String   = ""
+	var _lbl   : String   = ""
+	var _cb    : Callable
+	var _font  : Font
+	var _hover : bool    = false
+	var _ga    : float   = 0.0   # glow alpha 0→1
+	var _phase : float   = 0.0   # per-statue random phase offset
+	var _fly   : float   = 0.0   # current idle float y
+	var _gtw   : Tween   = null
+
+	func setup(tp: String, lbl: String, cb: Callable, fnt: Font, phase_off: float) -> void:
+		_type  = tp
+		_lbl   = lbl
+		_cb    = cb
+		_font  = fnt
+		_phase = phase_off
+		mouse_filter = MOUSE_FILTER_STOP
+		pivot_offset = size / 2.0
+		mouse_entered.connect(_on_enter)
+		mouse_exited.connect(_on_exit)
+
+	func _on_enter() -> void:
+		_hover = true
+		if is_instance_valid(_gtw): _gtw.kill()
+		_gtw = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
+		_gtw.tween_property(self, "_ga", 1.0, 0.16)
+		var stw := create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
+		stw.tween_property(self, "scale", Vector2(1.06, 1.06), 0.12)
+
+	func _on_exit() -> void:
+		_hover = false
+		if is_instance_valid(_gtw): _gtw.kill()
+		_gtw = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
+		_gtw.tween_property(self, "_ga", 0.0, 0.22)
+		var stw := create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
+		stw.tween_property(self, "scale", Vector2(1.0, 1.0), 0.14)
+
+	func _gui_input(ev: InputEvent) -> void:
+		if ev is InputEventMouseButton and ev.button_index == MOUSE_BUTTON_LEFT and ev.pressed:
+			_cb.call()
+
+	func _process(dt: float) -> void:
+		_phase += dt
+		_fly = sin(_phase * 0.88) * 4.5 - (8.0 if _hover else 0.0)
+		queue_redraw()
+
+	func _draw() -> void:
+		var w := size.x; var h := size.y
+		_draw_nameplate(w, h)
+		match _type:
+			"upgrades": _draw_knight(w, h)
+			"shop":     _draw_shop(w, h)
+			"worldmap": _draw_worldmap(w, h)
+			"heroes":   _draw_hero(w, h)
+			"towers":   _draw_towers(w, h)
+			"relics":   _draw_relics(w, h)
+			"start":    _draw_dragon(w, h)
+
+	# ── Drawing helpers ──────────────────────────────────────────────────────
+	func _tri(a: Vector2, b: Vector2, c: Vector2, col: Color) -> void:
+		draw_colored_polygon(PackedVector2Array([a, b, c]), col)
+
+	func _pedestal(cx: float, y_top: float, pw: float, ph: float) -> void:
+		var pts := PackedVector2Array([
+			Vector2(cx - pw * 0.44, y_top),       Vector2(cx + pw * 0.44, y_top),
+			Vector2(cx + pw * 0.56, y_top + ph),  Vector2(cx - pw * 0.56, y_top + ph),
+		])
+		draw_colored_polygon(pts, SC)
+		draw_line(pts[0], pts[1], SE, 1.5)
+		draw_line(pts[3], pts[2], SD, 2.0)
+		draw_line(pts[0], pts[3], Color(SD, 0.5), 1.0)
+		draw_line(pts[1], pts[2], Color(SD, 0.5), 1.0)
+		draw_circle(pts[3] + Vector2(8, -4), 4.5, MS)
+		draw_circle(pts[2] + Vector2(-8, -4), 3.5, MS)
+		# Warm torch glow from below
+		draw_arc(Vector2(cx, y_top + ph + 5), pw * 0.52, PI * 0.06, PI * 0.94, 14, WL, 11.0)
+
+	func _glow_box(x: float, y: float, rw: float, rh: float) -> void:
+		if _ga < 0.02: return
+		var g := Color(GL, _ga * 0.42)
+		draw_rect(Rect2(x - 3, y - 3, rw + 6, rh + 6), g, false, 2.5)
+		draw_rect(Rect2(x - 7, y - 7, rw + 14, rh + 14), Color(GL, _ga * 0.15), false, 1.5)
+
+	func _draw_nameplate(w: float, h: float) -> void:
+		var nh := 34.0; var nw := w * 0.84
+		var nx := (w - nw) * 0.5; var ny := h - nh - 2.0
+		draw_rect(Rect2(nx, ny, nw, nh), SD)
+		draw_rect(Rect2(nx + 3, ny + 3, nw - 6, nh - 6), NP)
+		draw_rect(Rect2(nx, ny, nw, nh), Color(SE, 0.32), false, 1.0)
+		if _font:
+			var fs := 13
+			var tw := _font.get_string_size(_lbl, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+			var tx := (w - tw) * 0.5; var ty := ny + nh * 0.67
+			draw_string(_font, Vector2(tx + 1, ty + 1), _lbl, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0, 0, 0, 0.55))
+			draw_string(_font, Vector2(tx, ty), _lbl, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0.94, 0.87, 0.68))
+		if _ga > 0.02:
+			draw_rect(Rect2(nx - 1, ny - 1, nw + 2, nh + 2), Color(SE, _ga * 0.40), false, 2.0)
+
+	# ── Knight — Upgrades ────────────────────────────────────────────────────
+	func _draw_knight(w: float, h: float) -> void:
+		var cx := w * 0.5
+		var by := h - 38.0 + _fly   # float base
+		_pedestal(cx, by - 30, w * 0.70, 30)
+
+		# Legs / greaves
+		draw_rect(Rect2(cx - 14, by - 72, 11, 44), SC)
+		draw_rect(Rect2(cx + 3, by - 72, 11, 44), SC)
+		draw_line(Vector2(cx - 14, by - 72), Vector2(cx - 14, by - 28), SE, 1.0)
+		draw_line(Vector2(cx + 14, by - 72), Vector2(cx + 14, by - 28), SE, 1.0)
+		# Boot trim
+		draw_line(Vector2(cx - 14, by - 30), Vector2(cx - 3, by - 30), Color(SE, 0.6), 1.5)
+		draw_line(Vector2(cx + 3, by - 30), Vector2(cx + 14, by - 30), Color(SE, 0.6), 1.5)
+
+		# Cape behind (darker)
+		_tri(Vector2(cx + 4, by - 140), Vector2(cx + 28, by - 30), Vector2(cx - 2, by - 30),
+			Color(SD.r, SD.g, SD.b, 0.80))
+
+		# Torso / breastplate
+		draw_rect(Rect2(cx - 16, by - 122, 32, 52), SC)
+		draw_line(Vector2(cx, by - 122), Vector2(cx, by - 72), Color(SD, 0.55), 1.0)
+		draw_line(Vector2(cx - 14, by - 120), Vector2(cx - 14, by - 72), SE, 1.0)
+
+		# Pauldrons (shoulder guards)
+		draw_circle(Vector2(cx - 21, by - 120), 9, SC)
+		draw_circle(Vector2(cx + 21, by - 120), 9, SC)
+		draw_arc(Vector2(cx - 21, by - 120), 8, PI * 1.05, PI * 1.95, 8, SE, 1.5)
+		draw_arc(Vector2(cx + 21, by - 120), 8, PI * 1.05, PI * 1.95, 8, SE, 1.5)
+
+		# Sword (right, blade angled up)
+		var sx := cx + 27.0
+		draw_line(Vector2(sx, by - 88), Vector2(sx + 8, by - 170), SL, 3.5)
+		draw_line(Vector2(sx - 8, by - 108), Vector2(sx + 8, by - 108), SC, 3.0)   # crossguard
+		draw_rect(Rect2(sx - 2.5, by - 97, 5, 10), Color(SC, 0.9))                  # grip
+		_tri(Vector2(sx + 8, by - 170), Vector2(sx + 3, by - 162), Vector2(sx + 13, by - 162), SL)
+
+		# Shield (left arm)
+		var shpts := PackedVector2Array([
+			Vector2(cx - 40, by - 127), Vector2(cx - 24, by - 130),
+			Vector2(cx - 22, by - 100), Vector2(cx - 28, by - 88),
+			Vector2(cx - 42, by - 96),
+		])
+		draw_colored_polygon(shpts, SC)
+		draw_polyline(shpts, SE, 1.0, true)
+		draw_circle(Vector2(cx - 32, by - 111), 4.5, SL)  # shield boss
+
+		# Helmet
+		draw_circle(Vector2(cx, by - 146), 15, SC)
+		draw_arc(Vector2(cx, by - 146), 14, -PI * 0.88, -PI * 0.12, 10, SE, 1.5)
+		draw_line(Vector2(cx - 9, by - 146), Vector2(cx + 5, by - 146), SD, 2.5)   # visor
+		draw_line(Vector2(cx - 4, by - 151), Vector2(cx - 4, by - 141), SD, 1.5)   # nasal
+
+		# Plume (animated gentle sway)
+		var plume_c := Color(0.65, 0.12, 0.12, 0.92)
+		var sway := sin(_phase * 1.8) * 2.5
+		draw_line(Vector2(cx - 1 + sway * 0.3, by - 161), Vector2(cx - 5 + sway, by - 183), plume_c, 2.5)
+		draw_line(Vector2(cx + 1 + sway * 0.2, by - 161), Vector2(cx - 1 + sway * 0.8, by - 180), plume_c, 2.0)
+		draw_line(Vector2(cx + 3 + sway * 0.1, by - 161), Vector2(cx + 3 + sway * 0.5, by - 176), plume_c, 1.5)
+
+		_glow_box(cx - 46, by - 183, 92, 183)
+
+	# ── Shop Stall ───────────────────────────────────────────────────────────
+	func _draw_shop(w: float, h: float) -> void:
+		var cx := w * 0.5
+		var by := h - 38.0 + _fly
+		_pedestal(cx, by - 28, w * 0.76, 28)
+
+		# Back panel
+		draw_rect(Rect2(cx - 34, by - 102, 68, 102), SC)
+		draw_line(Vector2(cx - 34, by - 102), Vector2(cx + 34, by - 102), SE, 1.5)
+		draw_line(Vector2(cx - 34, by - 102), Vector2(cx - 34, by), Color(SE, 0.4), 1.0)
+		draw_line(Vector2(cx + 34, by - 102), Vector2(cx + 34, by), Color(SE, 0.4), 1.0)
+
+		# Support poles
+		draw_line(Vector2(cx - 36, by - 98), Vector2(cx - 36, by), Color(SD, 0.6), 5.0)
+		draw_line(Vector2(cx + 36, by - 98), Vector2(cx + 36, by), Color(SD, 0.6), 5.0)
+		draw_line(Vector2(cx - 36, by - 98), Vector2(cx - 36, by), SL, 1.5)
+		draw_line(Vector2(cx + 36, by - 98), Vector2(cx + 36, by), SL, 1.5)
+
+		# Awning (triangle)
+		_tri(Vector2(cx - 46, by - 92), Vector2(cx + 46, by - 92), Vector2(cx, by - 130), SC)
+		draw_line(Vector2(cx - 46, by - 92), Vector2(cx, by - 130), SE, 1.5)
+		draw_line(Vector2(cx + 46, by - 92), Vector2(cx, by - 130), SE, 1.5)
+		# Awning fringe triangles
+		for i in range(5):
+			var fx := cx - 36.0 + float(i) * 18.0
+			_tri(Vector2(fx, by - 92), Vector2(fx + 9, by - 92), Vector2(fx + 4.5, by - 82), SL)
+
+		# Counter top slab
+		draw_rect(Rect2(cx - 38, by - 56, 76, 10), SL)
+		draw_rect(Rect2(cx - 38, by - 46, 76, 46), SC)
+		draw_line(Vector2(cx - 38, by - 46), Vector2(cx + 38, by - 46), SE, 1.0)
+
+		# Coins on counter (gold)
+		for i in range(4):
+			var coinx := cx - 20.0 + float(i) * 12.0
+			draw_circle(Vector2(coinx, by - 57), 5.5, Color(0.78, 0.60, 0.18))
+			draw_arc(Vector2(coinx, by - 57), 4.5, -PI * 0.8, -PI * 0.2, 6, Color(1.0, 0.88, 0.38), 1.5)
+
+		# Small barrel right side
+		draw_rect(Rect2(cx + 28, by - 52, 16, 30), SC)
+		draw_arc(Vector2(cx + 36, by - 37), 8, 0, TAU, 8, Color(SD, 0.7), 1.5)
+		draw_line(Vector2(cx + 28, by - 37), Vector2(cx + 44, by - 37), Color(SD, 0.5), 1.0)
+
+		# Hanging lantern
+		var lx := cx - 22.0; var ly := by - 112.0
+		draw_line(Vector2(lx, by - 125), Vector2(lx, ly), Color(SD, 0.6), 1.0)
+		draw_rect(Rect2(lx - 5, ly, 10, 14), NP)
+		draw_circle(Vector2(lx, ly + 7), 5, Color(0.88, 0.68, 0.18, 0.7))
+		draw_rect(Rect2(lx - 5, ly, 10, 14), Color(SE, 0.3), false, 1.0)
+
+		_glow_box(cx - 46, by - 130, 92, 130)
+
+	# ── Stone Map Tablet — World Map ─────────────────────────────────────────
+	func _draw_worldmap(w: float, h: float) -> void:
+		var cx := w * 0.5
+		var by := h - 38.0 + _fly
+		_pedestal(cx, by - 26, w * 0.66, 26)
+
+		# Side support pillars
+		draw_rect(Rect2(cx - 38, by - 122, 9, 122), Color(SC, 0.8))
+		draw_rect(Rect2(cx + 29, by - 122, 9, 122), Color(SC, 0.8))
+		draw_line(Vector2(cx - 38, by - 122), Vector2(cx - 29, by - 122), SE, 1.5)
+		draw_line(Vector2(cx + 29, by - 122), Vector2(cx + 38, by - 122), SE, 1.5)
+
+		# Stone tablet face (lighter)
+		draw_rect(Rect2(cx - 32, by - 146, 64, 138), SC)
+		draw_rect(Rect2(cx - 30, by - 144, 60, 134), SL)
+		draw_rect(Rect2(cx - 32, by - 146, 64, 138), Color(SE, 0.38), false, 1.5)
+
+		# Carved map lines
+		var mc := Color(SD.r, SD.g, SD.b, 0.65)
+		# Continent outlines
+		draw_line(Vector2(cx - 18, by - 132), Vector2(cx - 4, by - 120), mc, 2.0)
+		draw_line(Vector2(cx - 4, by - 120), Vector2(cx + 14, by - 125), mc, 2.0)
+		draw_line(Vector2(cx + 14, by - 125), Vector2(cx + 22, by - 108), mc, 2.0)
+		draw_line(Vector2(cx - 15, by - 102), Vector2(cx - 2, by - 92), mc, 2.0)
+		draw_line(Vector2(cx - 2, by - 92), Vector2(cx + 20, by - 98), mc, 2.0)
+		draw_line(Vector2(cx + 6, by - 78), Vector2(cx + 24, by - 68), mc, 1.5)
+		draw_line(Vector2(cx - 22, by - 78), Vector2(cx - 8, by - 72), mc, 1.5)
+		# Mountain marks
+		_tri(Vector2(cx - 22, by - 114), Vector2(cx - 15, by - 126), Vector2(cx - 8, by - 114), mc)
+		_tri(Vector2(cx + 8, by - 88), Vector2(cx + 14, by - 100), Vector2(cx + 20, by - 88), mc)
+		# River line
+		draw_line(Vector2(cx - 2, by - 120), Vector2(cx - 6, by - 90), Color(0.35, 0.50, 0.68, 0.55), 1.5)
+
+		# Compass rose (top-right of tablet)
+		var krx := cx + 18.0; var kry := by - 132.0
+		draw_circle(Vector2(krx, kry), 9, NP)
+		for a in [0.0, PI * 0.5, PI, PI * 1.5]:
+			var tip := Vector2(krx + cos(a) * 9, kry + sin(a) * 9)
+			var bl  := Vector2(krx + cos(a + PI * 0.5) * 3, kry + sin(a + PI * 0.5) * 3)
+			var br  := Vector2(krx + cos(a - PI * 0.5) * 3, kry + sin(a - PI * 0.5) * 3)
+			_tri(tip, bl, br, SL)
+
+		# Age cracks
+		var cc := Color(SD, 0.5)
+		draw_line(Vector2(cx - 28, by - 82), Vector2(cx - 20, by - 58), cc, 1.0)
+		draw_line(Vector2(cx + 24, by - 112), Vector2(cx + 30, by - 90), cc, 1.0)
+
+		_glow_box(cx - 38, by - 146, 76, 146)
+
+	# ── Warrior — Heroes ────────────────────────────────────────────────────
+	func _draw_hero(w: float, h: float) -> void:
+		var cx := w * 0.5
+		var by := h - 38.0 + _fly
+		_pedestal(cx, by - 30, w * 0.68, 30)
+
+		# Cape (dynamic sway)
+		var csway := sin(_phase * 0.7) * 3.0
+		var cape_pts := PackedVector2Array([
+			Vector2(cx + 4, by - 142), Vector2(cx + 26 + csway, by - 62),
+			Vector2(cx + 18 + csway, by - 25), Vector2(cx - 5, by - 25),
+			Vector2(cx - 4, by - 142),
+		])
+		draw_colored_polygon(cape_pts, Color(SD.r * 1.1, SD.g * 1.1, SD.b * 1.1, 0.82))
+
+		# Legs
+		draw_rect(Rect2(cx - 12, by - 68, 10, 44), SC)
+		draw_rect(Rect2(cx + 2, by - 68, 10, 44), SC)
+		draw_line(Vector2(cx - 12, by - 68), Vector2(cx - 12, by - 24), SE, 1.0)
+
+		# Body / tabard
+		draw_rect(Rect2(cx - 15, by - 122, 30, 56), SC)
+		draw_line(Vector2(cx, by - 122), Vector2(cx, by - 68), Color(SD, 0.4), 1.0)
+		draw_line(Vector2(cx - 13, by - 120), Vector2(cx - 13, by - 68), SE, 1.0)
+		# Belt
+		draw_rect(Rect2(cx - 15, by - 80, 30, 5), Color(SD, 0.7))
+
+		# Left arm (raised)
+		draw_line(Vector2(cx - 14, by - 114), Vector2(cx - 32, by - 148), SC, 6.0)
+		draw_line(Vector2(cx - 14, by - 114), Vector2(cx - 32, by - 148), SE, 1.5)
+		# Raised fist
+		draw_circle(Vector2(cx - 33, by - 150), 6, SC)
+		draw_arc(Vector2(cx - 33, by - 150), 5, -PI * 0.9, -PI * 0.1, 8, SE, 1.5)
+
+		# Right arm (holding orb)
+		draw_line(Vector2(cx + 14, by - 114), Vector2(cx + 22, by - 88), SC, 6.0)
+		draw_circle(Vector2(cx + 24, by - 84), 7, Color(SC.r * 0.7, SC.g * 0.8, SC.b * 1.15))
+		draw_arc(Vector2(cx + 24, by - 84), 6, -PI * 0.85, -PI * 0.15, 8, SL, 1.5)
+
+		# Head / face
+		draw_circle(Vector2(cx, by - 140), 15, SC)
+		draw_arc(Vector2(cx, by - 140), 14, -PI * 0.88, -PI * 0.12, 10, SE, 1.5)
+		# Crown suggestion
+		for i in range(5):
+			var crown_x := cx - 10.0 + float(i) * 5.0
+			var crown_h := 5.0 if i % 2 == 0 else 3.0
+			draw_rect(Rect2(crown_x, by - 155 - crown_h, 4, crown_h), Color(0.78, 0.62, 0.28))
+
+		_glow_box(cx - 40, by - 165, 80, 165)
+
+	# ── Archer Tower — Towers ────────────────────────────────────────────────
+	func _draw_towers(w: float, h: float) -> void:
+		var cx := w * 0.5
+		var by := h - 38.0 + _fly
+		_pedestal(cx, by - 28, w * 0.72, 28)
+
+		# Tower lower section (wide)
+		draw_rect(Rect2(cx - 24, by - 95, 48, 95), SC)
+		draw_line(Vector2(cx - 24, by - 95), Vector2(cx + 24, by - 95), SE, 1.5)
+		draw_line(Vector2(cx - 24, by - 95), Vector2(cx - 24, by), Color(SE, 0.4), 1.0)
+		draw_line(Vector2(cx + 24, by - 95), Vector2(cx + 24, by), Color(SE, 0.4), 1.0)
+
+		# Tower upper section (narrower)
+		draw_rect(Rect2(cx - 20, by - 135, 40, 42), SC)
+		draw_line(Vector2(cx - 20, by - 135), Vector2(cx + 20, by - 135), SE, 1.5)
+
+		# Battlements (merlons)
+		for i in range(5):
+			if i % 2 == 0:
+				var bx := cx - 22.0 + float(i) * 11.0
+				draw_rect(Rect2(bx, by - 152, 9, 18), SC)
+				draw_line(Vector2(bx, by - 152), Vector2(bx + 9, by - 152), SE, 1.5)
+
+		# Arrow slits
+		draw_rect(Rect2(cx - 3, by - 125, 6, 16), SD)
+		draw_rect(Rect2(cx - 3, by - 78, 6, 16), SD)
+
+		# Stone banding
+		draw_line(Vector2(cx - 24, by - 48), Vector2(cx + 24, by - 48), Color(SE, 0.28), 1.0)
+
+		# Archer figure on top parapet
+		var ax := cx + 6.0; var ab := by - 152.0
+		draw_circle(Vector2(ax, ab - 12), 8, SC)
+		draw_rect(Rect2(ax - 5, ab - 24, 10, 18), SC)
+		draw_line(Vector2(ax - 4, ab - 18), Vector2(ax - 4, ab), Color(SE, 0.5), 1.0)
+		# Bow (arc)
+		draw_arc(Vector2(ax - 15, ab - 18), 13, -PI * 0.45, PI * 0.45, 10, SL, 2.0)
+		# Bowstring
+		draw_line(Vector2(ax - 15, ab - 31), Vector2(ax - 3, ab - 18), Color(SE, 0.6), 1.0)
+		draw_line(Vector2(ax - 3, ab - 18), Vector2(ax - 15, ab - 5), Color(SE, 0.6), 1.0)
+		# Arrow
+		draw_line(Vector2(ax - 26, ab - 18), Vector2(ax - 4, ab - 18), SL, 1.5)
+		_tri(Vector2(ax - 26, ab - 18), Vector2(ax - 22, ab - 21), Vector2(cx - 22, ab - 15), SL)
+
+		_glow_box(cx - 28, by - 170, 56, 170)
+
+	# ── Mage Staff — Relics ──────────────────────────────────────────────────
+	func _draw_relics(w: float, h: float) -> void:
+		var cx := w * 0.5
+		var by := h - 38.0 + _fly
+		_pedestal(cx, by - 32, w * 0.66, 32)
+
+		# Rune circle on pedestal top
+		draw_arc(Vector2(cx, by - 28), 26, PI * 0.08, PI * 0.92, 14, Color(SE, 0.22), 1.0)
+		for i in range(6):
+			var ra := float(i) / 6.0 * TAU
+			draw_circle(Vector2(cx + cos(ra) * 22, by - 28 + sin(ra) * 8), 2.0, Color(SE, 0.38))
+
+		# Staff rod
+		draw_line(Vector2(cx, by - 6), Vector2(cx, by - 148), SC, 5.0)
+		draw_line(Vector2(cx - 1, by - 6), Vector2(cx - 1, by - 148), Color(SE, 0.5), 1.5)
+
+		# Cross-piece
+		draw_line(Vector2(cx - 22, by - 118), Vector2(cx + 22, by - 118), SC, 6.0)
+		draw_line(Vector2(cx - 22, by - 118), Vector2(cx + 22, by - 118), SE, 1.5)
+		draw_circle(Vector2(cx - 22, by - 118), 4.5, SL)
+		draw_circle(Vector2(cx + 22, by - 118), 4.5, SL)
+
+		# Orb / crystal (arcane blue)
+		var oc := Color(0.38, 0.62, 0.92)
+		var oy := by - 162.0
+		draw_circle(Vector2(cx, oy), 18, oc.darkened(0.35))
+		draw_circle(Vector2(cx, oy), 14, oc)
+		draw_arc(Vector2(cx, oy), 13, -PI * 0.85, -PI * 0.15, 10, Color(0.82, 0.94, 1.0, 0.9), 2.0)
+		draw_circle(Vector2(cx - 5, oy - 5), 4.5, Color(1, 1, 1, 0.38))  # specular
+
+		# Orb ambient glow (always on, pulses)
+		var pulse := 0.22 + sin(_phase * 1.6) * 0.08
+		draw_arc(Vector2(cx, oy), 20, 0, TAU, 18, Color(oc.r, oc.g, 1.0, pulse), 4.0)
+
+		# Floating arcane sparks orbiting orb
+		for i in range(5):
+			var sa := float(i) / 5.0 * TAU + _phase * 0.9
+			var sr := 26.0 + sin(_phase * 1.4 + float(i) * 1.2) * 5.0
+			var sp := Vector2(cx + cos(sa) * sr * 0.5, oy + sin(sa) * sr * 0.3)
+			var sa2 := 0.35 + sin(_phase * 1.1 + float(i)) * 0.15
+			draw_circle(sp, 2.0, Color(oc.r, oc.g + 0.1, 1.0, sa2))
+
+		# Enhanced hover orb
+		if _ga > 0.02:
+			draw_arc(Vector2(cx, oy), 18 + _ga * 5, 0, TAU, 20, Color(oc.r, oc.g, 1.0, _ga * 0.38), 3.0)
+
+		_glow_box(cx - 40, by - 180, 80, 180)
+
+	# ── Dragon — Start Game ──────────────────────────────────────────────────
+	func _draw_dragon(w: float, h: float) -> void:
+		var cx := w * 0.5
+		var by := h - 44.0 + _fly
+		_pedestal(cx, by - 38, w * 0.84, 38)
+
+		# Tail (curves right)
+		var tail := PackedVector2Array([
+			Vector2(cx + 16, by - 38), Vector2(cx + 42, by - 60),
+			Vector2(cx + 52, by - 84), Vector2(cx + 40, by - 104),
+			Vector2(cx + 24, by - 94), Vector2(cx + 32, by - 74),
+			Vector2(cx + 36, by - 58), Vector2(cx + 14, by - 40),
+		])
+		draw_colored_polygon(tail, SC)
+		draw_polyline(PackedVector2Array([
+			Vector2(cx + 16, by - 38), Vector2(cx + 42, by - 60),
+			Vector2(cx + 52, by - 84), Vector2(cx + 40, by - 104),
+		]), SE, 1.0)
+
+		# Body mass
+		var body := PackedVector2Array([
+			Vector2(cx - 24, by - 52), Vector2(cx + 24, by - 52),
+			Vector2(cx + 30, by - 108), Vector2(cx + 12, by - 128),
+			Vector2(cx - 12, by - 128), Vector2(cx - 30, by - 108),
+		])
+		draw_colored_polygon(body, SC)
+		draw_polyline(body, SE, 1.0, true)
+
+		# Left wing
+		var lw := PackedVector2Array([
+			Vector2(cx - 24, by - 92), Vector2(cx - 58, by - 76),
+			Vector2(cx - 68, by - 112), Vector2(cx - 44, by - 138),
+			Vector2(cx - 22, by - 128),
+		])
+		draw_colored_polygon(lw, Color(SC, 0.88))
+		draw_polyline(lw, SE, 1.0, true)
+		# Wing membrane lines
+		draw_line(Vector2(cx - 24, by - 92), Vector2(cx - 62, by - 90), Color(SD, 0.5), 1.0)
+		draw_line(Vector2(cx - 24, by - 104), Vector2(cx - 54, by - 112), Color(SD, 0.5), 1.0)
+
+		# Right wing
+		var rw := PackedVector2Array([
+			Vector2(cx + 24, by - 92), Vector2(cx + 58, by - 76),
+			Vector2(cx + 68, by - 112), Vector2(cx + 44, by - 138),
+			Vector2(cx + 22, by - 128),
+		])
+		draw_colored_polygon(rw, Color(SC, 0.88))
+		draw_polyline(rw, SE, 1.0, true)
+		draw_line(Vector2(cx + 24, by - 92), Vector2(cx + 62, by - 90), Color(SD, 0.5), 1.0)
+		draw_line(Vector2(cx + 24, by - 104), Vector2(cx + 54, by - 112), Color(SD, 0.5), 1.0)
+
+		# Wing claw tips
+		_tri(Vector2(cx - 68, by - 112), Vector2(cx - 74, by - 118), Vector2(cx - 66, by - 122), SL)
+		_tri(Vector2(cx + 68, by - 112), Vector2(cx + 74, by - 118), Vector2(cx + 66, by - 122), SL)
+
+		# Body highlight edge
+		draw_line(Vector2(cx - 22, by - 55), Vector2(cx - 28, by - 106), SE, 1.5)
+
+		# Back spines
+		for i in range(5):
+			var sp_x := cx - 8.0 + float(i) * 8.0
+			var sp_by := by - 128.0 - float(i) * 3.0
+			var sh := 12.0 + float(i) * 2.0 + sin(_phase * 1.2 + float(i)) * 1.5
+			_tri(Vector2(sp_x, sp_by - sh), Vector2(sp_x - 4, sp_by), Vector2(sp_x + 4, sp_by), SL)
+
+		# Neck
+		draw_rect(Rect2(cx - 11, by - 150, 22, 24), SC)
+		draw_line(Vector2(cx - 11, by - 150), Vector2(cx - 11, by - 126), SE, 1.0)
+
+		# Head
+		var hc := Vector2(cx - 10, by - 164)
+		draw_circle(hc, 18, SC)
+		draw_arc(hc, 17, -PI * 0.9, -PI * 0.1, 10, SE, 1.5)
+
+		# Horn
+		_tri(Vector2(hc.x + 6, hc.y - 18), Vector2(hc.x + 1, hc.y - 34), Vector2(hc.x + 14, hc.y - 28), SL)
+		_tri(Vector2(hc.x - 2, hc.y - 16), Vector2(hc.x - 6, hc.y - 28), Vector2(hc.x + 4, hc.y - 24), Color(SL, 0.6))
+
+		# Snout
+		var snout := PackedVector2Array([
+			Vector2(hc.x - 11, hc.y - 3), Vector2(hc.x - 30, hc.y + 4),
+			Vector2(hc.x - 28, hc.y + 11), Vector2(hc.x - 9, hc.y + 6),
+		])
+		draw_colored_polygon(snout, SC)
+		draw_line(snout[0], snout[1], SE, 1.0)
+		draw_line(snout[2], snout[3], Color(SD, 0.4), 1.0)
+
+		# Eye (fiery amber)
+		draw_circle(Vector2(hc.x - 4, hc.y - 6), 3.5, Color(0.88, 0.28, 0.08))
+		draw_circle(Vector2(hc.x - 4, hc.y - 6), 1.8, Color(0.15, 0.04, 0.0))
+
+		# Fire breath (animated)
+		var fb := Vector2(hc.x - 30, hc.y + 6)
+		var fa  := 0.60 + sin(_phase * 2.8) * 0.22
+		_tri(fb, fb + Vector2(-28, -10), fb + Vector2(-22, 8), Color(0.96, 0.55, 0.08, fa))
+		_tri(fb + Vector2(-4, -2), fb + Vector2(-36, -6), fb + Vector2(-32, 10), Color(0.90, 0.32, 0.04, fa * 0.55))
+		_tri(fb + Vector2(-2, -1), fb + Vector2(-18, -4), fb + Vector2(-15, 6), Color(1.0, 0.92, 0.40, fa * 0.85))
+		# Embers drift up
+		for i in range(4):
+			var ea  := _phase * 1.8 + float(i) * 1.5
+			var ex := fb.x - 22 + sin(ea) * 6 - float(i) * 4
+			var ey := fb.y - float(i) * 8 - sin(ea * 0.7) * 3
+			draw_circle(Vector2(ex, ey), 1.5, Color(1.0, 0.72, 0.18, 0.6 - float(i) * 0.12))
+
+		_glow_box(cx - 75, by - 198, 150, 198)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
