@@ -405,9 +405,8 @@ func _draw_hp_bar() -> void:
 	var frac  : float = clampf(hp / max_hp, 0.0, 1.0)
 	draw_rect(Rect2(bx, by, bar_w, bar_h), Color(0.10, 0.08, 0.12))
 	var col : Color
-	if frac > 0.5:    col = Color(0.20, 0.85, 0.35) if not is_boss else Color(0.72, 0.15, 0.88)
-	elif frac > 0.25: col = Color(0.95, 0.65, 0.10)
-	else:             col = Color(0.95, 0.15, 0.15)
+	if frac > 0.5: col = Color(0.20, 0.85, 0.35) if not is_boss else Color(0.72, 0.15, 0.88)
+	else:          col = Color(0.95, 0.15, 0.15)
 	draw_rect(Rect2(bx, by, bar_w * frac, bar_h), col)
 
 	# Brittle debuff icon — cracked earth, drawn to the right of the HP bar

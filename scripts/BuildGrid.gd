@@ -198,17 +198,22 @@ func unplace(t: Vector2i) -> void:
 
 
 func _draw() -> void:
-	# Grid outlines for every buildable (non-road-blocked) tile
-	var grid_c := Color(1.0, 1.0, 1.0, 0.18)
+	# Highlight + grid outlines for every buildable (non-road-blocked) tile.
+	# Two-pass: all fills first, then all outlines so no fill can overwrite a grid line.
+	var highlight_c := Color(0.82, 0.94, 1.00, 0.30)
+	var grid_c      := Color(1.0, 1.0, 1.0, 0.20)
 	for c in range(_cols):
 		for r in range(_rows):
 			if not _path_blocked.has(Vector2i(c, r)):
-				draw_rect(
-					Rect2(_island.position.x + c * TILE_SIZE,
-						  _island.position.y + r * TILE_SIZE,
-						  TILE_SIZE, TILE_SIZE),
-					grid_c, false, 1.0
-				)
+				var x0 := _island.position.x + c * TILE_SIZE
+				var y0 := _island.position.y + r * TILE_SIZE
+				draw_rect(Rect2(x0, y0, TILE_SIZE, TILE_SIZE), highlight_c)
+	for c in range(_cols):
+		for r in range(_rows):
+			if not _path_blocked.has(Vector2i(c, r)):
+				var x0 := _island.position.x + c * TILE_SIZE
+				var y0 := _island.position.y + r * TILE_SIZE
+				_draw_tile_smart_outline(c, r, x0, y0, grid_c)
 
 	# Special bonus tiles (World 2 Stage 5) — glass effect
 	for t in special_tiles:
@@ -279,6 +284,31 @@ func _draw() -> void:
 		10.0 - abs(bob) * 0.5,
 		Color(0.0, 0.0, 0.0, max(0.0, shadow_alpha))
 	)
+
+
+func _is_bg(c: int, r: int) -> bool:
+	if c < 0 or c >= _cols or r < 0 or r >= _rows:
+		return true
+	return _path_blocked.has(Vector2i(c, r))
+
+
+func _draw_tile_smart_outline(c: int, r: int, x0: float, y0: float, color: Color, rad: float = 8.0) -> void:
+	var x1 := x0 + TILE_SIZE
+	var y1 := y0 + TILE_SIZE
+
+	# Always draw all 4 sides with draw_rect — guaranteed to be visible on every tile
+	draw_rect(Rect2(x0, y0, TILE_SIZE, TILE_SIZE), color, false, 1.0)
+
+	# Rounded arc only at outer corners (both adjacent sides face background).
+	# Drawn on top of the rect outline to soften the corner.
+	var bg_t := _is_bg(c, r - 1)
+	var bg_r := _is_bg(c + 1, r)
+	var bg_b := _is_bg(c, r + 1)
+	var bg_l := _is_bg(c - 1, r)
+	if bg_t and bg_l: draw_arc(Vector2(x0 + rad, y0 + rad), rad, PI,        PI * 1.5, 8, color)
+	if bg_t and bg_r: draw_arc(Vector2(x1 - rad, y0 + rad), rad, -PI * 0.5, 0.0,      8, color)
+	if bg_r and bg_b: draw_arc(Vector2(x1 - rad, y1 - rad), rad,  0.0,      PI * 0.5, 8, color)
+	if bg_b and bg_l: draw_arc(Vector2(x0 + rad, y1 - rad), rad,  PI * 0.5, PI,       8, color)
 
 
 func _draw_glass_tile(rx: float, ry: float, base: Color) -> void:

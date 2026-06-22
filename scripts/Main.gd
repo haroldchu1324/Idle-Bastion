@@ -249,6 +249,7 @@ func _spawn_knight() -> void:
 	_build_grid.place(tile)
 	var tower : Node2D = TOWER_SCENE.instantiate()
 	add_child(tower)
+	tower.z_index = 6
 	var hero_base : Dictionary = GameData.HERO_DEFS.get(GameData.selected_hero_id, KNIGHT_DATA)
 	var h_data := hero_base.duplicate()
 	var h_idx  : int = hero_base.get("idx", 4)
@@ -1152,6 +1153,7 @@ func _place_turret_random(data: Dictionary) -> void:
 	_build_grid.place(tile)
 	var tower : Node2D = TOWER_SCENE.instantiate()
 	add_child(tower)
+	tower.z_index = 6
 	tower.init_type(data)
 	tower.gold_proc.connect(func(amount: float): _gold += amount; _refresh_hud())
 	tower.serpent_summon.connect(func(dmg: float): _spawn_infernal_serpent(dmg))
@@ -1304,6 +1306,7 @@ func _pick_up_tower(tile: Vector2i) -> void:
 
 
 func _place_held_tower(tile: Vector2i) -> void:
+	_held_tower.z_index = 6
 	var was_moved := tile != _held_from_tile
 	_build_grid.place(tile)
 	_tower_map[tile] = _held_tower

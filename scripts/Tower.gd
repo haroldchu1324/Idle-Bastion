@@ -145,7 +145,7 @@ func drop_from_sky(final_pos: Vector2, duration: float = 0.65) -> void:
 func move_to(final_pos: Vector2) -> void:
 	_landing  = true
 	is_held   = false
-	z_index   = 0
+	z_index   = 6
 	var tw := create_tween()
 	tw.tween_property(self, "position", final_pos, 0.25) \
 		.set_trans(Tween.TRANS_BOUNCE).set_ease(Tween.EASE_OUT)
@@ -155,7 +155,7 @@ func move_to(final_pos: Vector2) -> void:
 func _on_landed() -> void:
 	_landing       = false
 	is_held        = false
-	z_index        = 0
+	z_index        = 6
 	_impact_radius = 0.0
 	_impact_alpha  = 0.85
 	var tw := create_tween()
@@ -1781,14 +1781,9 @@ func _draw_mage(bob: float, shooting: bool) -> void:
 	var staff  := Color(0.52, 0.34, 0.10)
 	var orb_c  := Color(0.40, 0.90, 1.00) if not shooting else Color(0.70, 1.0, 1.0)
 	var sx     := -17.0
-
 	draw_circle(Vector2(0, 24), 11, Color(0, 0, 0, 0.15))
-
-	# ── Staff behind body ─────────────────────────────────────────────────────
 	draw_line(Vector2(sx, 20 + b), Vector2(sx, -8 + b), staff, 4.0)
 	draw_line(Vector2(sx, 20 + b), Vector2(sx, -8 + b), staff.lightened(0.25), 1.5)
-
-	# ── Layered gown ──────────────────────────────────────────────────────────
 	draw_colored_polygon(PackedVector2Array([
 		Vector2(-10, -10 + b), Vector2(10, -10 + b),
 		Vector2(15,  22 + b),  Vector2(-15, 22 + b)
@@ -1805,24 +1800,16 @@ func _draw_mage(bob: float, shooting: bool) -> void:
 	draw_circle(Vector2(-9, 20 + b), 1.5, star_c)
 	draw_circle(Vector2( 0, 20 + b), 1.5, star_c)
 	draw_circle(Vector2( 9, 20 + b), 1.5, star_c)
-
-	# ── Shoulder pieces ───────────────────────────────────────────────────────
 	draw_circle(Vector2(-16, -8 + b), 7, robe_d)
 	draw_arc(Vector2(-16, -8 + b), 7, -PI * 0.9, PI * 0.1, 10, star_c, 1.5)
 	draw_circle(Vector2(-16, -12 + b), 4, robe)
 	draw_circle(Vector2( 16, -8 + b), 7, robe_d)
 	draw_arc(Vector2( 16, -8 + b), 7, -PI * 0.1, PI * 0.9, 10, star_c, 1.5)
 	draw_circle(Vector2( 16, -12 + b), 4, robe)
-
-	# ── Belt sash ─────────────────────────────────────────────────────────────
 	draw_rect(Rect2(-10, -2 + b, 20, 5), star_c.darkened(0.25))
 	draw_rect(Rect2(-10, -2 + b, 20,  2), star_c.darkened(0.1))
 	draw_circle(Vector2(0, 0 + b), 3, star_c.darkened(0.1))
-
-	# ── Left arm ──────────────────────────────────────────────────────────────
 	draw_rect(Rect2(sx, -5 + b, 10, 5), skin)
-
-	# ── Orb at staff top ──────────────────────────────────────────────────────
 	var orb_r := 7.0 if shooting else 5.5
 	if shooting:
 		var pulse := 0.5 + sin(_anim_time * 8.0) * 0.3
@@ -1834,8 +1821,6 @@ func _draw_mage(bob: float, shooting: bool) -> void:
 			draw_circle(sp, 2.0, Color(1, 1, 0.8, 0.7))
 	draw_circle(Vector2(sx, -14 + b), orb_r, orb_c)
 	draw_circle(Vector2(sx - 2, -16 + b), orb_r * 0.35, Color(1, 1, 1, 0.50))
-
-	# ── Head ──────────────────────────────────────────────────────────────────
 	draw_circle(Vector2(0, -18 + b), 7, skin)
 	draw_colored_polygon(PackedVector2Array([
 		Vector2(-5, -13 + b), Vector2(5, -13 + b),
@@ -1845,8 +1830,6 @@ func _draw_mage(bob: float, shooting: bool) -> void:
 	draw_line(Vector2( 5, -21 + b), Vector2( 2, -22 + b), hair, 1.5)
 	draw_circle(Vector2(-3, -19 + b), 1.5, Color(0.12, 0.08, 0.30))
 	draw_circle(Vector2( 3, -19 + b), 1.5, Color(0.12, 0.08, 0.30))
-
-	# ── Pointy hat ────────────────────────────────────────────────────────────
 	draw_colored_polygon(PackedVector2Array([
 		Vector2(-12, -23 + b), Vector2(12, -23 + b),
 		Vector2(  8, -25 + b), Vector2(-8, -25 + b)

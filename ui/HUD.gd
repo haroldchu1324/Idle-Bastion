@@ -145,6 +145,9 @@ var _tutorial_locked_btns   : Array   = []   # nav buttons hidden until dq_unloc
 var _dq_main_btn            : Button  = null
 var _dq_stat                : Control = null
 var _game_over_screen       : Control
+var _nav_flash              : ColorRect = null
+var _simple_menu_screen     : Control = null
+var _main_menu_statues      : Array   = []
 var _run_results_screen     : Control
 var _run_results_loot_grid  : Control = null
 var _upgrades_screen    : Control
@@ -233,6 +236,7 @@ var _upg_rows           : Array = []
 var _go_stage_lbl       : Label
 var _go_flavour_lbl     : Label
 var _go_title_lbl       : Label
+var _go_title_idle_lbl  : Label
 
 var _btn_tweens : Dictionary = {}
 var _font_reg   : FontFile
@@ -2030,6 +2034,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 				_debug_kbuf = ""
 				if is_instance_valid(_main_debug_panel):
 					_main_debug_panel.visible = not _main_debug_panel.visible
+				_toggle_dbg_tower_panel()
 	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
 		if is_instance_valid(_rarity_modal) and _rarity_modal.visible:
 			_rarity_modal.visible = false
@@ -2594,6 +2599,51 @@ func _build_main_debug_panel() -> Control:
 		show_main_menu()
 	)
 	panel.add_child(skip_tut_btn)
+	BY += BH + GAP
+
+	var menu_btn := Button.new()
+	menu_btn.text       = "🎨  Menu Style: Statue"
+	menu_btn.position   = Vector2(8, BY)
+	menu_btn.size       = Vector2(BW, BH)
+	menu_btn.focus_mode = FOCUS_NONE
+	menu_btn.add_theme_font_override("font",           _font_bold)
+	menu_btn.add_theme_font_size_override("font_size", 13)
+	menu_btn.add_theme_color_override("font_color",    Color(0.60, 0.85, 1.00))
+	menu_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.08, 0.18, 0.26)))
+	menu_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.12, 0.26, 0.38)))
+	menu_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.05, 0.12, 0.18)))
+	menu_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.08, 0.18, 0.26)))
+	menu_btn.pressed.connect(func():
+		if is_instance_valid(_simple_menu_screen):
+			var to_simple := not _simple_menu_screen.visible
+			_simple_menu_screen.visible = to_simple
+			for s in _main_menu_statues:
+				if is_instance_valid(s):
+					s.visible = not to_simple
+			menu_btn.text = "🎨  Menu Style: %s" % ("Simple" if to_simple else "Statue")
+	)
+	panel.add_child(menu_btn)
+	BY += BH + GAP
+
+	var unlock_btn := Button.new()
+	unlock_btn.text       = "🌍  Unlock All Worlds"
+	unlock_btn.position   = Vector2(8, BY)
+	unlock_btn.size       = Vector2(BW, BH)
+	unlock_btn.focus_mode = FOCUS_NONE
+	unlock_btn.add_theme_font_override("font",           _font_bold)
+	unlock_btn.add_theme_font_size_override("font_size", 13)
+	unlock_btn.add_theme_color_override("font_color",    Color(0.40, 0.90, 0.55))
+	unlock_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.04, 0.22, 0.10)))
+	unlock_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.06, 0.32, 0.16)))
+	unlock_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.02, 0.16, 0.08)))
+	unlock_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.04, 0.22, 0.10)))
+	unlock_btn.pressed.connect(func():
+		GameData.max_world_unlocked     = 10
+		GameData.all_time_highest_stage = 10
+		GameData.save_game()
+		_refresh_world_map()
+	)
+	panel.add_child(unlock_btn)
 	BY += BH + GAP
 
 	var sep2 := ColorRect.new()
@@ -3517,16 +3567,19 @@ func _build_run_results_screen() -> void:
 	cont_btn.add_theme_stylebox_override("pressed", _btn_pressed(C_BTN))
 	cont_btn.add_theme_stylebox_override("focus",   _btn_style(C_BTN))
 	cont_btn.pressed.connect(func():
-		overlay.visible = false
-		if is_instance_valid(_gear_btn):
-			_gear_btn.visible = true
-		show_main_menu()
+		_nav_transition(func():
+			overlay.visible = false
+			if is_instance_valid(_gear_btn):
+				_gear_btn.visible = true
+			show_main_menu()
+		)
 	)
 	overlay.add_child(cont_btn)
 
 
 func _mk_statue(tp: String, lbl: String, cb: Callable, pos: Vector2, sz: Vector2, phase: float) -> _StatueBtn:
 	var s := _StatueBtn.new()
+	s.name     = "statue_" + tp
 	s.position = pos
 	s.size     = sz
 	s.setup(tp, lbl, cb, _font_bold, phase)
@@ -3536,135 +3589,463 @@ func _build_game_over_screen() -> void:
 	# ── Background ───────────────────────────────────────────────────────────
 	var overlay := Panel.new()
 	var bg_s := StyleBoxFlat.new()
-	bg_s.bg_color = Color(0.078, 0.072, 0.090)   # matches statue image backgrounds
+	bg_s.bg_color = Color(0.04, 0.04, 0.06)   # dark fallback if image missing
 	overlay.add_theme_stylebox_override("panel", bg_s)
 	overlay.position     = Vector2.ZERO
 	overlay.size         = Vector2(1280, 720)
+	overlay.name         = "MainMenuOverlay"
 	overlay.mouse_filter = MOUSE_FILTER_STOP
 	overlay.visible      = false
 	add_child(overlay)
 	_game_over_screen = overlay
 
-	# Atmospheric top vignette (warm blood-red for game-over mood)
+	_nav_flash = ColorRect.new()
+	_nav_flash.color        = Color(0, 0, 0, 0)
+	_nav_flash.position     = Vector2.ZERO
+	_nav_flash.size         = Vector2(1280, 720)
+	_nav_flash.mouse_filter = MOUSE_FILTER_IGNORE
+	add_child(_nav_flash)
+
+	# Courtyard background image
+	var bg_path := "res://assets/background.png"
+	if ResourceLoader.exists(bg_path):
+		var bg_tex := TextureRect.new()
+		bg_tex.texture      = load(bg_path) as Texture2D
+		bg_tex.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+		bg_tex.expand_mode  = TextureRect.EXPAND_IGNORE_SIZE
+		bg_tex.position     = Vector2.ZERO
+		bg_tex.size         = Vector2(1280, 720)
+		bg_tex.mouse_filter = MOUSE_FILTER_IGNORE
+		overlay.add_child(bg_tex)
+
+	# Subtle dark vignette so statues are readable against the background
+	var vignette := ColorRect.new()
+	vignette.color        = Color(0, 0, 0, 0.28)
+	vignette.position     = Vector2.ZERO
+	vignette.size         = Vector2(1280, 720)
+	vignette.mouse_filter = MOUSE_FILTER_IGNORE
+	overlay.add_child(vignette)
+
+	# Top band for title legibility
 	var top_band := ColorRect.new()
-	top_band.color        = Color(0.48, 0.07, 0.07, 0.22)
+	top_band.color        = Color(0.02, 0.02, 0.08, 0.50)
 	top_band.position     = Vector2.ZERO
-	top_band.size         = Vector2(1280, 155)
+	top_band.size         = Vector2(1280, 152)
 	top_band.mouse_filter = MOUSE_FILTER_IGNORE
 	overlay.add_child(top_band)
 
+	# ── Title — 2-liner: IDLE (gold serif) / BASTION (white impact) ──────────
+	var _sf_idle := SystemFont.new()
+	_sf_idle.font_names         = ["Palatino Linotype", "Book Antiqua", "Georgia", "Palatino"]
+	_sf_idle.font_weight        = 700
+	_sf_idle.antialiasing       = TextServer.FONT_ANTIALIASING_LCD
 
-	# Bottom warm ambient (torch glow from ground)
-	var bot_glow := ColorRect.new()
-	bot_glow.color        = Color(0.72, 0.42, 0.10, 0.06)
-	bot_glow.position     = Vector2(0, 620)
-	bot_glow.size         = Vector2(1280, 100)
-	bot_glow.mouse_filter = MOUSE_FILTER_IGNORE
-	overlay.add_child(bot_glow)
+	var _ls_idle := LabelSettings.new()
+	_ls_idle.font               = _sf_idle
+	_ls_idle.font_size          = 38
+	_ls_idle.font_color         = Color(1.00, 0.84, 0.12)
+	_ls_idle.outline_size       = 3
+	_ls_idle.outline_color      = Color(0.18, 0.08, 0.00)
+	_ls_idle.shadow_offset      = Vector2(2, 3)
+	_ls_idle.shadow_color       = Color(0.0, 0.0, 0.0, 0.65)
 
-	# ── Title ────────────────────────────────────────────────────────────────
-	_go_title_lbl = _label("🛡  IDLE BASTION", _font_bold, 52, C_WHITE)
-	var title := _go_title_lbl
-	title.position             = Vector2(0, 22)
-	title.size                 = Vector2(1280, 70)
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	title.mouse_filter         = MOUSE_FILTER_IGNORE
-	overlay.add_child(title)
+	_go_title_idle_lbl                     = Label.new()
+	_go_title_idle_lbl.text                = "IDLE"
+	_go_title_idle_lbl.label_settings      = _ls_idle
+	_go_title_idle_lbl.position            = Vector2(0, 6)
+	_go_title_idle_lbl.size                = Vector2(1280, 50)
+	_go_title_idle_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_go_title_idle_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	_go_title_idle_lbl.mouse_filter        = MOUSE_FILTER_IGNORE
+	overlay.add_child(_go_title_idle_lbl)
+
+	var _sf_bastion := SystemFont.new()
+	_sf_bastion.font_names      = ["Impact", "Arial Black", "Franklin Gothic Heavy", "Arial"]
+	_sf_bastion.font_weight     = 900
+	_sf_bastion.antialiasing    = TextServer.FONT_ANTIALIASING_LCD
+
+	var _ls_bastion := LabelSettings.new()
+	_ls_bastion.font            = _sf_bastion
+	_ls_bastion.font_size       = 68
+	_ls_bastion.font_color      = Color(1.00, 1.00, 1.00)
+	_ls_bastion.outline_size    = 4
+	_ls_bastion.outline_color   = Color(0.04, 0.04, 0.18)
+	_ls_bastion.shadow_offset   = Vector2(3, 5)
+	_ls_bastion.shadow_color    = Color(0.0, 0.0, 0.0, 0.75)
+
+	_go_title_lbl                          = Label.new()
+	_go_title_lbl.text                     = "BASTION"
+	_go_title_lbl.label_settings           = _ls_bastion
+	_go_title_lbl.position                 = Vector2(0, 52)
+	_go_title_lbl.size                     = Vector2(1280, 88)
+	_go_title_lbl.horizontal_alignment     = HORIZONTAL_ALIGNMENT_CENTER
+	_go_title_lbl.vertical_alignment       = VERTICAL_ALIGNMENT_CENTER
+	_go_title_lbl.mouse_filter             = MOUSE_FILTER_IGNORE
+	overlay.add_child(_go_title_lbl)
 
 	# Subtitle decorative line under title
 	var title_line := ColorRect.new()
 	title_line.color        = Color(C_GOLD, 0.40)
-	title_line.position     = Vector2(420, 95)
+	title_line.position     = Vector2(420, 144)
 	title_line.size         = Vector2(440, 1)
 	title_line.mouse_filter = MOUSE_FILTER_IGNORE
 	overlay.add_child(title_line)
 
 	# Game-over subtitles (hidden by default, shown via show_game_over())
 	_go_stage_lbl = _label("Stage 1 reached", _font_bold, 22, Color(0.85, 0.55, 0.55))
-	_go_stage_lbl.position             = Vector2(0, 102)
+	_go_stage_lbl.position             = Vector2(0, 98)
 	_go_stage_lbl.size                 = Vector2(1280, 34)
 	_go_stage_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_go_stage_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
 	overlay.add_child(_go_stage_lbl)
 
 	_go_flavour_lbl = _label("Your kingdom has fallen…", _font_reg, 16, Color(0.55, 0.42, 0.42))
-	_go_flavour_lbl.position             = Vector2(0, 136)
+	_go_flavour_lbl.position             = Vector2(0, 132)
 	_go_flavour_lbl.size                 = Vector2(1280, 26)
 	_go_flavour_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_go_flavour_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
 	overlay.add_child(_go_flavour_lbl)
 
-	# ── TOP ROW — 5 navigation statues ──────────────────────────────────────
-	# Evenly spaced across the full width.  Stat size: 158 × 240
-	const SW : int = 158; const SH : int = 240
-	const SW_GAP : int = (1280 - 5 * SW) / 6   # ~43 px
-	const TOP_Y  : int = 160
+	# ── Statues — arranged around the central stone circle ───────────────────
+	# Circle approx center (640, 490). Statues arc around it left/right/bottom.
+	# Left arc: Upgrades (upper-left) → Heroes (left) → Shop (lower-left)
+	# Right arc: Towers (upper-right) → World Map (right) → Relics (lower-right)
+	# Bottom: Daily Quests (left-center) | Start Game (center, prominent)
+	# Standard size (2×) for secondary statues
+	const SW : int = 324; const SH : int = 492
 
-	var nav_defs : Array = [
-		{"type": "upgrades", "lbl": "Upgrades",  "idx": 0, "phase": 0.00},
-		{"type": "shop",     "lbl": "Shop",       "idx": 1, "phase": 0.95},
-		{"type": "worldmap", "lbl": "World Map",  "idx": 2, "phase": 1.72},
-		{"type": "heroes",   "lbl": "Heroes",     "idx": 3, "phase": 2.55},
-		{"type": "towers",   "lbl": "Towers",     "idx": 4, "phase": 3.30},
-	]
-	for i in range(nav_defs.size()):
-		var nd  : Dictionary = nav_defs[i]
-		var sx  : int = SW_GAP + i * (SW + SW_GAP)
-		var stat := _mk_statue(
-			nd["type"], nd["lbl"],
-			func(): _on_main_nav_pressed(nd["idx"]),
-			Vector2(sx, TOP_Y), Vector2(SW, SH), nd["phase"]
-		)
-		stat.set_locked(!GameData.tutorial_complete)
-		_tutorial_locked_btns.append(stat)
-		overlay.add_child(stat)
+	# ── Secondary statues — drawn first (behind large ones) ──────────────────
 
-	# ── BOTTOM ROW — Quests | Relics | Start Game ────────────────────────────
-	const QW : int = 165; const QH : int = 250
-	const RW : int = 165; const RH : int = 250
-	const DW : int = 215; const DH : int = 268
-	const BOT_GAP : int = 35
-	const BOT_X : int = (1280 - QW - BOT_GAP - RW - BOT_GAP - DW) / 2
-
-	var quests_stat := _mk_statue(
-		"quests", "Daily Quests",
-		func():
-			_game_over_screen.visible = false
-			if is_instance_valid(_daily_quests_screen):
-				_refresh_daily_quests_screen()
-				_daily_quests_screen.visible = true,
-		Vector2(BOT_X, 420), Vector2(QW, QH), 0.30
+	# Upgrades — between Start Game and World Map, touches bottom
+	var upgrades_stat := _mk_statue(
+		"upgrades", "Upgrades",
+		func(): _on_main_nav_pressed(0),
+		Vector2(759, 504), Vector2(220, 236), 0.00
 	)
-	quests_stat.set_locked(!GameData.dq_unlocked)
-	_dq_stat = quests_stat
-	overlay.add_child(quests_stat)
+	var _upg_tex_path := "res://assets/statues/Upgrades.png"
+	if ResourceLoader.exists(_upg_tex_path):
+		upgrades_stat._texture = load(_upg_tex_path) as Texture2D
+	upgrades_stat._draw_size  = Vector2(389, 590)
+	upgrades_stat._img_offset = Vector2(-18, 0)
+	upgrades_stat.set_locked(!GameData.tutorial_complete)
+	_tutorial_locked_btns.append(upgrades_stat)
+	overlay.add_child(upgrades_stat)
+	_main_menu_statues.append(upgrades_stat)
 
-	var relics_stat := _mk_statue(
-		"relics", "Relics",
-		func():
-			_game_over_screen.visible = false
-			if is_instance_valid(_relic_screen):
-				_refresh_relics_screen()
-				_relic_screen.visible = true,
-		Vector2(BOT_X + QW + BOT_GAP, 420), Vector2(RW, RH), 0.55
+	# Shop — left side, south
+	var shop_stat := _mk_statue(
+		"shop", "Shop",
+		func(): _on_main_nav_pressed(1),
+		Vector2(20, 482), Vector2(272, 263), 0.95
 	)
-	relics_stat.set_locked(!GameData.tutorial_complete)
-	_tutorial_locked_btns.append(relics_stat)
-	overlay.add_child(relics_stat)
+	var _shop_tex_path := "res://assets/statues/Shop.png"
+	if ResourceLoader.exists(_shop_tex_path):
+		shop_stat._texture = load(_shop_tex_path) as Texture2D
+	shop_stat._draw_size = Vector2(292, 443)
+	shop_stat.set_locked(!GameData.tutorial_complete)
+	_tutorial_locked_btns.append(shop_stat)
+	overlay.add_child(shop_stat)
+	_main_menu_statues.append(shop_stat)
 
+	# World Map — bottom-right, touches bottom
+	var worldmap_stat := _mk_statue(
+		"worldmap", "World Map",
+		func(): _on_main_nav_pressed(2),
+		Vector2(987, 508), Vector2(292, 243), 1.72
+	)
+	var _wm_tex_path := "res://assets/statues/WorldMap.png"
+	if ResourceLoader.exists(_wm_tex_path):
+		worldmap_stat._texture = load(_wm_tex_path) as Texture2D
+	worldmap_stat._draw_size = Vector2(292, 443)
+	worldmap_stat.set_locked(!GameData.tutorial_complete)
+	_tutorial_locked_btns.append(worldmap_stat)
+	overlay.add_child(worldmap_stat)
+	_main_menu_statues.append(worldmap_stat)
+
+	# Start Game — center-left, touches bottom, 20% smaller
 	var dragon_stat := _mk_statue(
 		"start", "Start Game",
 		func(): _on_main_nav_pressed(2),
-		Vector2(BOT_X + QW + BOT_GAP + RW + BOT_GAP, 405), Vector2(DW, DH), 1.40
+		Vector2(473, 564), Vector2(272, 183), 1.40
 	)
+	var _start_tex_path := "res://assets/statues/StartGame.png"
+	if ResourceLoader.exists(_start_tex_path):
+		dragon_stat._texture = load(_start_tex_path) as Texture2D
+	dragon_stat._draw_size  = Vector2(272, 408)
+	dragon_stat._img_offset = Vector2(-5, 0)
 	overlay.add_child(dragon_stat)
+	_main_menu_statues.append(dragon_stat)
+
+	# ── Large statues (200×300 hitbox, 324×492 visual) ───────────────────────
+
+	# Towers — far left, slightly right and south
+	var towers_stat := _mk_statue(
+		"towers", "Towers",
+		func(): _on_main_nav_pressed(4),
+		Vector2(119, 229), Vector2(200, 310), 3.30
+	)
+	var _towers_tex_path := "res://assets/statues/Towers.png"
+	if ResourceLoader.exists(_towers_tex_path):
+		towers_stat._texture = load(_towers_tex_path) as Texture2D
+	towers_stat._draw_size  = Vector2(389, 590)
+	towers_stat._img_offset = Vector2(-8, 0)
+	towers_stat.set_locked(!GameData.tutorial_complete)
+	_tutorial_locked_btns.append(towers_stat)
+	overlay.add_child(towers_stat)
+	_main_menu_statues.append(towers_stat)
+
+	# Heroes — slightly left
+	var heroes_stat := _mk_statue(
+		"heroes", "Heroes",
+		func(): _on_main_nav_pressed(3),
+		Vector2(352, 196), Vector2(152, 295), 2.55
+	)
+	var _heroes_tex_path := "res://assets/statues/Heroes.png"
+	if ResourceLoader.exists(_heroes_tex_path):
+		heroes_stat._texture = load(_heroes_tex_path) as Texture2D
+	heroes_stat._draw_size = Vector2(389, 590)
+	heroes_stat._hide_label = true
+	heroes_stat.set_locked(!GameData.tutorial_complete)
+	_tutorial_locked_btns.append(heroes_stat)
+	overlay.add_child(heroes_stat)
+	_main_menu_statues.append(heroes_stat)
+
+	# Relics — right side of portal
+	var relics_stat := _mk_statue(
+		"relics", "Relics",
+		func():
+			_nav_transition(func():
+				_game_over_screen.visible = false
+				if is_instance_valid(_relic_screen):
+					_refresh_relics_screen()
+					_relic_screen.visible = true),
+		Vector2(766, 213), Vector2(150, 281), 0.55
+	)
+	var _relics_tex_path := "res://assets/statues/Relics.png"
+	if ResourceLoader.exists(_relics_tex_path):
+		relics_stat._texture = load(_relics_tex_path) as Texture2D
+	relics_stat._draw_size = Vector2(389, 590)
+	relics_stat.set_locked(!GameData.tutorial_complete)
+	_tutorial_locked_btns.append(relics_stat)
+	overlay.add_child(relics_stat)
+	_main_menu_statues.append(relics_stat)
+
+	# Daily Quest — far right, slightly lower than Relics
+	var quests_stat := _mk_statue(
+		"quests", "Daily Quests",
+		func():
+			_nav_transition(func():
+				_game_over_screen.visible = false
+				if is_instance_valid(_daily_quests_screen):
+					_refresh_daily_quests_screen()
+					_daily_quests_screen.visible = true),
+		Vector2(904, 259), Vector2(200, 273), 0.30
+	)
+	var _quests_tex_path := "res://assets/statues/DailyQuest.png"
+	if ResourceLoader.exists(_quests_tex_path):
+		quests_stat._texture = load(_quests_tex_path) as Texture2D
+	quests_stat._draw_size  = Vector2(389, 590)
+	quests_stat._img_offset = Vector2(-12, 0)
+	quests_stat.set_locked(!GameData.dq_unlocked)
+	_dq_stat = quests_stat
+	overlay.add_child(quests_stat)
+	_main_menu_statues.append(quests_stat)
 
 	call_deferred("_wire_hover_recursive", overlay)
 
+	_simple_menu_screen = _build_simple_menu_screen()
+	overlay.add_child(_simple_menu_screen)
+
+
+func _build_simple_menu_screen() -> Control:
+	const BH  : int = 54   # main button height (64 * 0.85)
+	const GAP : int = 15   # gap between buttons
+	const BX  : int = 25   # left margin (shifted right 15px)
+	const BW  : int = 262  # button width
+	const IS  : int = 22   # icon size
+
+	var root := Control.new()
+	root.position     = Vector2.ZERO
+	root.size         = Vector2(1280, 720)
+	root.mouse_filter = MOUSE_FILTER_IGNORE
+	root.visible      = false
+
+	var blocker := ColorRect.new()
+	blocker.color        = Color(0, 0, 0, 0)
+	blocker.position     = Vector2.ZERO
+	blocker.size         = Vector2(1280, 720)
+	blocker.mouse_filter = MOUSE_FILTER_STOP
+	root.add_child(blocker)
+
+	var bg := TextureRect.new()
+	bg.texture      = load("res://assets/mainmenu2_try2.png")
+	bg.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	bg.expand_mode  = TextureRect.EXPAND_IGNORE_SIZE
+	bg.position     = Vector2.ZERO
+	bg.size         = Vector2(1280, 720)
+	bg.mouse_filter = MOUSE_FILTER_IGNORE
+	root.add_child(bg)
+
+	# Game title — IDLE + BASTION (same as statue menu, reduced font size)
+	var _sf_idle := SystemFont.new()
+	_sf_idle.font_names         = ["Palatino Linotype", "Book Antiqua", "Georgia", "Palatino"]
+	_sf_idle.font_weight        = 700
+	_sf_idle.antialiasing       = TextServer.FONT_ANTIALIASING_LCD
+
+	var _ls_idle := LabelSettings.new()
+	_ls_idle.font               = _sf_idle
+	_ls_idle.font_size          = 42
+	_ls_idle.font_color         = Color(1.00, 0.84, 0.12)
+	_ls_idle.outline_size       = 3
+	_ls_idle.outline_color      = Color(0.18, 0.08, 0.00)
+	_ls_idle.shadow_offset      = Vector2(2, 3)
+	_ls_idle.shadow_color       = Color(0.0, 0.0, 0.0, 0.65)
+
+	var title_idle := Label.new()
+	title_idle.text                = "IDLE"
+	title_idle.label_settings      = _ls_idle
+	title_idle.position            = Vector2(25, 43)
+	title_idle.size                = Vector2(BW, 40)
+	title_idle.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	title_idle.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	title_idle.mouse_filter        = MOUSE_FILTER_IGNORE
+	root.add_child(title_idle)
+
+	var _sf_bastion := SystemFont.new()
+	_sf_bastion.font_names      = ["Impact", "Arial Black", "Franklin Gothic Heavy", "Arial"]
+	_sf_bastion.font_weight     = 900
+	_sf_bastion.antialiasing    = TextServer.FONT_ANTIALIASING_LCD
+
+	var _ls_bastion := LabelSettings.new()
+	_ls_bastion.font            = _sf_bastion
+	_ls_bastion.font_size       = 62
+	_ls_bastion.font_color      = Color(1.00, 1.00, 1.00)
+	_ls_bastion.outline_size    = 4
+	_ls_bastion.outline_color   = Color(0.04, 0.04, 0.18)
+	_ls_bastion.shadow_offset   = Vector2(3, 5)
+	_ls_bastion.shadow_color    = Color(0.0, 0.0, 0.0, 0.75)
+
+	var title_bastion := Label.new()
+	title_bastion.text                 = "BASTION"
+	title_bastion.label_settings       = _ls_bastion
+	title_bastion.position             = Vector2(25, 73)
+	title_bastion.size                 = Vector2(BW, 70)
+	title_bastion.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	title_bastion.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	title_bastion.mouse_filter         = MOUSE_FILTER_IGNORE
+	root.add_child(title_bastion)
+
+	var btn_tex : Texture2D = load("res://assets/mainmenubutton.png")
+
+	# [label, icon_path, callback]
+	var entries := [
+		["START GAME", "res://assets/icon_start.svg",    func(): _on_main_nav_pressed(2)],
+		["HEROES",     "res://assets/icon_heroes.svg",   func(): _on_main_nav_pressed(3)],
+		["TOWERS",     "res://assets/icon_towers.svg",   func(): _on_main_nav_pressed(4)],
+		["RELICS",     "res://assets/icon_relics.svg",   func():
+			_nav_transition(func():
+				_game_over_screen.visible = false
+				if is_instance_valid(_relic_screen):
+					_refresh_relics_screen(); _relic_screen.visible = true)],
+		["SHOP",       "res://assets/icon_shop.svg",     func(): _on_main_nav_pressed(1)],
+		["UPGRADES",   "res://assets/icon_upgrades.svg", func(): _on_main_nav_pressed(0)],
+	]
+
+	var by := (720 - (6 * BH + 5 * GAP)) / 2 + 50
+	for entry_idx in range(entries.size()):
+		var entry = entries[entry_idx]
+		var lbl_text  : String   = entry[0]
+		var icon_path : String   = entry[1]
+		var cb        : Callable = entry[2]
+		var is_relics : bool     = (lbl_text == "RELICS")
+
+		var row := Control.new()
+		row.position     = Vector2(BX, by)
+		row.size         = Vector2(BW, BH)
+		row.mouse_filter = MOUSE_FILTER_STOP
+		row.scale        = Vector2.ONE
+		row.pivot_offset = Vector2(BW * 0.5, BH * 0.5)
+		root.add_child(row)
+
+		# Button background texture
+		var btn_bg := TextureRect.new()
+		btn_bg.texture      = btn_tex
+		btn_bg.stretch_mode = TextureRect.STRETCH_SCALE
+		btn_bg.expand_mode  = TextureRect.EXPAND_IGNORE_SIZE
+		btn_bg.position     = Vector2.ZERO
+		btn_bg.size         = row.size
+		btn_bg.mouse_filter = MOUSE_FILTER_IGNORE
+		row.add_child(btn_bg)
+
+		# Icons much larger and very close to label
+		var icon_size := 40 if is_relics else 36
+		var icon_x    := 60
+		var icon_tex := TextureRect.new()
+		icon_tex.texture      = load(icon_path)
+		icon_tex.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		icon_tex.expand_mode  = TextureRect.EXPAND_IGNORE_SIZE
+		icon_tex.position     = Vector2(icon_x, (BH - icon_size) / 2)
+		icon_tex.size         = Vector2(icon_size, icon_size)
+		icon_tex.mouse_filter = MOUSE_FILTER_IGNORE
+		row.add_child(icon_tex)
+
+		# Button label — immediately after icon, feels like one element
+		var label_x := 42 if is_relics else 40
+		var lbl := Label.new()
+		lbl.text     = lbl_text
+		lbl.position = Vector2(label_x, 0)
+		lbl.size     = Vector2(BW - label_x - 4, BH)
+		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+		lbl.add_theme_font_override("font",           _font_bold)
+		lbl.add_theme_font_size_override("font_size", 16)
+		lbl.add_theme_color_override("font_color",    Color(0.92, 0.88, 0.75))
+		lbl.mouse_filter = MOUSE_FILTER_IGNORE
+		row.add_child(lbl)
+
+		row.gui_input.connect(func(ev: InputEvent):
+			if ev is InputEventMouseButton and ev.button_index == MOUSE_BUTTON_LEFT:
+				if ev.pressed:
+					btn_bg.modulate = Color(0.70, 0.70, 0.70)
+				else:
+					btn_bg.modulate = Color(1.00, 1.00, 1.00)
+					cb.call()
+		)
+		row.mouse_entered.connect(func():
+			btn_bg.modulate = Color(1.25, 1.25, 1.25)
+			if _btn_tweens.has(row) and is_instance_valid(_btn_tweens[row]):
+				_btn_tweens[row].kill()
+			var tw := create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
+			tw.tween_property(row, "scale", Vector2(1.01, 1.01), 0.5)
+			_btn_tweens[row] = tw
+			if _btn_tweens.has("lift_" + str(row)) and is_instance_valid(_btn_tweens["lift_" + str(row)]):
+				_btn_tweens["lift_" + str(row)].kill()
+			var lift_tw := create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
+			lift_tw.tween_property(row, "position:y", by - 4.0, 0.6)
+			_btn_tweens["lift_" + str(row)] = lift_tw
+		)
+		row.mouse_exited.connect(func():
+			btn_bg.modulate = Color(1.00, 1.00, 1.00)
+			if _btn_tweens.has(row) and is_instance_valid(_btn_tweens[row]):
+				_btn_tweens[row].kill()
+			var tw := create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
+			tw.tween_property(row, "scale", Vector2.ONE, 0.3)
+			_btn_tweens[row] = tw
+			if _btn_tweens.has("lift_" + str(row)) and is_instance_valid(_btn_tweens["lift_" + str(row)]):
+				_btn_tweens["lift_" + str(row)].kill()
+			var lift_tw := create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
+			lift_tw.tween_property(row, "position:y", by, 0.4)
+			_btn_tweens["lift_" + str(row)] = lift_tw
+		)
+
+		by += BH + GAP
+
+	return root
+
 
 func show_game_over(stage: int) -> void:
-	_go_title_lbl.text      = "💀  IDLE BASTION"
+	_go_title_idle_lbl.text = "IDLE"
+	_go_title_lbl.text      = "💀  BASTION"
 	_go_stage_lbl.text      = "Stage %d reached" % stage
 	_go_stage_lbl.visible   = true
 	_go_flavour_lbl.visible = true
@@ -3679,7 +4060,8 @@ func start_tutorial() -> void:
 
 func show_main_menu() -> void:
 	Engine.time_scale = 1.0
-	_go_title_lbl.text      = "🛡  IDLE BASTION"
+	_go_title_idle_lbl.text = "IDLE"
+	_go_title_lbl.text      = "BASTION"
 	_go_stage_lbl.visible   = false
 	_go_flavour_lbl.visible = false
 	for btn in _tutorial_locked_btns:
@@ -3690,24 +4072,40 @@ func show_main_menu() -> void:
 	_game_over_screen.visible = true
 
 
+func _back_to_menu(hide_node: Control) -> void:
+	_nav_transition(func():
+		hide_node.visible = false
+		_game_over_screen.visible = true
+	)
+
+
+func _nav_transition(cb: Callable) -> void:
+	if not is_instance_valid(_nav_flash):
+		cb.call()
+		return
+	_nav_flash.move_to_front()
+	var tw := create_tween()
+	tw.tween_property(_nav_flash, "color:a", 1.0, 0.07)
+	tw.finished.connect(func():
+		cb.call_deferred()
+		await get_tree().process_frame
+		var tw2 := create_tween()
+		tw2.tween_property(_nav_flash, "color:a", 0.0, 0.18)
+	, CONNECT_ONE_SHOT)
+
+
 func _on_main_nav_pressed(idx: int) -> void:
-	match idx:
-		0: # Upgrades
-			_game_over_screen.visible = false
-			_upgrades_screen.visible = true
-		1: # Shop
-			_game_over_screen.visible = false
-			_shop_screen.visible = true
-		2: # World Map
-			_game_over_screen.visible = false
-			_world_map_screen.visible = true
-			_refresh_world_map()
-		3: # Heroes
-			_game_over_screen.visible = false
-			_heroes_screen.visible = true
-		4: # Towers
-			_game_over_screen.visible = false
-			_towers_screen.visible = true
+	_nav_transition(func():
+		_game_over_screen.visible = false
+		match idx:
+			0: _upgrades_screen.visible = true
+			1: _shop_screen.visible = true
+			2:
+				_world_map_screen.visible = true
+				_refresh_world_map()
+			3: _heroes_screen.visible = true
+			4: _towers_screen.visible = true
+	)
 
 
 func _on_continue_pressed() -> void:
@@ -3755,10 +4153,7 @@ func _build_upgrades_screen() -> void:
 	back_btn.add_theme_stylebox_override("hover",   _btn_tertiary_hover())
 	back_btn.add_theme_stylebox_override("pressed", _btn_tertiary_pressed())
 	back_btn.add_theme_stylebox_override("focus",   _btn_tertiary())
-	back_btn.pressed.connect(func():
-		overlay.visible = false
-		_game_over_screen.visible = true
-	)
+	back_btn.pressed.connect(func(): _back_to_menu(overlay))
 	overlay.add_child(back_btn)
 
 
@@ -3793,10 +4188,7 @@ func _build_placeholder_screen(var_ref: String, title_text: String) -> Control:
 	back_btn.add_theme_stylebox_override("hover",   _btn_tertiary_hover())
 	back_btn.add_theme_stylebox_override("pressed", _btn_tertiary_pressed())
 	back_btn.add_theme_stylebox_override("focus",   _btn_tertiary())
-	back_btn.pressed.connect(func():
-		overlay.visible = false
-		_game_over_screen.visible = true
-	)
+	back_btn.pressed.connect(func(): _back_to_menu(overlay))
 	overlay.add_child(back_btn)
 	return overlay
 
@@ -4090,10 +4482,7 @@ func _build_shop_screen() -> void:
 	back_btn.add_theme_stylebox_override("hover",   _btn_tertiary_hover())
 	back_btn.add_theme_stylebox_override("pressed", _btn_tertiary_pressed())
 	back_btn.add_theme_stylebox_override("focus",   _btn_tertiary())
-	back_btn.pressed.connect(func():
-		overlay.visible = false
-		_game_over_screen.visible = true
-	)
+	back_btn.pressed.connect(func(): _back_to_menu(overlay))
 	overlay.add_child(back_btn)
 
 	# ── Relic panel (overlays gacha content when "relic" tab is active) ──────────
@@ -4121,10 +4510,7 @@ func _build_shop_screen() -> void:
 	relic_back_btn.add_theme_stylebox_override("hover",   _btn_tertiary_hover())
 	relic_back_btn.add_theme_stylebox_override("pressed", _btn_tertiary_pressed())
 	relic_back_btn.add_theme_stylebox_override("focus",   _btn_tertiary())
-	relic_back_btn.pressed.connect(func():
-		overlay.visible = false
-		_game_over_screen.visible = true
-	)
+	relic_back_btn.pressed.connect(func(): _back_to_menu(overlay))
 	qp.add_child(relic_back_btn)
 
 	# ── Relic wheel arrow ─────────────────────────────────────────────────────────
@@ -5384,10 +5770,7 @@ func _build_relics_screen() -> void:
 	back_btn.add_theme_stylebox_override("hover",   _btn_tertiary_hover())
 	back_btn.add_theme_stylebox_override("pressed", _btn_tertiary_pressed())
 	back_btn.add_theme_stylebox_override("focus",   _btn_tertiary())
-	back_btn.pressed.connect(func():
-		overlay.visible           = false
-		_game_over_screen.visible = true
-	)
+	back_btn.pressed.connect(func(): _back_to_menu(overlay))
 	overlay.add_child(back_btn)
 
 	# Debug: Reset All Relics button
@@ -6116,10 +6499,7 @@ func _build_world_map_screen() -> void:
 	back_btn.add_theme_stylebox_override("hover",   _btn_tertiary_hover())
 	back_btn.add_theme_stylebox_override("pressed", _btn_tertiary_pressed())
 	back_btn.add_theme_stylebox_override("focus",   _btn_tertiary())
-	back_btn.pressed.connect(func():
-		overlay.visible           = false
-		_game_over_screen.visible = true
-	)
+	back_btn.pressed.connect(func(): _back_to_menu(overlay))
 	overlay.add_child(back_btn)
 
 	_build_world_detail_screen()
@@ -6573,27 +6953,62 @@ func _build_heroes_screen() -> void:
 	sel_panel.add_child(sel_box)
 	_hero_sel_container = sel_box
 
-	# Preview placeholder (replaced in _hero_refresh_selected)
-	_hero_sel_preview = _TurretPreview.new()
-	_hero_sel_preview.position = Vector2(16, 4)
-	sel_box.add_child(_hero_sel_preview)
+	# Check if any hero is unlocked (level >= 1)
+	var has_any_hero := false
+	for hid in GameData.HERO_DEFS:
+		if GameData.get_tower_level(hid) >= 1:
+			has_any_hero = true
+			break
 
-	_hero_sel_name = _label("", _font_bold, 18, C_WHITE)
-	_hero_sel_name.position = Vector2(80, 6); _hero_sel_name.size = Vector2(350, 26)
-	_hero_sel_name.mouse_filter = MOUSE_FILTER_IGNORE
-	sel_box.add_child(_hero_sel_name)
+	if not has_any_hero:
+		var no_hero_msg := _label("You don't have any heroes. Roll for a hero!", _font_reg, 16, C_DIM)
+		no_hero_msg.position             = Vector2(0, 12)
+		no_hero_msg.size                 = Vector2(900, 26)
+		no_hero_msg.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+		no_hero_msg.mouse_filter         = MOUSE_FILTER_IGNORE
+		no_hero_msg.position.x           = 80
+		sel_box.add_child(no_hero_msg)
 
-	_hero_sel_stats = _label("", _font_reg, 14, C_DIM)
-	_hero_sel_stats.position = Vector2(80, 36); _hero_sel_stats.size = Vector2(700, 20)
-	_hero_sel_stats.mouse_filter = MOUSE_FILTER_IGNORE
-	sel_box.add_child(_hero_sel_stats)
+		var shop_btn := Button.new()
+		shop_btn.text       = "Go to Shop"
+		shop_btn.position   = Vector2(960, 20)
+		shop_btn.size       = Vector2(200, 40)
+		shop_btn.focus_mode = FOCUS_NONE
+		shop_btn.add_theme_font_override("font",           _font_bold)
+		shop_btn.add_theme_font_size_override("font_size", 15)
+		shop_btn.add_theme_color_override("font_color",    C_WHITE)
+		shop_btn.add_theme_stylebox_override("normal",  _btn_primary())
+		shop_btn.add_theme_stylebox_override("hover",   _btn_primary_hover())
+		shop_btn.add_theme_stylebox_override("pressed", _btn_primary_pressed())
+		shop_btn.add_theme_stylebox_override("focus",   _btn_primary())
+		shop_btn.pressed.connect(func():
+			overlay.visible      = false
+			_shop_screen.visible = true
+		)
+		sel_box.add_child(shop_btn)
+	else:
+		# Preview placeholder (replaced in _hero_refresh_selected)
+		_hero_sel_preview = _TurretPreview.new()
+		_hero_sel_preview.position = Vector2(16, 4)
+		sel_box.add_child(_hero_sel_preview)
 
-	var active_badge := _label("✓  Active", _font_bold, 14, Color(0.30, 0.90, 0.45))
-	active_badge.position = Vector2(1140, 26); active_badge.size = Vector2(90, 20)
-	active_badge.mouse_filter = MOUSE_FILTER_IGNORE
-	sel_box.add_child(active_badge)
+		_hero_sel_name = _label("", _font_bold, 18, C_WHITE)
+		_hero_sel_name.position = Vector2(80, 6); _hero_sel_name.size = Vector2(350, 26)
+		_hero_sel_name.mouse_filter = MOUSE_FILTER_IGNORE
+		sel_box.add_child(_hero_sel_name)
 
-	_hero_refresh_selected()
+		_hero_sel_stats = _label("", _font_reg, 14, C_DIM)
+		_hero_sel_stats.position = Vector2(80, 36); _hero_sel_stats.size = Vector2(700, 20)
+		_hero_sel_stats.mouse_filter = MOUSE_FILTER_IGNORE
+		sel_box.add_child(_hero_sel_stats)
+
+		var active_badge := _label("✓  Active", _font_bold, 14, Color(0.30, 0.90, 0.45))
+		active_badge.position = Vector2(1140, 26); active_badge.size = Vector2(90, 20)
+		active_badge.mouse_filter = MOUSE_FILTER_IGNORE
+		active_badge.visible = not GameData.selected_hero_id.is_empty()
+		sel_box.add_child(active_badge)
+
+		_hero_refresh_selected()
 
 	# ── Scroll area ────────────────────────────────────────────────────────────
 	var scroll := ScrollContainer.new()
@@ -6680,10 +7095,7 @@ func _build_heroes_screen() -> void:
 	back_btn.add_theme_stylebox_override("hover",   _btn_tertiary_hover())
 	back_btn.add_theme_stylebox_override("pressed", _btn_tertiary_pressed())
 	back_btn.add_theme_stylebox_override("focus",   _btn_tertiary())
-	back_btn.pressed.connect(func():
-		overlay.visible = false
-		_game_over_screen.visible = true
-	)
+	back_btn.pressed.connect(func(): _back_to_menu(overlay))
 	overlay.add_child(back_btn)
 
 	# ── Hero detail panel ──────────────────────────────────────────────────────
@@ -7555,10 +7967,7 @@ func _build_towers_screen() -> void:
 	back_btn.add_theme_stylebox_override("hover",   _btn_tertiary_hover())
 	back_btn.add_theme_stylebox_override("pressed", _btn_tertiary_pressed())
 	back_btn.add_theme_stylebox_override("focus",   _btn_tertiary())
-	back_btn.pressed.connect(func():
-		overlay.visible = false
-		_game_over_screen.visible = true
-	)
+	back_btn.pressed.connect(func(): _back_to_menu(overlay))
 	overlay.add_child(back_btn)
 
 	# ── Detail panel (right-side slide-in) ────────────────────────────────────
@@ -8393,10 +8802,7 @@ func _build_daily_quests_screen() -> void:
 	back_btn.add_theme_stylebox_override("hover",   _btn_tertiary_hover())
 	back_btn.add_theme_stylebox_override("pressed", _btn_tertiary_pressed())
 	back_btn.add_theme_stylebox_override("focus",   _btn_tertiary())
-	back_btn.pressed.connect(func():
-		overlay.visible           = false
-		_game_over_screen.visible = true
-	)
+	back_btn.pressed.connect(func(): _back_to_menu(overlay))
 	overlay.add_child(back_btn)
 
 	call_deferred("_wire_hover_recursive", overlay)
@@ -9710,19 +10116,19 @@ func _btn_secondary_pressed() -> StyleBoxFlat:
 	return s
 
 func _btn_tertiary() -> StyleBoxFlat:
-	var s := _flat(Color(0.106, 0.102, 0.090, 0.42), RADIUS)
+	var s := _flat(Color(0.22, 0.24, 0.32, 0.78), RADIUS)
 	s.border_width_left   = 1; s.border_width_right  = 1
 	s.border_width_top    = 1; s.border_width_bottom = 1
-	s.border_color        = Color(0.235, 0.263, 0.306, 0.45)
+	s.border_color        = Color(0.55, 0.60, 0.72, 0.70)
 	s.content_margin_left = 16; s.content_margin_right  = 16
 	s.content_margin_top  = 9;  s.content_margin_bottom = 9
 	return s
 
 func _btn_tertiary_hover() -> StyleBoxFlat:
-	var s := _flat(Color(0.165, 0.180, 0.208, 0.58), RADIUS)
+	var s := _flat(Color(0.28, 0.32, 0.46, 0.88), RADIUS)
 	s.border_width_left   = 1; s.border_width_right  = 1
 	s.border_width_top    = 1; s.border_width_bottom = 2
-	s.border_color        = Color(C_GOLD.r, C_GOLD.g, C_GOLD.b, 0.40)
+	s.border_color        = Color(C_GOLD.r, C_GOLD.g, C_GOLD.b, 0.60)
 	s.shadow_color        = Color(C_GOLD.r * 0.28, C_GOLD.g * 0.24, C_GOLD.b * 0.10, 0.40)
 	s.shadow_size         = 6
 	s.shadow_offset       = Vector2(0.0, 2.0)
@@ -9731,10 +10137,10 @@ func _btn_tertiary_hover() -> StyleBoxFlat:
 	return s
 
 func _btn_tertiary_pressed() -> StyleBoxFlat:
-	var s := _flat(Color(0.082, 0.075, 0.063, 0.70), RADIUS)
+	var s := _flat(Color(0.14, 0.16, 0.22, 0.85), RADIUS)
 	s.border_width_left   = 1; s.border_width_right  = 1
 	s.border_width_top    = 2; s.border_width_bottom = 1
-	s.border_color        = Color(0.235, 0.263, 0.306, 0.22)
+	s.border_color        = Color(0.45, 0.50, 0.62, 0.50)
 	s.content_margin_left = 16; s.content_margin_right  = 16
 	s.content_margin_top  = 9;  s.content_margin_bottom = 9
 	return s
@@ -10091,13 +10497,19 @@ class _StatueBtn extends Control:
 	var _cb      : Callable
 	var _font    : Font
 	var _texture : Texture2D = null
-	var _locked   : bool     = false
+	var _hide_label : bool   = false
+	var _draw_size  : Vector2 = Vector2.ZERO   # if set, image renders at this size regardless of control size
+	var _locked       : bool     = false
 	var _lock_tex : Texture2D = null
 	var _hover   : bool    = false
 	var _ga      : float   = 0.0   # glow alpha 0→1
 	var _phase   : float   = 0.0   # per-statue random phase offset
 	var _fly     : float   = 0.0   # current idle float y
-	var _gtw     : Tween   = null
+	var _gtw          : Tween   = null
+	var _stw          : Tween   = null
+	var _fly_tw       : Tween   = null
+	var _img_offset   : Vector2 = Vector2.ZERO  # shifts image within control; hitbox stays put
+	var _visual_scale : float   = 1.0           # visual-only scale; does NOT affect hitbox
 
 	func set_locked(v: bool) -> void:
 		_locked = v
@@ -10111,7 +10523,6 @@ class _StatueBtn extends Control:
 		_phase = phase_off
 		mouse_filter = MOUSE_FILTER_STOP
 		focus_mode   = FOCUS_NONE
-		pivot_offset = size / 2.0
 		mouse_entered.connect(_on_enter)
 		mouse_exited.connect(_on_exit)
 		var tex_path := "res://assets/statues/statue_%s.png" % tp
@@ -10126,35 +10537,46 @@ class _StatueBtn extends Control:
 		_hover = true
 		if is_instance_valid(_gtw): _gtw.kill()
 		_gtw = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
-		_gtw.tween_property(self, "_ga", 1.0, 0.16)
-		var stw := create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
-		stw.tween_property(self, "scale", Vector2(1.06, 1.06), 0.12)
+		_gtw.tween_property(self, "_ga", 1.0, 0.8)
+		if is_instance_valid(_stw): _stw.kill()
+		_stw = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
+		_stw.tween_property(self, "_visual_scale", 1.03, 0.5)
+		if is_instance_valid(_fly_tw): _fly_tw.kill()
+		_fly_tw = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
+		_fly_tw.tween_property(self, "_fly", -8.0, 0.6)
 
 	func _on_exit() -> void:
 		if _locked: return
 		_hover = false
 		if is_instance_valid(_gtw): _gtw.kill()
 		_gtw = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
-		_gtw.tween_property(self, "_ga", 0.0, 0.22)
-		var stw := create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
-		stw.tween_property(self, "scale", Vector2(1.0, 1.0), 0.14)
+		_gtw.tween_property(self, "_ga", 0.0, 0.4)
+		if is_instance_valid(_stw): _stw.kill()
+		_stw = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
+		_stw.tween_property(self, "_visual_scale", 1.0, 0.3)
+		if is_instance_valid(_fly_tw): _fly_tw.kill()
+		_fly_tw = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
+		_fly_tw.tween_property(self, "_fly", 0.0, 0.4)
 
 	func _gui_input(ev: InputEvent) -> void:
 		if _locked: return
 		if ev is InputEventMouseButton and ev.button_index == MOUSE_BUTTON_LEFT and ev.pressed:
 			_cb.call()
 
-	func _process(dt: float) -> void:
-		_phase += dt
-		_fly = sin(_phase * 0.88) * 4.5 - (8.0 if _hover else 0.0)
-		queue_redraw()
+	func _process(_dt: float) -> void:
+		if _hover or _ga > 0.01 or absf(_fly) > 0.01 or absf(_visual_scale - 1.0) > 0.001:
+			queue_redraw()
 
 	func _draw() -> void:
 		var w := size.x; var h := size.y
+		if _visual_scale != 1.0:
+			var s := _visual_scale
+			draw_set_transform(Vector2(w * 0.5 * (1.0 - s), h * 0.5 * (1.0 - s)), 0.0, Vector2(s, s))
 		if _texture:
 			_draw_from_texture(w, h)
 		else:
-			_draw_nameplate(w, h)
+			if not _hide_label:
+				_draw_nameplate(w, h)
 			match _type:
 				"upgrades": _draw_knight(w, h)
 				"shop":     _draw_shop(w, h)
@@ -10163,31 +10585,37 @@ class _StatueBtn extends Control:
 				"towers":   _draw_towers(w, h)
 				"relics":   _draw_relics(w, h)
 				"start":    _draw_dragon(w, h)
+			if _locked:
+				draw_rect(Rect2(0, 0, w, h), Color(0, 0, 0, 0.70))
 		if _locked:
 			_draw_locked_overlay(w, h)
+		if _visual_scale != 1.0:
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 	func _draw_locked_overlay(w: float, h: float) -> void:
 		if not _lock_tex:
 			return
 		var area_h : float   = h - 38.0
 		var ts     : Vector2 = _lock_tex.get_size()
-		var sc     : float   = min(w / ts.x, area_h / ts.y) * 0.80
+		var sc     : float   = min(w / ts.x, area_h / ts.y) * 0.56
 		var dw     : float   = ts.x * sc
 		var dh     : float   = ts.y * sc
 		var dx     : float   = (w - dw) * 0.5
 		var dy     : float   = (area_h - dh) * 0.5
-		draw_texture_rect(_lock_tex, Rect2(dx, dy, dw, dh), false, Color(1, 1, 1, 0.72))
+		draw_texture_rect(_lock_tex, Rect2(dx, dy, dw, dh), false, Color(1, 1, 1, 0.50))
 
 	func _draw_from_texture(w: float, h: float) -> void:
-		var area_h : float   = h - 42.0          # reserve bottom 42px for nameplate
+		# Use _draw_size for image scaling when set (allows visual > hitbox)
+		var vw     : float   = _draw_size.x if _draw_size.x > 0.0 else w
+		var vh     : float   = _draw_size.y if _draw_size.y > 0.0 else h
+		var area_h : float   = vh - 42.0
 		var ts     : Vector2 = _texture.get_size()
-		var sc     : float   = min(w / ts.x, area_h / ts.y)
+		var sc     : float   = min(vw / ts.x, area_h / ts.y)
 		var dw     : float   = ts.x * sc
 		var dh     : float   = ts.y * sc
-		var dx     : float   = (w - dw) * 0.5
-		var dy     : float   = (area_h - dh) * 0.5 + _fly
-		draw_texture_rect(_texture, Rect2(dx, dy, dw, dh), false)
-		_draw_nameplate(w, h)
+		var dx     : float   = (w - dw) * 0.5 + _img_offset.x
+		var dy     : float   = (h - dh) * 0.5 + _fly + _img_offset.y
+		draw_texture_rect(_texture, Rect2(dx, dy, dw, dh), false, Color(1, 1, 1, 0.3 if _locked else 1.0))
 
 	# ── Drawing helpers ──────────────────────────────────────────────────────
 	func _tri(a: Vector2, b: Vector2, c: Vector2, col: Color) -> void:

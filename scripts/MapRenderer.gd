@@ -3,8 +3,49 @@ extends Node2D
 # World 1 uses the original polygon road ring. Worlds 2-10 use a themed
 # thick-polyline road following the same waypoints as the enemy PATH.
 
+const FLOORS_TEX       := preload("res://assets/Pixel Crawler - Free Pack/Environment/Tilesets/Floors_Tiles.png")
+const TREES_TEX        := preload("res://assets/Harvest Sumer Free Ver. Pack/Vegetation/Trees 3.png")
+const ROCKS_TEX        := preload("res://assets/Pixel Crawler - Free Pack/Environment/Props/Static/Rocks.png")
+const HARVEST_TILES_TEX := preload("res://assets/Harvest Sumer Free Ver. Pack/tilesets/Set 1.0.png")
+
+var _road_atlas:      AtlasTexture    = null
+var _grass_atlas:     AtlasTexture    = null
+var _grass_tile_map:  PackedByteArray = PackedByteArray()
+var _road_tiles:      Array           = []   # [[tx, ty, src_idx], ...]
+
+func _ready() -> void:
+	_road_atlas = AtlasTexture.new()
+	_road_atlas.atlas  = FLOORS_TEX
+	_road_atlas.region = Rect2(160, 0, 80, 80)
+	_grass_atlas = AtlasTexture.new()
+	_grass_atlas.atlas  = FLOORS_TEX
+	_grass_atlas.region = Rect2(0, 0, 80, 80)
+	# Precompute dirt tile grid for road — check each tile center against road polygon
+	var road_poly := _road_outer_poly()
+	var rng2 := RandomNumberGenerator.new()
+	rng2.seed = 54321
+	var pool2 : Array[int] = [0, 0, 1, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3]
+	for ty in range(110, 531, 16):
+		for tx in range(0, 881, 16):
+			# Inset corners 1px: straight edges always pass, rounded arc corners get excluded.
+			var inside := true
+			for ox in [1, 15]:
+				for oy in [1, 15]:
+					if not Geometry2D.is_point_in_polygon(Vector2(tx + ox, ty + oy), road_poly):
+						inside = false
+			if inside:
+				_road_tiles.append([tx, ty, pool2[rng2.randi_range(0, pool2.size() - 1)]])
+	# Pre-compute mixed grass tile map (80×45 = 3600 tiles) with fixed seed.
+	# Weighted pool: r1c11~8%, r1c12~2%, r2c11~45%, r2c12~45%
+	var pool : Array[int] = [0, 0, 1, 2,2,2,2,2,2,2,2,2, 3,3,3,3,3,3,3,3,3,3]
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 12345
+	_grass_tile_map.resize(80 * 45)
+	for i in range(80 * 45):
+		_grass_tile_map[i] = pool[rng.randi_range(0, pool.size() - 1)]
+
 # ── Colors — World 1 (kept exactly as before) ────────────────────────────────
-const C_ROAD    := Color(0.60, 0.42, 0.18)
+const C_ROAD    := Color(0.99, 0.59, 0.23)
 const C_SHADOW  := Color(0.00, 0.00, 0.00, 0.22)
 const C_ISLAND  := Color(0.30, 0.62, 0.18)
 
@@ -23,7 +64,7 @@ const I_BOT   : float = 470.0
 const ISLAND    := Rect2(280, 170, 540, 300)
 const TILE_SIZE : int  = 60
 
-const OUTER_R  : float = 16.0
+const OUTER_R  : float = 20.0
 const INNER_R  : float = 10.0
 const STEPS    : int   = 12
 
@@ -95,8 +136,11 @@ func _draw() -> void:
 		_draw_world_n(world)
 
 
-# ── World 1 — original polygon road ring (unchanged) ─────────────────────────
+# ── World 1 — original polygon road ring ─────────────────────────────────────
 func _draw_world1() -> void:
+	_draw_grass_bg()
+	_draw_w1_trees()
+
 	var road   := _road_outer_poly()
 	var island := _island_poly(ISLAND)
 
@@ -104,8 +148,229 @@ func _draw_world1() -> void:
 	for i in range(shadow.size()):
 		shadow[i] += Vector2(5, 7)
 	draw_colored_polygon(shadow, C_SHADOW)
+
+	# Solid base gives rounded corners; tiles drawn on top fill the interior
 	draw_colored_polygon(road, C_ROAD)
+
+	# Draw dirt tiles inside road polygon — precomputed in _ready()
+	var dirt_srcs := [
+		Rect2(16, 16, 16, 16),
+		Rect2(32, 16, 16, 16),
+		Rect2(16, 32, 16, 16),
+		Rect2(32, 32, 16, 16),
+	]
+	for t in _road_tiles:
+		draw_texture_rect_region(HARVEST_TILES_TEX,
+			Rect2(t[0], t[1], 16, 16), dirt_srcs[t[2]])
+
+	# Island — solid green base + tiled grass texture overlay
 	draw_colored_polygon(island, C_ISLAND)
+	var grass_colors := PackedColorArray()
+	var grass_uvs    := PackedVector2Array()
+	for pt in island:
+		grass_colors.append(Color(1.0, 1.0, 1.0, 0.30))
+		grass_uvs.append(Vector2(pt.x / 80.0, pt.y / 80.0))
+	texture_repeat = CanvasItem.TEXTURE_REPEAT_ENABLED
+	draw_polygon(island, grass_colors, grass_uvs, _grass_atlas)
+	texture_repeat = CanvasItem.TEXTURE_REPEAT_DISABLED
+
+
+func _draw_grass_bg() -> void:
+	# Tile the background with 4 mixed Harvest Sumer grass tiles (16×16 each).
+	# 1280÷16=80 cols, 720÷16=45 rows. Pattern pre-seeded in _ready().
+	var srcs := [
+		Rect2(176, 16, 16, 16),  # r1c11 — blobs
+		Rect2(192, 16, 16, 16),  # r1c12 — blobs variant
+		Rect2(176, 32, 16, 16),  # r2c11 — grass tufts
+		Rect2(192, 32, 16, 16),  # r2c12 — grass tufts variant
+	]
+	for row in range(45):
+		for col in range(80):
+			draw_texture_rect_region(HARVEST_TILES_TEX,
+				Rect2(col * 16, row * 16, 16, 16),
+				srcs[_grass_tile_map[row * 80 + col]])
+
+
+func _draw_grass_bg_dark() -> void:
+	# Same tile layout/weights as World 1 but using dark green variants.
+	var srcs := [
+		Rect2(176, 144, 16, 16),  # dark blob A
+		Rect2(192, 144, 16, 16),  # dark blob B
+		Rect2(176, 160, 16, 16),  # dark tuft A
+		Rect2(192, 160, 16, 16),  # dark tuft B
+	]
+	for row in range(45):
+		for col in range(80):
+			draw_texture_rect_region(HARVEST_TILES_TEX,
+				Rect2(col * 16, row * 16, 16, 16),
+				srcs[_grass_tile_map[row * 80 + col]])
+
+
+func _draw_w1_trees() -> void:
+	# Asset regions from Trees 3.png (160×80, 16×16 grid):
+	#   T0  Rect2(  0, 0,48,54) sz(55,62)  T1  Rect2( 48, 0,48,54) sz(55,62)
+	#   T2a Rect2( 96, 0,32,64) sz(38,76)  T2b Rect2(128, 0,32,64) sz(38,76)
+	#   S0  Rect2(  0,54,48,26) sz(55,30)  S1  Rect2( 48,54,48,26) sz(55,30)
+	#   S2  Rect2( 96,64,32,16) sz(38,19)  S3  Rect2(128,64,32,16) sz(38,19)
+	#
+	# Road: R_TOP=110 R_BOT=530 R_LEFT=220 R_RIGHT=880 entry y=110-170 x=0-220
+	# Safe (half-extent + 10px buffer):
+	#   T0/T1 half(27,31): TOP cy≤69 BOT cy≥571 LEFT cx≤182,cy≥211 RIGHT cx≥918
+	#   T2a/b half(19,38): TOP cy≤62 BOT cy≥578 LEFT cx≤191,cy≥218 RIGHT cx≥909
+	#   S0/S1 half(27,15): TOP cy≤85 BOT cy≥555 LEFT cx≤182,cy≥195 RIGHT cx≥918
+	#   S2/S3 half(19, 9): TOP cy≤90 BOT cy≥549                     RIGHT cx≥909
+	var T0  := Rect2(  0, 0, 48, 54); var SZ0  := Vector2(55, 62)
+	var T1  := Rect2( 48, 0, 48, 54); var SZ1  := Vector2(55, 62)
+	var T2a := Rect2( 96, 0, 32, 64); var SZ2a := Vector2(38, 76)
+	var T2b := Rect2(128, 0, 32, 64); var SZ2b := Vector2(38, 76)
+	var S0  := Rect2(  0,54, 48, 26); var SS0  := Vector2(55, 30)
+	var S1  := Rect2( 48,54, 48, 26); var SS1  := Vector2(55, 30)
+	var S2  := Rect2( 96,64, 32, 16); var SS2  := Vector2(38, 19)
+	var S3  := Rect2(128,64, 32, 16); var SS3  := Vector2(38, 19)
+
+	# [cx, cy, src, sz]
+	# T0×6  T1×6  T2a×6  T2b×6  |  S0×2  S1×2  S2×2  S3×2
+	var sprites := [
+		# ── TOP strip — round cy=65, tall cy=58, stumps cy=88 ──────────────
+		[ 80,  65, T0,  SZ0 ],   # T0 #1
+		[280,  58, T2a, SZ2a],   # T2a #1
+		[480,  65, T1,  SZ1 ],   # T1 #1
+		[680,  58, T2b, SZ2b],   # T2b #1
+		[890,  65, T0,  SZ0 ],   # T0 #2
+		[1080, 58, T2a, SZ2a],   # T2a #2
+		[200,  88, S0,  SS0 ],   # S0 #1
+		[780,  88, S1,  SS1 ],   # S1 #1
+
+		# ── BOTTOM strip — round cy=575, tall cy=582, stumps cy=600 ────────
+		[120,  575, T1,  SZ1 ],  # T1 #2
+		[320,  582, T2b, SZ2b],  # T2b #2
+		[520,  575, T0,  SZ0 ],  # T0 #3
+		[720,  582, T2a, SZ2a],  # T2a #3
+		[920,  575, T1,  SZ1 ],  # T1 #3
+		[1100, 582, T2b, SZ2b],  # T2b #3
+		[450,  600, S0,  SS0 ],  # S0 #2
+		[660,  598, S2,  SS2 ],  # S2 #1
+		[1050, 596, S3,  SS3 ],  # S3 #1
+
+		# ── LEFT strip — cx≤182, round cy≥211, tall cy≥218 ─────────────────
+		[90,  250, T0,  SZ0 ],   # T0 #4
+		[75,  380, T1,  SZ1 ],   # T1 #4
+		[92,  480, T2b, SZ2b],   # T2b #4
+		[65,  320, S1,  SS1 ],   # S1 #2
+
+		# ── RIGHT strip — round cx≥918, tall cx≥909; no road at x>880 ──────
+		# Row 1 (cy=200)
+		[935,  200, T0,  SZ0 ],  # T0 #5
+		[1090, 200, T2a, SZ2a],  # T2a #4
+		[1240, 200, T1,  SZ1 ],  # T1 #5
+		# Row 2 (cy=340)
+		[918,  340, T2b, SZ2b],  # T2b #5
+		[1090, 340, T2a, SZ2a],  # T2a #5
+		[1240, 340, T0,  SZ0 ],  # T0 #6
+		# Row 3 (cy=480)
+		[935,  480, T1,  SZ1 ],  # T1 #6
+		[1090, 480, T2a, SZ2a],  # T2a #6
+		[1240, 480, T2b, SZ2b],  # T2b #6
+		[960,  270, S2,  SS2 ],  # S2 #2
+		[1120, 415, S3,  SS3 ],  # S3 #2
+	]
+	for s in sprites:
+		var src : Rect2   = s[2]
+		var sz  : Vector2 = s[3]
+		draw_texture_rect_region(TREES_TEX,
+			Rect2(s[0] - sz.x * 0.5, s[1] - sz.y * 0.5, sz.x, sz.y), src)
+
+
+# ── Worlds 2-10 — outer margin sprite decorations ────────────────────────────
+# Sprites drawn at 40×50 (trees) or 30×38 (rocks) centered on (cx,cy).
+# Positions are safe: every sprite bbox stays ≥30 px from the nearest road segment.
+#
+# Trees 3.png src rects (y=0-77):
+#   T0 bright-green x=1-47 | T1 teal x=49-95 | T2 dark x=98-156
+# Rocks.png src rects (y=19-61):
+#   RA x=2-29 (28px)       | RB x=35-62 (28px)
+func _draw_world_outer(world: int) -> void:
+	var t_sz := Vector2(40, 50)
+	var r_sz := Vector2(30, 38)
+	var T0 := Rect2(1,0,47,77);  var T1 := Rect2(49,0,47,77); var T2 := Rect2(98,0,59,77)
+	var RA := Rect2(2,19,28,43); var RB := Rect2(35,19,28,43)
+	match world:
+		2:  # Deep Forest — Tree B (T1)×8, Tree D (T2b)×8, stumps S1+S3×5
+			var T1_r  := Rect2( 48,  0, 48, 54); var SZ_T1  := Vector2(55, 62)
+			var T2b_r := Rect2(128,  0, 32, 64); var SZ_T2b := Vector2(38, 76)
+			var S1_r  := Rect2( 48, 54, 48, 26); var SS1    := Vector2(55, 30)
+			var S3_r  := Rect2(128, 64, 32, 16); var SS3    := Vector2(38, 19)
+			var w2_sprites := [
+				# T1 (Tree B wide) ×8 — TOP×3, LEFT×1, RIGHT col-A×2 col-B×2
+				[  80,  55, T1_r,  SZ_T1], [ 380,  55, T1_r,  SZ_T1], [ 660,  55, T1_r,  SZ_T1],
+				[  44, 270, T1_r,  SZ_T1],
+				[ 945, 170, T1_r,  SZ_T1], [ 945, 490, T1_r,  SZ_T1],
+				[1100, 395, T1_r,  SZ_T1], [1100, 695, T1_r,  SZ_T1],
+				# T2b (Tree D slim) ×8 — TOP×3, LEFT×1, RIGHT col-A×2 col-B×2
+				[ 210,  55, T2b_r, SZ_T2b], [ 500,  55, T2b_r, SZ_T2b], [ 800,  55, T2b_r, SZ_T2b],
+				[  46, 440, T2b_r, SZ_T2b],
+				[ 945, 330, T2b_r, SZ_T2b], [ 945, 640, T2b_r, SZ_T2b],
+				[1100, 245, T2b_r, SZ_T2b], [1100, 545, T2b_r, SZ_T2b],
+				# S1/S3 stumps ×5 — TOP×2, LEFT×1, RIGHT×2 (placed in gaps between trees)
+				[ 150,  88, S1_r,  SS1], [ 550,  88, S3_r,  SS3],
+				[  48, 350, S1_r,  SS1],
+				[ 952, 245, S3_r,  SS3], [ 968, 430, S1_r,  SS1],
+			]
+			for s in w2_sprites:
+				var src2 : Rect2   = s[2]
+				var sz2  : Vector2 = s[3]
+				draw_texture_rect_region(TREES_TEX,
+					Rect2(s[0] - sz2.x * 0.5, s[1] - sz2.y * 0.5, sz2.x, sz2.y), src2)
+		3:  # Desert Ruins — warm sandy rocks; sparse trees; right cx>920
+			var tc := Color(0.88, 0.80, 0.50);  var rc := Color(1.00, 0.82, 0.44)
+			_ospr(TREES_TEX, [60,60, 230,60, 420,60, 600,60, 790,60, 1000,60, 1170,60, 1250,60], t_sz, T2, tc)
+			_ospr(ROCKS_TEX, [945,195, 1080,238, 1215,198, 950,332, 1108,362, 1238,330, 945,462, 1080,480, 1215,458], r_sz, RA, rc)
+			_ospr(ROCKS_TEX, [80,560, 260,560, 448,560, 630,560, 818,560, 1008,560, 1188,560], r_sz, RB, rc)
+			_ospr(ROCKS_TEX, [80,660, 260,660, 448,660, 630,660, 818,660, 1008,660, 1188,660], r_sz, RA, rc)
+		4:  # Frost Peaks — ice-blue trees + pale rocks; right cx>890
+			var tc := Color(0.70, 0.88, 0.98);  var rc := Color(0.72, 0.82, 0.96)
+			_ospr(TREES_TEX, [60,60, 230,60, 420,60, 600,60, 790,60, 960,60, 1130,60, 1250,60], t_sz, T0, tc)
+			_ospr(TREES_TEX, [910,188, 1055,228, 1205,192, 915,322, 1070,362, 1225,326, 910,455, 1060,476, 1212,455], t_sz, T1, tc)
+			_ospr(ROCKS_TEX, [80,660, 260,660, 448,660, 630,660, 818,660, 1000,660, 1188,660], r_sz, RA, rc)
+		5:  # Volcanic Wastes — charred rocks; right cx>1040 (path x reaches 990)
+			var rc := Color(0.60, 0.26, 0.16);  var tc := Color(0.50, 0.30, 0.20)
+			_ospr(TREES_TEX, [60,60, 230,60, 420,60, 600,60, 800,60, 1070,60, 1200,60, 1255,60], t_sz, T2, tc)
+			_ospr(ROCKS_TEX, [1060,202, 1178,242, 1255,202, 1065,338, 1185,370, 1255,335, 1060,462, 1180,480, 1255,458], r_sz, RA, rc)
+			_ospr(ROCKS_TEX, [80,660, 260,660, 448,660, 625,660, 812,660, 1008,660, 1188,660], r_sz, RB, rc)
+		6:  # Swamplands — murky olive trees; right cx>920 (diagonal path stays inside)
+			var tc := Color(0.56, 0.74, 0.44);  var rc := Color(0.52, 0.60, 0.36)
+			_ospr(TREES_TEX, [60,60, 230,60, 420,60, 600,60, 790,60, 1000,60, 1170,60, 1250,60], t_sz, T0, tc)
+			_ospr(TREES_TEX, [945,195, 1072,238, 1212,198, 950,332, 1108,365, 1238,330, 945,462, 1082,480, 1215,458], t_sz, T1, tc)
+			_ospr(ROCKS_TEX, [80,660, 260,660, 448,660, 630,660, 818,660, 1008,660, 1188,660], r_sz, RB, rc)
+		7:  # Crystal Highlands — purple rocks; right cx>1040; skip cx≈510 in top strip
+			var rc := Color(0.65, 0.38, 1.00);  var tc := Color(0.56, 0.36, 0.88)
+			_ospr(TREES_TEX, [60,60, 218,60, 390,60, 638,60, 808,60, 978,60, 1130,60, 1252,60], t_sz, T2, tc)
+			_ospr(ROCKS_TEX, [1060,202, 1178,245, 1255,208, 1065,340, 1185,372, 1255,340, 1060,462, 1180,480, 1255,458], r_sz, RA, rc)
+			_ospr(ROCKS_TEX, [80,660, 260,660, 448,660, 630,660, 818,660, 1008,660, 1188,660], r_sz, RB, rc)
+		8:  # Shadow Realm — near-void dark; right cx>830 (path max x=780)
+			var tc := Color(0.30, 0.18, 0.45);  var rc := Color(0.28, 0.16, 0.40)
+			_ospr(TREES_TEX, [60,60, 230,60, 420,60, 600,60, 790,60, 1000,60, 1170,60, 1250,60], t_sz, T1, tc)
+			_ospr(TREES_TEX, [850,198, 988,240, 1148,205, 855,335, 1002,368, 1158,330, 850,462, 992,480, 1158,458], t_sz, T0, tc)
+			_ospr(ROCKS_TEX, [80,660, 260,660, 448,660, 630,660, 818,660, 1008,660, 1188,660], r_sz, RA, rc)
+		9:  # Celestial Kingdom — golden sheen; right cx>950 (path max x=900)
+			var tc := Color(1.00, 0.92, 0.60);  var rc := Color(1.00, 0.86, 0.50)
+			_ospr(TREES_TEX, [60,60, 230,60, 420,60, 600,60, 790,60, 1010,60, 1175,60, 1255,60], t_sz, T0, tc)
+			_ospr(TREES_TEX, [972,198, 1108,238, 1238,202, 975,335, 1112,368, 1238,335, 972,462, 1108,480, 1238,458], t_sz, T1, tc)
+			_ospr(ROCKS_TEX, [80,660, 260,660, 448,660, 630,660, 818,660, 1008,660, 1188,660], r_sz, RB, rc)
+		10: # Eternal Citadel — silver marble rocks; right cx>1040; skip cx≈880 in top
+			var rc := Color(0.76, 0.78, 0.92);  var tc := Color(0.70, 0.74, 0.88)
+			_ospr(TREES_TEX, [60,60, 220,60, 400,60, 570,60, 740,60, 862,60, 1035,60, 1188,60, 1256,60], t_sz, T2, tc)
+			_ospr(ROCKS_TEX, [1060,202, 1178,242, 1256,206, 1065,338, 1185,370, 1256,338, 1060,462, 1180,480, 1256,458], r_sz, RA, rc)
+			_ospr(ROCKS_TEX, [80,660, 260,660, 448,660, 630,660, 818,660, 1008,660, 1188,660], r_sz, RB, rc)
+
+
+# Helper: draw sprites at [cx,cy, cx,cy, ...] flat array, centered on each position.
+func _ospr(tex: Texture2D, xy: Array, sz: Vector2, src: Rect2, tint: Color) -> void:
+	var i := 0
+	while i < xy.size() - 1:
+		var cx : float = xy[i];  var cy : float = xy[i + 1]
+		draw_texture_rect_region(tex, Rect2(cx - sz.x*0.5, cy - sz.y*0.5, sz.x, sz.y), src, tint)
+		i += 2
 
 
 # ── Worlds 2-10 — polyline road following world-specific path ─────────────────
@@ -120,10 +385,17 @@ func _draw_world_n(world: int) -> void:
 	var pts    := _path_to_pv2(GameData.get_world_path(world))
 
 	# 0 — full-map background (terrain colour) — cover full viewport so no clear-color shows
-	draw_rect(Rect2(0, 0, 1280, 720), sky_c)
+	if world == 2:
+		_draw_grass_bg_dark()
+	else:
+		draw_rect(Rect2(0, 0, 1280, 720), sky_c)
+
+	# 0b — outer margin sprite decorations (trees/rocks) in safe zones outside the road
+	_draw_world_outer(world)
 
 	# 1 — island ground slab (tower placement area)
-	draw_colored_polygon(_island_poly(wi), island_c)
+	if world != 2:
+		draw_colored_polygon(_island_poly(wi), island_c)
 
 	# 2 — biome decorations drawn on the ground, below the road
 	_draw_world_decorations(world, wi)

@@ -14,9 +14,6 @@ func _draw() -> void:
 	if GameData.selected_world != 1:
 		return
 	_draw_grass_patches()
-	_draw_trees()
-	_draw_rocks()
-	_draw_flowers()
 
 
 # ── Subtle grass texture patches ──────────────────────────────────────────────
@@ -88,15 +85,16 @@ func _draw_trees() -> void:
 
 # ── Rocks ─────────────────────────────────────────────────────────────────────
 func _draw_rocks() -> void:
-	# Only in the outer grass margins — never on or touching the road.
-	# Road occupies x=130-1150, y=60-540 (+ entry x=0-190, y=60-120).
+	# Placed in gaps between sprite trees — clear of all tree bounding boxes.
 	var rocks : Array = [
-		[90,  44],  [115, 30],    # top margin (y < 60)
-		[980, 38],  [1060, 22],
-		[90,  570], [115, 584],   # bottom margin (y > 540)
-		[960, 558], [1060, 572],
-		[60,  280], [50,  430],   # left margin (x < 130, y 120-540)
-		[1195, 280],[1200, 430],  # right margin (x > 1150, y 120-540)
+		# TOP — in horizontal gaps between trees (trees at x=80,280,480,680,890,1080)
+		[185, 80], [380, 82], [785, 80], [985, 82],
+		# BOTTOM — gaps between trees (trees at x=120,320,520,720,920,1100)
+		[225, 610], [420, 605], [820, 608], [1165, 605],
+		# LEFT — above T0@250 and between T1@380 and T2b@480
+		[45, 200], [43, 428],
+		# RIGHT — between columns and rows of right-strip trees
+		[1000, 270], [1000, 398],
 	]
 	for rk in rocks:
 		var p : Vector2 = Vector2(float(rk[0]), float(rk[1]))
@@ -112,16 +110,16 @@ func _draw_flowers() -> void:
 	var white  := Color(1.0, 1.00, 1.00)
 	var pink   := Color(1.0, 0.70, 0.80)
 	var flowers : Array = [
-		# Top margin (y < 55, clear of road at y=60)
-		[80,  44, yellow], [310, 32, white], [600, 46, pink],
-		[900, 28, yellow], [1180,42, white],
-		# Bottom margin (y > 548, clear of road at y=540)
-		[80,  560, white],  [340, 550, yellow], [640, 562, pink],
-		[940, 552, white],  [1180,558, yellow],
-		# Left margin (x < 115, clear of road/entry)
-		[80, 240, pink],  [72, 430, yellow],
-		# Right margin (x > 1160)
-		[1192, 240, yellow], [1196, 420, white],
+		# TOP — gaps between trees
+		[155, 58, yellow], [380, 50, white], [580, 58, pink],
+		[985, 55, yellow], [1180, 52, white],
+		# BOTTOM — gaps between trees
+		[50, 560, white],  [225, 558, yellow], [420, 562, pink],
+		[968, 560, yellow], [1190, 562, white],
+		# LEFT — above T0@250, and between T1@380 and T2b@480
+		[50, 185, pink], [40, 428, yellow],
+		# RIGHT — above row 1 and below row 3
+		[980, 148, yellow], [980, 530, white],
 	]
 	for fl in flowers:
 		var p : Vector2 = Vector2(float(fl[0]), float(fl[1]))
