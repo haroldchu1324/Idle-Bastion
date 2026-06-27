@@ -13,6 +13,8 @@ var _rows    : int      = 5
 var _occupied          : Dictionary = {}   # Vector2i → true
 var _path_blocked      : Dictionary = {}   # Vector2i → true (tiles under the road)
 var special_tiles      : Dictionary = {}   # Vector2i → "red" | "blue" | "green" (W2 S5 bonuses)
+var null_zone_tiles    : Dictionary = {}   # Vector2i → true (curse_null_zones debuff: -50% range)
+var disabled_tiles     : Dictionary = {}   # Vector2i → true (towers currently disabled by debuff)
 var tutorial_lock_tile : Vector2i   = Vector2i(-1, -1)  # when set, only this tile accepts drops
 var hovered_tile       : Vector2i   = Vector2i(-1, -1)
 var _time         : float      = 0.0
@@ -38,6 +40,7 @@ func setup_world(world: int, path: Array) -> void:
 	_occupied.clear()
 	_path_blocked.clear()
 	special_tiles.clear()
+	null_zone_tiles.clear()
 	_tile_anims.clear()
 	_land_flashes.clear()
 	_tiles_animating    = false
@@ -251,6 +254,18 @@ func _draw() -> void:
 		var alpha  : float = (1.0 - ft) * 0.80
 		draw_circle(Vector2(cx, cy), radius, Color(base_c.r, base_c.g, base_c.b, alpha), false, 3.5)
 
+	# Null zone debuff tiles
+	for t in null_zone_tiles:
+		var rx : float = _island.position.x + t.x * TILE_SIZE
+		var ry : float = _island.position.y + t.y * TILE_SIZE
+		_draw_null_zone_tile(rx, ry)
+
+	# Disabled tower tiles (Curse of Silence / tower_rot)
+	for t in disabled_tiles:
+		var rx : float = _island.position.x + t.x * TILE_SIZE
+		var ry : float = _island.position.y + t.y * TILE_SIZE
+		_draw_disabled_tile(rx, ry)
+
 	if tutorial_lock_tile != Vector2i(-1, -1):
 		return  # TutorialOverlay handles the target highlight during move lock
 	if hovered_tile.x < 0 or not can_place(hovered_tile):
@@ -356,3 +371,54 @@ func _draw_glass_tile(rx: float, ry: float, base: Color) -> void:
 
 	# Layer 8 — inner white border (thin glass-edge shimmer, inset by 2 px)
 	draw_rect(Rect2(rx + 2, ry + 2, T - 4, T - 4), Color(1.0, 1.0, 1.0, 0.22), false, 1.0)
+
+
+func _draw_null_zone_tile(rx: float, ry: float) -> void:
+	var T   := float(TILE_SIZE)
+	var p   := T * 0.18
+	# Pulsing alpha so the zone draws the eye
+	var pulse : float = 0.55 + sin(_time * 2.8) * 0.15
+	# Dark crimson fill
+	draw_rect(Rect2(rx, ry, T, T), Color(0.22, 0.02, 0.02, 0.70))
+	# Hatched diagonal lines (interference pattern)
+	var step : float = T / 4.0
+	for i in range(5):
+		var off := i * step
+		draw_line(Vector2(rx,       ry + off), Vector2(rx + off,       ry),
+			Color(0.80, 0.08, 0.08, 0.40 * pulse), 1.0)
+		draw_line(Vector2(rx + off, ry + T),   Vector2(rx + T, ry + off),
+			Color(0.80, 0.08, 0.08, 0.40 * pulse), 1.0)
+	# Bold X
+	draw_line(Vector2(rx + p, ry + p), Vector2(rx + T - p, ry + T - p),
+		Color(0.95, 0.15, 0.15, 0.85 * pulse), 2.5)
+	draw_line(Vector2(rx + T - p, ry + p), Vector2(rx + p, ry + T - p),
+		Color(0.95, 0.15, 0.15, 0.85 * pulse), 2.5)
+	# Outer border
+	draw_rect(Rect2(rx, ry, T, T), Color(0.90, 0.12, 0.12, 0.90 * pulse), false, 2.0)
+
+
+func _draw_disabled_tile(rx: float, ry: float) -> void:
+	var T   := float(TILE_SIZE)
+	var cx  := rx + T * 0.5
+	# Reddish-purple tinted background
+	var bg_pulse : float = 0.50 + sin(_time * 3.5) * 0.12
+	draw_rect(Rect2(rx, ry, T, T), Color(0.42, 0.05, 0.38, 0.62 * bg_pulse))
+	draw_rect(Rect2(rx, ry, T, T), Color(0.75, 0.10, 0.65, 0.80 * bg_pulse), false, 2.0)
+	# Two staggered falling arrows (period = 0.7s each, offset by half)
+	var period  : float = 0.70
+	var arr_w   : float = 10.0
+	var arr_h   : float = 8.0
+	var travel  : float = T - 16.0   # usable vertical space inside tile
+	for i in range(2):
+		var t : float = fmod(_time + i * (period * 0.5), period) / period  # 0→1
+		var ay : float = ry + 8.0 + t * travel
+		# Fade in at top, fade out at bottom — peak alpha at mid-travel
+		var alpha : float = sin(t * PI) * 0.90
+		var tip   := Vector2(cx,              ay + arr_h)
+		var left  := Vector2(cx - arr_w * 0.5, ay)
+		var right := Vector2(cx + arr_w * 0.5, ay)
+		draw_colored_polygon(PackedVector2Array([left, right, tip]),
+			Color(0.95, 0.20, 0.85, alpha))
+		# Thin stem above the arrowhead
+		draw_line(Vector2(cx, ay - arr_h * 0.6), Vector2(cx, ay),
+			Color(0.95, 0.20, 0.85, alpha * 0.70), 1.5)

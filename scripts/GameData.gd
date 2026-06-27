@@ -26,7 +26,10 @@ var merge_tutorial_seen       : bool      = false
 var special_tiles_seen        : bool      = false
 var recipe_tutorial_seen      : bool      = false
 var selected_world            : int       = 1     # in-memory only; set by HUD before scene reload
+var selected_difficulty       : String    = "easy"    # "easy" or "hard"; in-memory only
+var easy_mode_beaten          : bool      = false     # true once any world is beaten on easy
 var launching_into_game       : bool      = false # true only when Start World triggers reload
+var debug_dummy_mode          : bool      = false # true when launched via harold debug game button
 
 # ── Daily Quests ──────────────────────────────────────────────────────────────
 const DQ_KILL_TARGET  : int = 200
@@ -42,6 +45,81 @@ var dq_sell_claimed     : bool   = false
 var dq_mode             : String = ""     # in-memory: "" | "mutated_w1" | "sell_w1"
 var dq_sell_run_count   : int    = 0      # in-memory: tower sells in current sell_w1 run
 var dq_unlocked         : bool   = false  # true after first defeat (unlocks Daily Quests tab)
+
+# ── Hard Mode Debuffs ────────────────────────────────────────────────────────
+const HARD_DEBUFF_DEFS : Array = [
+	{"id": "curse_tower_penalty", "name": "Massed Vanguard",  "icon": "🏰",
+	 "desc": "For every 5 towers on the map,\nenemies gain 1% more max health when they spawn."},
+	{"id": "curse_gold_miss",     "name": "Greedy Ghosts",    "icon": "👻",
+	 "desc": "5% chance enemies drop no gold\nwhen killed. Does not affect bosses."},
+	{"id": "curse_revive",        "name": "Undying Tide",     "icon": "💀",
+	 "desc": "5% chance a killed enemy revives\nwith 20% HP and 3x speed (drops no gold)."},
+	{"id": "curse_armor",         "name": "Iron Skin",        "icon": "🛡",
+	 "desc": "Enemies gain 3 armor. Direct hits\ndeal 3 less damage (DoTs unaffected)."},
+	{"id": "curse_tower_rot",     "name": "Cursed Grid",      "icon": "⚙",
+	 "desc": "Every 10 seconds, 2 random towers\nget -20% damage and -50% attack speed."},
+	{"id": "curse_regen",          "name": "Ancient Vitality",  "icon": "❤",
+	 "desc": "All enemies regenerate 2 HP\nper second."},
+	{"id": "curse_legend_penalty", "name": "Broken Pinnacle",   "icon": "⬇",
+	 "desc": "Legendary and Fusion towers\ndeal 15% less damage."},
+	{"id": "curse_tower_disable",  "name": "Curse of Silence",  "icon": "🔇",
+	 "desc": "Every enemy death has a 20% chance\nto disable 2 random towers for 5 seconds."},
+	{"id": "curse_boss_minions",   "name": "Eternal Horde",     "icon": "👑",
+	 "desc": "During the boss stage, a minion\nspawns every second with 5% boss HP and 2x speed."},
+	{"id": "curse_remove_towers",  "name": "Purge",             "icon": "💥",
+	 "desc": "Immediately destroys 3 random\ntowers on your grid (no refund)."},
+	{"id": "curse_wounded_speed",  "name": "Second Wind",       "icon": "💨",
+	 "desc": "Enemies below 50% HP move\n20% faster."},
+	{"id": "curse_taunt_tank",     "name": "Iron Colossus",     "icon": "🛡",
+	 "desc": "3 seconds into each wave, a Taunt Tank\nspawns with 5000 HP (+200/stage).\nAll towers prioritize it while it lives."},
+	{"id": "curse_null_zones",     "name": "Dead Frequency",    "icon": "📡",
+	 "desc": "Places 2 pairs of connected cursed tiles\non your grid. Any tower on these tiles\nhas its attack range reduced by 50%."},
+	{"id": "curse_vampiric_surge", "name": "Vampiric Surge",    "icon": "🩸",
+	 "desc": "3% chance on enemy death: 8 random towers\nheal enemies for 5 seconds instead of\ndealing damage."},
+]
+
+var debuff_tower_penalty  : bool  = false
+var debuff_gold_miss      : bool  = false
+var debuff_revive         : bool  = false
+var debuff_armor          : bool  = false
+var debuff_tower_rot      : bool  = false
+var debuff_regen          : bool  = false
+var debuff_legend_penalty : bool  = false
+var debuff_tower_disable  : bool  = false
+var debuff_boss_minions   : bool  = false
+var debuff_remove_towers  : bool  = false
+var debuff_wounded_speed  : bool  = false
+var debuff_taunt_tank     : bool  = false
+var debuff_null_zones     : bool  = false
+var debuff_vampiric_surge : bool  = false
+var active_hard_debuffs   : Array = []
+var active_tower_count    : int   = 0   # maintained by Main.gd for curse_tower_penalty
+
+func pick_hard_debuffs(count: int) -> Array:
+	var pool : Array = []
+	for d in HARD_DEBUFF_DEFS:
+		if not active_hard_debuffs.has(d["id"]):
+			pool.append(d)
+	pool.shuffle()
+	return pool.slice(0, mini(count, pool.size()))
+
+func apply_hard_debuff(id: String) -> void:
+	active_hard_debuffs.append(id)
+	match id:
+		"curse_tower_penalty":  debuff_tower_penalty  = true
+		"curse_gold_miss":      debuff_gold_miss      = true
+		"curse_revive":         debuff_revive         = true
+		"curse_armor":          debuff_armor          = true
+		"curse_tower_rot":      debuff_tower_rot      = true
+		"curse_regen":          debuff_regen          = true
+		"curse_legend_penalty": debuff_legend_penalty = true
+		"curse_tower_disable":  debuff_tower_disable  = true
+		"curse_boss_minions":   debuff_boss_minions   = true
+		"curse_remove_towers":  debuff_remove_towers  = true
+		"curse_wounded_speed":  debuff_wounded_speed  = true
+		"curse_taunt_tank":     debuff_taunt_tank     = true
+		"curse_null_zones":     debuff_null_zones     = true
+		"curse_vampiric_surge": debuff_vampiric_surge = true
 
 # ── Relics ────────────────────────────────────────────────────────────────────
 const RELIC_DEFS : Array = [
@@ -253,10 +331,57 @@ func final_damage_mult(_tower_idx: int)    -> float: return 1.0
 func final_fire_rate_mult(_tower_idx: int) -> float: return 1.0
 func final_range_mult(_tower_idx: int)     -> float: return 1.0
 
+# ── Category upgrade bonuses ──────────────────────────────────────────────────
+const RANGED_TOWER_IDS : Array = ["archer", "crossbow", "mage", "catapult"]
+const MELEE_TOWER_IDS  : Array = ["spearman", "rogue"]
+
+func _upg(node_id: String) -> bool:
+	return get_upgrade_tiers(node_id) > 0
+
+func category_dmg_bonus(tower_id: String) -> float:
+	var b := 0.0
+	if RANGED_TOWER_IDS.has(tower_id):
+		if _upg("ranged_dmg_1"): b += 0.01
+		if _upg("ranged_dmg_2"): b += 0.01
+		if _upg("ranged_dmg_3"): b += 0.02
+		if _upg("ranged_dmg_4"): b += 0.01
+	elif MELEE_TOWER_IDS.has(tower_id):
+		if _upg("melee_dmg_1"): b += 0.01
+		if _upg("melee_dmg_2"): b += 0.01
+		if _upg("melee_dmg_3"): b += 0.02
+		if _upg("melee_dmg_4"): b += 0.01
+	if _upg("all_dmg_1"): b += 0.01
+	return b
+
+func category_spd_bonus(tower_id: String) -> float:
+	var b := 0.0
+	if RANGED_TOWER_IDS.has(tower_id):
+		if _upg("ranged_spd_1"): b += 0.01
+		if _upg("ranged_spd_2"): b += 0.01
+		if _upg("ranged_spd_3"): b += 0.01
+		if _upg("ranged_spd_4"): b += 0.01
+	elif MELEE_TOWER_IDS.has(tower_id):
+		if _upg("melee_spd_1"): b += 0.01
+		if _upg("melee_spd_2"): b += 0.01
+		if _upg("melee_spd_3"): b += 0.01
+	if _upg("all_spd_1"): b += 0.01
+	return b
+
+func category_rng_flat_bonus(tower_id: String) -> float:
+	var b := 0.0
+	if RANGED_TOWER_IDS.has(tower_id):
+		if _upg("ranged_rng_1"): b += 5.0
+		if _upg("ranged_rng_2"): b += 5.0
+		if _upg("ranged_rng_3"): b += 5.0
+	elif MELEE_TOWER_IDS.has(tower_id):
+		if _upg("melee_rng_1"): b += 3.0
+		if _upg("melee_rng_2"): b += 3.0
+		if _upg("melee_rng_3"): b += 3.0
+	return b
+
 # ── Tower level multipliers ───────────────────────────────────────────────────
 # Additive bonuses per level (index 0 = Lv.1, index 9 = Lv.10).
 # Each entry is the TOTAL bonus accumulated up to that level (1.0 = base).
-# Matches the additive convention of turret_damage_mult (1.0 + tiers * 0.15).
 # Lv2+15%dmg, Lv3+10%rng, Lv4+15%rate, Lv5+20%dmg, Lv6+10%rng+10%rate,
 # Lv7+25%dmg, Lv8+15%rng, Lv9+20%rate, Lv10+30%dmg.
 const LEVEL_DMG_MULTS  : Array = [1.0, 1.15, 1.15, 1.15, 1.35, 1.35, 1.60, 1.60, 1.60, 1.90]
@@ -275,13 +400,20 @@ func tower_level_fire_rate_mult(tower_id: String) -> float:
 	var idx : int = clampi(get_tower_level(tower_id) - 1, 0, LEVEL_RATE_MULTS.size() - 1)
 	return LEVEL_RATE_MULTS[idx]
 
+# Hero upgrade tree bonuses (+15% per tier, max 3 tiers)
+func hero_upgrade_dmg_bonus(hero_id: String) -> float:
+	return get_upgrade_tiers("hero_" + hero_id + "_dmg") * 0.15
+
+func hero_upgrade_spd_bonus(hero_id: String) -> float:
+	return get_upgrade_tiers("hero_" + hero_id + "_spd") * 0.15
+
 # Combined additive multipliers — level bonus + upgrade bonus, both from original base.
 # Formula: 1.0 + (level_bonus) + (upgrade_bonus). Matches turret_damage_mult convention.
 func tower_total_damage_mult(tower_id: String) -> float:
-	return 1.0 + (tower_level_damage_mult(tower_id) - 1.0) + (get_upgrade_tiers(tower_id + "_dmg") * 0.15)
+	return 1.0 + (tower_level_damage_mult(tower_id) - 1.0) + category_dmg_bonus(tower_id)
 
 func tower_total_fire_rate_mult(tower_id: String) -> float:
-	return 1.0 + (tower_level_fire_rate_mult(tower_id) - 1.0) + (get_upgrade_tiers(tower_id + "_spd") * 0.15)
+	return 1.0 + (tower_level_fire_rate_mult(tower_id) - 1.0) + category_spd_bonus(tower_id) + (hero_upgrade_spd_bonus(tower_id) if HERO_DEFS.has(tower_id) else 0.0)
 
 func tower_total_range_mult(tower_id: String) -> float:
 	return tower_level_range_mult(tower_id)  # no range upgrade tiers
@@ -316,15 +448,31 @@ func heroes_of_rarity(rarity: String) -> Array:
 	return result
 
 func reset_run_buffs() -> void:
-	buff_damage_flat    = 0.0
-	buff_fire_rate_pct  = 0.0
-	buff_boss_dmg_pct   = 0.0
-	buff_enemy_slow_pct = 0.0
-	buff_dot_dps        = 0.0
-	buff_gold_pct       = 0.0
-	buff_pending_lives  = 0
-	chosen_buffs        = []
-	run_pending_cards   = []
+	buff_damage_flat       = 0.0
+	buff_fire_rate_pct     = 0.0
+	buff_boss_dmg_pct      = 0.0
+	buff_enemy_slow_pct    = 0.0
+	buff_dot_dps           = 0.0
+	buff_gold_pct          = 0.0
+	buff_pending_lives     = 0
+	chosen_buffs           = []
+	run_pending_cards      = []
+	debuff_tower_penalty  = false
+	debuff_gold_miss      = false
+	debuff_revive         = false
+	debuff_armor          = false
+	debuff_tower_rot      = false
+	debuff_regen          = false
+	debuff_legend_penalty = false
+	debuff_tower_disable  = false
+	debuff_boss_minions   = false
+	debuff_remove_towers  = false
+	debuff_wounded_speed  = false
+	debuff_taunt_tank     = false
+	debuff_null_zones     = false
+	debuff_vampiric_surge = false
+	active_hard_debuffs   = []
+	active_tower_count    = 0
 
 # ── Boss buff definitions ─────────────────────────────────────────────────────
 const BOSS_BUFFS : Array = [
@@ -440,6 +588,7 @@ func save_game() -> void:
 		"dq_unlocked":            dq_unlocked,
 		"relics_collected":       relics_collected,
 		"relic_levels":           relic_levels,
+		"easy_mode_beaten":       easy_mode_beaten,
 	}
 	var file := FileAccess.open_encrypted_with_pass(SAVE_PATH, FileAccess.WRITE, SAVE_KEY)
 	if file:
@@ -511,6 +660,7 @@ func load_game() -> void:
 	var rl = d.get("relic_levels", {})
 	if rl is Dictionary:
 		relic_levels = rl
+	easy_mode_beaten = bool(d.get("easy_mode_beaten", false))
 	_reconcile_hero_talents()
 
 func _reconcile_hero_talents() -> void:
@@ -539,12 +689,10 @@ func try_buy_upgrade(node_id: String, max_tiers: int, cost: int) -> bool:
 	return true
 
 func turret_damage_mult(turret_id: String) -> float:
-	var tiers := get_upgrade_tiers(turret_id + "_dmg")
-	return 1.0 + tiers * 0.15
+	return 1.0 + category_dmg_bonus(turret_id)
 
 func turret_fire_rate_mult(turret_id: String) -> float:
-	var tiers := get_upgrade_tiers(turret_id + "_spd")
-	return (1.0 + tiers * 0.15) * (1.0 + buff_fire_rate_pct)
+	return (1.0 + category_spd_bonus(turret_id)) * (1.0 + buff_fire_rate_pct)
 
 func turret_has_special(turret_id: String) -> bool:
 	return get_upgrade_tiers(turret_id + "_special") > 0
@@ -707,6 +855,35 @@ static func world_melee_resist(world: int) -> float:
 	for m in get_world_modifiers(world):
 		if m["type"] == "melee_resist": return float(m["value"]) / 100.0
 	return 0.0
+
+# ── Difficulty-scaled world modifier accessors ────────────────────────────────
+# Easy mode halves all world modifier effects. Normal = full modifiers.
+func _diff_scale() -> float:
+	return 0.5 if selected_difficulty == "easy" else 1.0
+
+func effective_world_hp_mult(world: int) -> float:
+	var base := 1.0 + (world_hp_mult(world) - 1.0) * _diff_scale()
+	if selected_difficulty == "easy" and world == 1:
+		base *= 0.9
+	return base
+
+func effective_world_spd_mult(world: int) -> float:
+	var base := 1.0 + (world_spd_mult(world) - 1.0) * _diff_scale()
+	if selected_difficulty == "easy" and world == 1:
+		base *= 0.95
+	return base
+
+func effective_world_gold_mult(world: int) -> float:
+	var base := world_gold_mult(world)
+	if base >= 1.0:
+		return base  # gold bonuses unchanged
+	return 1.0 + (base - 1.0) * _diff_scale()  # reduce penalty on easy
+
+func effective_world_skeleton_chance(world: int) -> float:
+	return world_skeleton_chance(world) * _diff_scale()
+
+func effective_world_melee_resist(world: int) -> float:
+	return world_melee_resist(world) * _diff_scale()
 
 
 func reset_save() -> void:

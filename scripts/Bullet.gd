@@ -100,6 +100,12 @@ func _process(delta: float) -> void:
 			_spawn_tw_cut_mark(_target)
 			queue_free()
 			return
+		if bullet_type == "bomb":
+			for enemy in get_tree().get_nodes_in_group("enemies"):
+				if is_instance_valid(enemy) and position.distance_to(enemy.position) < 65.0:
+					enemy.take_damage(_damage)
+			queue_free()
+			return
 		_target.take_damage(_damage)
 		if pushback_on_hit and is_instance_valid(_target) and not _target.is_boss:
 			_target.pushback()

@@ -8,6 +8,7 @@ signal wave_pressed
 signal speed_toggled(factor: float)
 signal start_battle_pressed
 signal buff_chosen(buff_id: String)
+signal debuff_chosen(debuff_id: String)
 signal upgrade_purchased(idx: int, cost: int)
 signal prestige_confirmed
 signal game_left
@@ -21,6 +22,7 @@ signal debug_gold_requested
 signal debug_skip_stage_requested(stage: int)
 signal sell_tower_requested
 signal debug_summon_requested(tower_id: String)
+signal debug_spawn_dummy
 signal tower_selected_tutorial(info_btn_rect: Rect2)
 signal tower_detail_opened_tutorial
 signal tower_moved_tutorial
@@ -102,6 +104,7 @@ var _modal_odds_lbls   : Array   = []   # [pool][rarity] — 3 pools × 4 rariti
 
 # Boss buff card overlay
 var _boss_buff_overlay    : Control = null
+var _hard_debuff_overlay  : Control = null
 # Tile drop animation input blocker
 var _tile_anim_blocker    : Control = null
 # Merge tutorial overlay
@@ -169,6 +172,7 @@ var _dq_btn2     : Button    = null
 var _dq_btn3     : Button    = null
 # World Map page refs
 var _world_node_panels  : Array          = []
+var _wm_overlay_visible : bool           = true
 var _wm_detail_screen     : Control = null
 var _wm_detail_header     : ColorRect = null
 var _wm_detail_name       : Label = null
@@ -179,8 +183,15 @@ var _wm_detail_desc       : Label = null
 var _wm_detail_minimap    : Control = null
 var _wm_detail_mod_box    : Control = null
 var _wm_detail_start_btn  : Button = null
-var _wm_selected_world  : int            = 0
-var _wm_canvas          : Node2D          = null
+var _wm_selected_world      : int           = 0
+var _wm_selected_difficulty : String        = "easy"
+var _wm_diff_easy_btn       : Button        = null
+var _wm_diff_hard_btn       : Button        = null
+var _wm_hard_glow           : Panel         = null
+var _wm_hard_glow_style     : StyleBoxFlat  = null
+var _wm_hard_glow_tween     : Tween         = null
+var _wm_detail_cp_style     : StyleBoxFlat  = null
+var _wm_canvas              : Node2D        = null
 # Heroes page refs
 var _hero_sel_container : Control  = null   # "Hero Selected" inner box
 var _hero_det_panel     : Panel    = null   # detail popup
@@ -387,9 +398,9 @@ func setup(_main) -> void:
 	pass
 
 
-func refresh_gems() -> void:
+func refresh_gems(run_gems: int = 0) -> void:
 	if is_instance_valid(_gem_hud_lbl):
-		_gem_hud_lbl.text = "%d" % GameData.blue_gems
+		_gem_hud_lbl.text = "%d" % run_gems
 
 func hide_wave_btn() -> void:
 	if is_instance_valid(wave_btn):
@@ -398,6 +409,28 @@ func hide_wave_btn() -> void:
 func show_wave_btn() -> void:
 	if is_instance_valid(wave_btn):
 		wave_btn.visible = true
+
+
+func show_debug_dummy_ui() -> void:
+	hide_wave_btn()
+	if not is_instance_valid(wave_btn):
+		return
+	var bar : Node = wave_btn.get_parent()
+	var btn := Button.new()
+	btn.text         = "🎯  Spawn Dummy"
+	btn.position     = wave_btn.position
+	btn.size         = wave_btn.size
+	btn.pivot_offset = wave_btn.pivot_offset
+	btn.focus_mode   = FOCUS_NONE
+	btn.add_theme_font_override("font",           _font_bold)
+	btn.add_theme_font_size_override("font_size", 15)
+	btn.add_theme_color_override("font_color",    Color(0.95, 0.82, 0.40))
+	btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.22, 0.14, 0.04)))
+	btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.34, 0.22, 0.06)))
+	btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.14, 0.09, 0.02)))
+	btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.22, 0.14, 0.04)))
+	btn.pressed.connect(func(): debug_spawn_dummy.emit())
+	bar.add_child(btn)
 
 
 func block_input_for_tile_anim() -> void:
@@ -1127,7 +1160,7 @@ func _build_gem_hud() -> void:
 
 	gem_row.add_child(_mk_blue_gem_icon(22.0))
 
-	_gem_hud_lbl = _label("%d" % GameData.blue_gems, _font_bold, 20, Color(0.45, 0.75, 1.0))
+	_gem_hud_lbl = _label("0", _font_bold, 20, Color(0.45, 0.75, 1.0))
 	_gem_hud_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
 	_gem_hud_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	_gem_hud_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
@@ -1229,7 +1262,7 @@ func _build_loot_tab() -> void:
 	panel.add_child(title)
 
 	var close_btn := Button.new()
-	close_btn.text       = "✕"
+	close_btn.text       = "X"
 	close_btn.position   = Vector2(PW - 44, 8)
 	close_btn.size       = Vector2(36, 36)
 	close_btn.focus_mode = FOCUS_NONE
@@ -2381,7 +2414,7 @@ func _build_dbg_tower_panel() -> Control:
 
 	# Close button
 	var close_btn := Button.new()
-	close_btn.text       = "✕"
+	close_btn.text       = "X"
 	close_btn.position   = Vector2(204, 4)
 	close_btn.size       = Vector2(30, 28)
 	close_btn.focus_mode = FOCUS_NONE
@@ -2486,7 +2519,7 @@ func _build_main_debug_panel() -> Control:
 	panel.add_child(title)
 
 	var close_btn := Button.new()
-	close_btn.text       = "✕"
+	close_btn.text       = "X"
 	close_btn.position   = Vector2(PW - 28, 4)
 	close_btn.size       = Vector2(22, 22)
 	close_btn.focus_mode = FOCUS_NONE
@@ -2646,6 +2679,27 @@ func _build_main_debug_panel() -> Control:
 	panel.add_child(unlock_btn)
 	BY += BH + GAP
 
+	var debug_game_btn := Button.new()
+	debug_game_btn.text       = "⚔  Start Debug Game"
+	debug_game_btn.position   = Vector2(8, BY)
+	debug_game_btn.size       = Vector2(BW, BH)
+	debug_game_btn.focus_mode = FOCUS_NONE
+	debug_game_btn.add_theme_font_override("font",           _font_bold)
+	debug_game_btn.add_theme_font_size_override("font_size", 13)
+	debug_game_btn.add_theme_color_override("font_color",    Color(0.90, 0.75, 0.40))
+	debug_game_btn.add_theme_stylebox_override("normal",  _btn_style(Color(0.22, 0.16, 0.04)))
+	debug_game_btn.add_theme_stylebox_override("hover",   _btn_style(Color(0.32, 0.24, 0.06)))
+	debug_game_btn.add_theme_stylebox_override("pressed", _btn_style(Color(0.14, 0.10, 0.02)))
+	debug_game_btn.add_theme_stylebox_override("focus",   _btn_style(Color(0.22, 0.16, 0.04)))
+	debug_game_btn.pressed.connect(func():
+		GameData.debug_dummy_mode    = true
+		GameData.selected_world      = 1
+		GameData.launching_into_game = true
+		get_tree().reload_current_scene()
+	)
+	panel.add_child(debug_game_btn)
+	BY += BH + GAP
+
 	var sep2 := ColorRect.new()
 	sep2.color    = Color(1.00, 0.40, 0.40, 0.30)
 	sep2.position = Vector2(8, BY)
@@ -2705,9 +2759,12 @@ func _fill_upgrades_tab(page: Control) -> void:
 	page.add_child(empty_lbl)
 	_buff_empty_lbl = empty_lbl
 
+	var is_hard : bool = GameData.selected_difficulty == "hard"
+	var scroll_h : int = 502 if not is_hard else 240
+
 	var scroll := ScrollContainer.new()
 	scroll.position               = Vector2(0, 46)
-	scroll.size                   = Vector2(w, 502)
+	scroll.size                   = Vector2(w, scroll_h)
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.vertical_scroll_mode   = ScrollContainer.SCROLL_MODE_AUTO
 	page.add_child(scroll)
@@ -2719,6 +2776,58 @@ func _fill_upgrades_tab(page: Control) -> void:
 	flow.add_theme_constant_override("v_separation", 6)
 	scroll.add_child(flow)
 	_buff_history_flow = flow
+
+	if is_hard:
+		var curse_y : int = 46 + scroll_h + 8
+		var curse_title := _label("⚔  Active Curses", _font_bold, 15, Color(0.90, 0.35, 0.35))
+		curse_title.position             = Vector2(0, curse_y)
+		curse_title.size                 = Vector2(w, 22)
+		curse_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		page.add_child(curse_title)
+
+		var cdiv := ColorRect.new()
+		cdiv.color    = Color(0.90, 0.35, 0.35, 0.18)
+		cdiv.position = Vector2(4, curse_y + 24)
+		cdiv.size     = Vector2(w - 8, 2)
+		page.add_child(cdiv)
+
+		var debuff_scroll := ScrollContainer.new()
+		debuff_scroll.position               = Vector2(0, curse_y + 30)
+		debuff_scroll.size                   = Vector2(w, 220)
+		debuff_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		debuff_scroll.vertical_scroll_mode   = ScrollContainer.SCROLL_MODE_AUTO
+		page.add_child(debuff_scroll)
+
+		var debuff_vbox := VBoxContainer.new()
+		debuff_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		debuff_vbox.add_theme_constant_override("separation", 4)
+		debuff_scroll.add_child(debuff_vbox)
+
+		var active_ids : Array = GameData.active_hard_debuffs
+		if active_ids.is_empty():
+			var none_lbl := _label("No active curses.", _font_reg, 13, C_DIM)
+			none_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			debuff_vbox.add_child(none_lbl)
+		else:
+			var def_map : Dictionary = {}
+			for d in GameData.HARD_DEBUFF_DEFS:
+				def_map[d["id"]] = d
+			for did in active_ids:
+				var def : Dictionary = def_map.get(did, {})
+				if def.is_empty():
+					continue
+				var row := HBoxContainer.new()
+				row.add_theme_constant_override("separation", 6)
+				debuff_vbox.add_child(row)
+
+				var icon_lbl := _label(def.get("icon", "?"), _font_bold, 14, Color(0.90, 0.35, 0.35))
+				icon_lbl.custom_minimum_size = Vector2(20, 0)
+				row.add_child(icon_lbl)
+
+				var name_lbl := _label(def.get("name", did), _font_bold, 13, Color(0.95, 0.60, 0.60))
+				name_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+				name_lbl.autowrap_mode         = TextServer.AUTOWRAP_WORD_SMART
+				row.add_child(name_lbl)
 
 	# Shared hover tooltip (added to root HUD so it floats above everything)
 	if not is_instance_valid(_buff_tooltip):
@@ -3091,7 +3200,8 @@ func show_tower_info(tower, merge_count: int = 0) -> void:
 	_info_rate_lbl.text  = "%.1f / s" % eff_rate + rate_suffix
 	var eff_map : Dictionary = {
 		"none":          "Standard single-target shot. No bonus effect.",
-		"focused_shot":  "Consecutive hits on the same target stacks +50% damage up to 2x. Resets when switching targets.",
+		"stack_shot":    "Consecutive hits on the same target stack +50% damage, up to 2×. Resets when switching targets.",
+		"focused_shot":  "Consecutive hits on the same target stack +50% damage, up to 2×. Resets when switching targets.",
 		"dual_shot":     "Fires at 2 separate enemies simultaneously each attack.",
 		"chain":         "Hits primary target at full damage, then chains to 2 nearby enemies at 50% damage.",
 		"aoe":           "Hits all enemies currently in range with each shot.",
@@ -3127,14 +3237,14 @@ func show_tower_info(tower, merge_count: int = 0) -> void:
 		"shadow_blade_combo": "Every 3rd hit strikes with both blades at 2× damage and applies a bleed dealing 2× damage/s for 3s. Max 1 bleed stack per target.",
 		"frost_shatter":      "Fires 2 projectiles per attack. Every hit slows the target by 5% for 2s. Gains +3% attack speed per slowed enemy on the map (max +30%). Resets after 3s without attacking.",
 	}
-	var base_effect_desc : String = eff_map.get(d.get("effect", "none"), "No special effect.")
+	var base_effect_desc : String = eff_map.get(tower.tower_effect, eff_map.get(d.get("effect", "none"), "No special effect."))
 	var special_map : Dictionary = {
-		"archer":   "★ Focused Shot+: Every hit permanently stacks +8% damage (max 10×).",
+		"archer":   "★ Focused Shot: Stack cap raised to 3 (max 2.5×). Every hit beyond the cap adds cumulative +1 flat damage with no cap.",
 		"crossbow": "★ Triple Bolt: Fires 3 bolts instead of 2.",
 		"mage":     "★ Arcane Chain: Chain now hits 5 enemies.",
 		"catapult": "★ Barrage: Fires 2 shots per attack.",
-		"spearman": "★ War Cry: Every 5th hit stuns enemies for 0.5s.",
-		"rogue":    "★ Hemorrhage: Bleed cap raised to 6; each stack deals +12% damage.",
+		"spearman": "★ War Cry: Every 3rd hit stuns enemies for 0.5s.",
+		"rogue":    "★ Hemorrhage: Bleed cap raised to 4. Enemies at max stacks are slowed by 5%.",
 	}
 	if GameData.turret_has_special(tid) and special_map.has(tid):
 		base_effect_desc += "\n" + special_map[tid]
@@ -3260,11 +3370,18 @@ func show_run_results(stage: int, kills: int, bosses: int, gems: int, turrets: A
 	else:
 		title_lbl.text = "💀  Defeated"
 		title_lbl.add_theme_color_override("font_color", C_RED)
-		stage_lbl.text = ("Stage %d Clear" % (stage - 1)) if stage > 1 else ""
-		wave_lbl.text  = "Wave %d" % wave if wave > 0 else ""
+		if wave > 0:
+			stage_lbl.text = "Stage %d" % stage
+			wave_lbl.text  = "Wave %d" % wave
+		elif bosses > 0:
+			stage_lbl.text = "Stage %d" % bosses
+			wave_lbl.text  = "Boss Wave"
+		else:
+			stage_lbl.text = "Stage %d" % stage
+			wave_lbl.text  = "Wave 0"
 	kills_lbl.text     = "⚔  %d enemies slain  (%d bosses)" % [kills, bosses]
 	gems_earn_lbl.text = "+%d  " % gems
-	gems_tot_lbl.text  = "Total: %d" % GameData.blue_gems
+	gems_tot_lbl.text  = "Total: %d" % gems
 
 	for child in tower_grid.get_children():
 		child.queue_free()
@@ -3567,6 +3684,7 @@ func _build_run_results_screen() -> void:
 	cont_btn.add_theme_stylebox_override("pressed", _btn_pressed(C_BTN))
 	cont_btn.add_theme_stylebox_override("focus",   _btn_style(C_BTN))
 	cont_btn.pressed.connect(func():
+		Engine.time_scale = 1.0
 		_nav_transition(func():
 			overlay.visible = false
 			if is_instance_valid(_gear_btn):
@@ -4070,6 +4188,11 @@ func show_main_menu() -> void:
 	if is_instance_valid(_dq_stat):
 		_dq_stat.set_locked(!GameData.dq_unlocked)
 	_game_over_screen.visible = true
+	if is_instance_valid(_simple_menu_screen):
+		_simple_menu_screen.visible = true
+		for s in _main_menu_statues:
+			if is_instance_valid(s):
+				s.visible = false
 
 
 func _back_to_menu(hide_node: Control) -> void:
@@ -4141,7 +4264,7 @@ func _build_upgrades_screen() -> void:
 
 	# Back button on top
 	var back_btn := Button.new()
-	back_btn.text         = "<  Back"
+	back_btn.text         = "BACK"
 	back_btn.position     = Vector2(14, 14)
 	back_btn.size         = Vector2(130, 46)
 	back_btn.z_index      = 10
@@ -4177,7 +4300,7 @@ func _build_placeholder_screen(var_ref: String, title_text: String) -> Control:
 	overlay.add_child(title)
 
 	var back_btn := Button.new()
-	back_btn.text         = "<  Back"
+	back_btn.text         = "BACK"
 	back_btn.position     = Vector2(30, 720 - 80)
 	back_btn.size         = Vector2(150, 54)
 	back_btn.focus_mode   = FOCUS_NONE
@@ -4499,7 +4622,7 @@ func _build_shop_screen() -> void:
 
 	# ── Back button inside relic panel ───────────────────────────────────────────
 	var relic_back_btn := Button.new()
-	relic_back_btn.text       = "<  Back"
+	relic_back_btn.text       = "BACK"
 	relic_back_btn.position   = Vector2(30, 534)
 	relic_back_btn.size       = Vector2(140, 44)
 	relic_back_btn.focus_mode = FOCUS_NONE
@@ -5759,7 +5882,7 @@ func _build_relics_screen() -> void:
 
 	# Back button
 	var back_btn := Button.new()
-	back_btn.text       = "← Back"
+	back_btn.text       = "BACK"
 	back_btn.position   = Vector2(30, 662)
 	back_btn.size       = Vector2(140, 44)
 	back_btn.focus_mode = FOCUS_NONE
@@ -6331,7 +6454,7 @@ func _build_world_map_screen() -> void:
 	# ── Overlay ──────────────────────────────────────────────────────────────
 	var overlay := Panel.new()
 	var bg_s    := StyleBoxFlat.new()
-	bg_s.bg_color = Color(0.04, 0.05, 0.12)
+	bg_s.bg_color = Color(0.07, 0.12, 0.24)
 	overlay.add_theme_stylebox_override("panel", bg_s)
 	overlay.position     = Vector2.ZERO
 	overlay.size         = Vector2(1280, 720)
@@ -6344,6 +6467,7 @@ func _build_world_map_screen() -> void:
 	var canvas_script := load("res://ui/WorldMapCanvas.gd")
 	_wm_canvas = canvas_script.new()
 	overlay.add_child(_wm_canvas)
+
 
 	# ── Title bar ────────────────────────────────────────────────────────────
 	var title_bg := ColorRect.new()
@@ -6421,50 +6545,43 @@ func _build_world_map_screen() -> void:
 		var wpos  : Vector2    = wdat["pos"]
 		var wname : String     = wdat["name"]
 
-		# World number label (above circle)
-		var num_lbl := _label("W%d" % w, _font_bold, 12, Color(0.95, 0.92, 0.75, 0.85))
-		num_lbl.position             = wpos + Vector2(-28, -52)
-		num_lbl.size                 = Vector2(56, 18)
-		num_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		overlay.add_child(num_lbl)
-
 		# Territory name (below circle)
-		var name_lbl := _label(wname, _font_bold, 11, Color(0.92, 0.88, 0.72))
-		name_lbl.position             = wpos + Vector2(-55, 36)
-		name_lbl.size                 = Vector2(110, 18)
+		var name_lbl := _label(wname, _font_bold, 16, Color(0.95, 0.90, 0.72))
+		name_lbl.position             = wpos + Vector2(-70, 74)
+		name_lbl.size                 = Vector2(140, 24)
 		name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		overlay.add_child(name_lbl)
 
 		# Status icon centred on circle  (⚔ / ★ / 🔒)
-		var icon_lbl := _label("🔒", _font_bold, 22, Color(1, 1, 1, 0.88))
-		icon_lbl.position             = wpos + Vector2(-20, -16)
-		icon_lbl.size                 = Vector2(40, 32)
+		var icon_lbl := _label("🔒", _font_bold, 28, Color(1, 1, 1, 0.88))
+		icon_lbl.position             = wpos + Vector2(-24, -20)
+		icon_lbl.size                 = Vector2(48, 40)
 		icon_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		overlay.add_child(icon_lbl)
 
 		# Progress text (W1 only)
-		var prog_lbl := _label("", _font_reg, 10, Color(0.80, 0.80, 0.70, 0.85))
-		prog_lbl.position             = wpos + Vector2(-52, 54)
-		prog_lbl.size                 = Vector2(104, 16)
+		var prog_lbl := _label("", _font_reg, 11, Color(0.80, 0.80, 0.70, 0.85))
+		prog_lbl.position             = wpos + Vector2(-65, 92)
+		prog_lbl.size                 = Vector2(130, 18)
 		prog_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		prog_lbl.visible              = false
 		overlay.add_child(prog_lbl)
 
-		# Invisible 66×66 click button centred on circle
+		# Invisible 140×140 click button centred on circle
 		var btn := Button.new()
-		btn.position   = wpos + Vector2(-33, -33)
-		btn.size       = Vector2(66, 66)
+		btn.position   = wpos + Vector2(-70, -70)
+		btn.size       = Vector2(140, 140)
 		btn.flat       = true
 		btn.focus_mode = FOCUS_NONE
 		var _bn := StyleBoxFlat.new()
 		_bn.bg_color = Color(0, 0, 0, 0)
-		_bn.set_corner_radius_all(33)
+		_bn.set_corner_radius_all(70)
 		var _bh := StyleBoxFlat.new()
-		_bh.bg_color = Color(1, 1, 1, 0.12)
-		_bh.set_corner_radius_all(33)
+		_bh.bg_color = Color(1, 1, 1, 0.10)
+		_bh.set_corner_radius_all(70)
 		var _bp := StyleBoxFlat.new()
-		_bp.bg_color = Color(1, 1, 1, 0.22)
-		_bp.set_corner_radius_all(33)
+		_bp.bg_color = Color(1, 1, 1, 0.18)
+		_bp.set_corner_radius_all(70)
 		btn.add_theme_stylebox_override("normal",  _bn)
 		btn.add_theme_stylebox_override("hover",   _bh)
 		btn.add_theme_stylebox_override("pressed", _bp)
@@ -6481,14 +6598,41 @@ func _build_world_map_screen() -> void:
 		overlay.add_child(btn)
 
 		_world_node_panels.append({
+			"name_lbl": name_lbl,
 			"icon_lbl": icon_lbl,
 			"prog_lbl": prog_lbl,
 			"btn":      btn,
 		})
 
+	# ── Toggle drawing button (top-left corner) ──────────────────────────────
+	var toggle_btn := Button.new()
+	toggle_btn.text       = "Hide Map"
+	toggle_btn.position   = Vector2(10, 10)
+	toggle_btn.size       = Vector2(120, 32)
+	toggle_btn.focus_mode = FOCUS_NONE
+	toggle_btn.add_theme_font_override("font",           _font_bold)
+	toggle_btn.add_theme_font_size_override("font_size", 13)
+	toggle_btn.add_theme_color_override("font_color",    C_WHITE)
+	toggle_btn.add_theme_stylebox_override("normal",  _btn_tertiary())
+	toggle_btn.add_theme_stylebox_override("hover",   _btn_tertiary_hover())
+	toggle_btn.add_theme_stylebox_override("pressed", _btn_tertiary_pressed())
+	toggle_btn.add_theme_stylebox_override("focus",   _btn_tertiary())
+	toggle_btn.pressed.connect(func():
+		_wm_overlay_visible = !_wm_overlay_visible
+		toggle_btn.text = "Show Map" if not _wm_overlay_visible else "Hide Map"
+		if is_instance_valid(_wm_canvas):
+			_wm_canvas.visible = _wm_overlay_visible
+		for refs in _world_node_panels:
+			refs["name_lbl"].visible = _wm_overlay_visible
+			refs["icon_lbl"].visible = _wm_overlay_visible
+			refs["prog_lbl"].visible = _wm_overlay_visible
+			refs["btn"].visible      = _wm_overlay_visible
+	)
+	overlay.add_child(toggle_btn)
+
 	# ── Back button (world map → main menu) ─────────────────────────────────
 	var back_btn := Button.new()
-	back_btn.text       = "← Back"
+	back_btn.text       = "BACK"
 	back_btn.position   = Vector2(30, 666)
 	back_btn.size       = Vector2(148, 44)
 	back_btn.focus_mode = FOCUS_NONE
@@ -6518,7 +6662,22 @@ func _build_world_detail_screen() -> void:
 	add_child(ds)
 	_wm_detail_screen = ds
 
-	# Centered content panel (1100 × 580)
+	# Red glow backdrop (hard mode) — shadow bleeds outward beyond the content panel
+	var hard_glow_s := StyleBoxFlat.new()
+	hard_glow_s.bg_color     = Color(0.0, 0.0, 0.0, 0.0)
+	hard_glow_s.shadow_color = Color(0.60, 0.0, 0.0, 0.0)
+	hard_glow_s.shadow_size  = 80
+	hard_glow_s.set_corner_radius_all(14)
+	var hard_glow := Panel.new()
+	hard_glow.add_theme_stylebox_override("panel", hard_glow_s)
+	hard_glow.position     = Vector2(90, 50)
+	hard_glow.size         = Vector2(1100, 640)
+	hard_glow.mouse_filter = MOUSE_FILTER_IGNORE
+	ds.add_child(hard_glow)
+	_wm_hard_glow       = hard_glow
+	_wm_hard_glow_style = hard_glow_s
+
+	# Centered content panel (1100 × 640)
 	var cp   := Panel.new()
 	var cp_s := StyleBoxFlat.new()
 	cp_s.bg_color     = Color(0.04, 0.05, 0.12, 0.97)
@@ -6530,6 +6689,7 @@ func _build_world_detail_screen() -> void:
 	cp.size         = Vector2(1100, 640)
 	cp.mouse_filter = MOUSE_FILTER_STOP
 	ds.add_child(cp)
+	_wm_detail_cp_style = cp_s
 
 	# Biome-colored header strip
 	var dh   := ColorRect.new()
@@ -6646,6 +6806,102 @@ func _build_world_detail_screen() -> void:
 	)
 	cp.add_child(ds_back)
 
+	# Difficulty label
+	var diff_lbl := _label("Difficulty:", _font_bold, 14, Color(0.85, 0.82, 0.72))
+	diff_lbl.position = Vector2(220, 590)
+	diff_lbl.size     = Vector2(110, 28)
+	cp.add_child(diff_lbl)
+
+	# Easy button
+	var easy_btn := Button.new()
+	easy_btn.text       = "☀  Easy"
+	easy_btn.position   = Vector2(336, 582)
+	easy_btn.size       = Vector2(130, 44)
+	easy_btn.focus_mode = FOCUS_NONE
+	easy_btn.add_theme_font_override("font",           _font_bold)
+	easy_btn.add_theme_font_size_override("font_size", 15)
+	easy_btn.add_theme_color_override("font_color",    C_WHITE)
+	cp.add_child(easy_btn)
+	_wm_diff_easy_btn = easy_btn
+
+	# Hard button
+	var hard_btn := Button.new()
+	hard_btn.text       = "☠  Hard"
+	hard_btn.position   = Vector2(476, 582)
+	hard_btn.size       = Vector2(130, 44)
+	hard_btn.focus_mode = FOCUS_NONE
+	hard_btn.add_theme_font_override("font",           _font_bold)
+	hard_btn.add_theme_font_size_override("font_size", 15)
+	hard_btn.add_theme_color_override("font_color",    C_WHITE)
+	cp.add_child(hard_btn)
+	_wm_diff_hard_btn = hard_btn
+
+	# Helper: build a selected-state style with a glowing border
+	var _sel_easy_style := func() -> StyleBoxFlat:
+		var s := _btn_style(Color(0.08, 0.32, 0.10))
+		s.border_color = Color(0.28, 0.90, 0.32, 1.0)
+		s.set_border_width_all(2)
+		s.shadow_color = Color(0.10, 0.80, 0.18, 0.55)
+		s.shadow_size  = 8
+		return s
+	var _sel_hard_style := func() -> StyleBoxFlat:
+		var s := _btn_style(Color(0.36, 0.04, 0.04))
+		s.border_color = Color(1.00, 0.18, 0.10, 1.0)
+		s.set_border_width_all(2)
+		s.shadow_color = Color(0.90, 0.08, 0.04, 0.60)
+		s.shadow_size  = 8
+		return s
+	var _unsel_style := func() -> StyleBoxFlat:
+		var s := _btn_style(Color(0.14, 0.14, 0.16))
+		s.border_color = Color(0.30, 0.30, 0.32, 0.40)
+		s.set_border_width_all(1)
+		s.shadow_size  = 0
+		return s
+
+	# Wire difficulty toggle logic
+	var _hard_locked := func() -> bool:
+		return not GameData.easy_mode_beaten
+
+	var _refresh_diff_btns := func():
+		var is_easy   : bool = _wm_selected_difficulty == "easy"
+		var hard_lock : bool = _hard_locked.call()
+		# Force back to easy if hard is locked
+		if hard_lock and not is_easy:
+			_wm_selected_difficulty = "easy"
+			is_easy = true
+		# Buttons — set all states to same style so hover/pressed never change shape
+		var easy_s  : StyleBoxFlat = _sel_easy_style.call() if is_easy  else _unsel_style.call()
+		var hard_s  : StyleBoxFlat = _sel_hard_style.call() if not is_easy else _unsel_style.call()
+		for state in ["normal", "hover", "pressed", "focus"]:
+			easy_btn.add_theme_stylebox_override(state, easy_s)
+			hard_btn.add_theme_stylebox_override(state, hard_s)
+		easy_btn.add_theme_color_override("font_color",       C_WHITE if is_easy     else Color(0.55, 0.55, 0.55))
+		easy_btn.add_theme_color_override("font_hover_color", C_WHITE if is_easy     else Color(0.55, 0.55, 0.55))
+		if hard_lock:
+			hard_btn.text = "🔒  Hard"
+			hard_btn.add_theme_color_override("font_color",       Color(0.40, 0.40, 0.40))
+			hard_btn.add_theme_color_override("font_hover_color", Color(0.40, 0.40, 0.40))
+		else:
+			hard_btn.text = "☠  Hard"
+			hard_btn.add_theme_color_override("font_color",       C_WHITE if not is_easy else Color(0.55, 0.55, 0.55))
+			hard_btn.add_theme_color_override("font_hover_color", C_WHITE if not is_easy else Color(0.55, 0.55, 0.55))
+		# Animated glow only when hard is selected and unlocked
+		_set_hard_glow(not is_easy and not hard_lock)
+	_refresh_diff_btns.call()
+
+	easy_btn.pressed.connect(func():
+		_wm_selected_difficulty = "easy"
+		_refresh_diff_btns.call()
+		_refresh_wm_detail_mods()
+	)
+	hard_btn.pressed.connect(func():
+		if _hard_locked.call():
+			return
+		_wm_selected_difficulty = "hard"
+		_refresh_diff_btns.call()
+		_refresh_wm_detail_mods()
+	)
+
 	# Start World button (bottom right of panel)
 	var ds_play := Button.new()
 	ds_play.text       = "▶  Start World"
@@ -6661,9 +6917,11 @@ func _build_world_detail_screen() -> void:
 	ds_play.add_theme_stylebox_override("focus",   _btn_primary())
 	ds_play.pressed.connect(func():
 		ds.visible = false
-		var world_to_load : int = _wm_selected_world
+		var world_to_load : int    = _wm_selected_world
+		var diff_to_load  : String = _wm_selected_difficulty
 		_show_loading_screen(func():
 			GameData.selected_world      = world_to_load
+			GameData.selected_difficulty = diff_to_load
 			GameData.launching_into_game = true
 			get_tree().reload_current_scene()
 		)
@@ -6689,28 +6947,8 @@ func _on_world_node_pressed(world_num: int) -> void:
 	if not unlocked:
 		return
 
-	# Restore previous selection's icon before changing
-	if _wm_selected_world > 0 and _wm_selected_world <= _world_node_panels.size():
-		var prev := _wm_selected_world - 1
-		var prev_w := _wm_selected_world
-		var prev_lbl : Label = _world_node_panels[prev]["icon_lbl"]
-		if GameData.max_world_unlocked > prev_w:
-			prev_lbl.text     = "★"
-			prev_lbl.modulate = Color(0.28, 0.96, 0.32)
-		elif GameData.max_world_unlocked == prev_w:
-			prev_lbl.text     = ""
-		else:
-			prev_lbl.text     = "🔒"
-			prev_lbl.modulate = Color(0.60, 0.58, 0.55)
-
 	_wm_selected_world = world_num
 	var idx := world_num - 1
-
-	# Show sword on newly clicked world
-	if idx < _world_node_panels.size():
-		var lbl : Label = _world_node_panels[idx]["icon_lbl"]
-		lbl.text     = "⚔"
-		lbl.modulate = Color(1.0, 1.0, 1.0, 0.95)
 
 	# Update canvas selection + click animation
 	if is_instance_valid(_wm_canvas):
@@ -6763,7 +7001,6 @@ func _on_world_node_pressed(world_num: int) -> void:
 	# Populate detail screen
 	_wm_detail_header.color = Color(wclr.r * 0.45, wclr.g * 0.45, wclr.b * 0.45, 0.95)
 	_wm_detail_name.text    = "World %d  —  %s" % [world_num, wname]
-	_wm_detail_diff.text    = "Difficulty:  %s" % wdiff
 
 	match state:
 		"cleared":
@@ -6789,22 +7026,8 @@ func _on_world_node_pressed(world_num: int) -> void:
 	var wisland : Rect2 = GameData.get_world_island(world_num)
 	_wm_detail_minimap.call("setup", wpath, wclr, wisland, world_num)
 
-	# Modifier rows
-	for child in _wm_detail_mod_box.get_children():
-		child.queue_free()
-	var mods : Array = GameData.get_world_modifiers(world_num)
-	if mods.is_empty():
-		var no_mod := _label("No modifiers — standard difficulty", _font_reg, 13, Color(0.65, 0.70, 0.68))
-		no_mod.position = Vector2(0, 4)
-		no_mod.size     = Vector2(460, 24)
-		_wm_detail_mod_box.add_child(no_mod)
-	else:
-		for mi in range(mods.size()):
-			var m   : Dictionary = mods[mi]
-			var row := _label("• " + m["label"], _font_reg, 13, m["color"])
-			row.position = Vector2(0, mi * 26)
-			row.size     = Vector2(460, 24)
-			_wm_detail_mod_box.add_child(row)
+	# Populate diff label + modifier rows via shared helper
+	_refresh_wm_detail_mods()
 
 	_wm_detail_start_btn.disabled = not unlocked
 
@@ -6818,10 +7041,10 @@ func _refresh_world_map() -> void:
 	# Reset selection state when the map is refreshed (e.g. after debug unlock)
 	if is_instance_valid(_wm_detail_screen) and _wm_detail_screen.visible:
 		_wm_detail_screen.visible = false
-	# Auto-select the highest attackable (active) world on open
-	var _active_w : int = mini(GameData.max_world_unlocked, 10)
-	_wm_selected_world = _active_w
-	_wm_canvas.selected_world = _active_w - 1
+	# Default to active world only on first open; persist last-clicked world afterward
+	if _wm_selected_world == 0:
+		_wm_selected_world = mini(GameData.max_world_unlocked, 10)
+	_wm_canvas.selected_world = _wm_selected_world - 1
 	# Auto-unlock world 2 when the player clears all 10 stages of world 1
 	if GameData.all_time_highest_stage >= 10 and GameData.max_world_unlocked < 2:
 		GameData.max_world_unlocked = 2
@@ -6873,34 +7096,112 @@ func _refresh_world_map() -> void:
 		var prog_lbl : Label  = refs["prog_lbl"]
 		var btn      : Button = refs["btn"]
 
-		if w == _wm_selected_world:
-			icon_lbl.text     = "⚔"
-			icon_lbl.modulate = Color(1.0, 1.0, 1.0, 0.95)
-			btn.disabled      = state == "locked"
-		else:
-			match state:
-				"active":
-					icon_lbl.text     = ""
-					icon_lbl.modulate = Color(1.0, 0.92, 0.28)
-					btn.disabled      = false
-				"cleared":
-					icon_lbl.text     = "★"
-					icon_lbl.modulate = Color(0.28, 0.96, 0.32)
-					btn.disabled      = false
-				"locked":
-					icon_lbl.text     = "🔒"
-					icon_lbl.modulate = Color(0.60, 0.58, 0.55)
-					btn.disabled      = true
+		match state:
+			"locked":
+				icon_lbl.text     = "🔒"
+				icon_lbl.modulate = Color(0.70, 0.68, 0.65, 0.90)
+				btn.disabled      = true
+			_:
+				icon_lbl.text = ""
+				btn.disabled  = false
 
 		if w == 1 and state != "locked":
 			if GameData.all_time_highest_stage >= 10:
 				prog_lbl.text    = "★ Complete!"
-				prog_lbl.visible = true
 			else:
 				prog_lbl.text    = "%d / 10" % GameData.all_time_highest_stage
-				prog_lbl.visible = true
+			prog_lbl.visible = _wm_overlay_visible
 		else:
 			prog_lbl.visible = false
+
+
+func _set_hard_glow(active: bool) -> void:
+	if not is_instance_valid(_wm_hard_glow_style):
+		return
+	if is_instance_valid(_wm_hard_glow_tween):
+		_wm_hard_glow_tween.kill()
+		_wm_hard_glow_tween = null
+	if active:
+		_wm_hard_glow_style.bg_color     = Color(0.35, 0.0, 0.0, 0.18)
+		_wm_hard_glow_style.shadow_color = Color(0.60, 0.0, 0.0, 0.0)
+		_wm_hard_glow_tween = create_tween().set_loops()
+		_wm_hard_glow_tween.tween_property(_wm_hard_glow_style, "shadow_color:a", 0.80, 1.4) \
+			.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+		_wm_hard_glow_tween.tween_property(_wm_hard_glow_style, "shadow_color:a", 0.25, 1.4) \
+			.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	else:
+		_wm_hard_glow_style.bg_color     = Color(0.0, 0.0, 0.0, 0.0)
+		_wm_hard_glow_style.shadow_color = Color(0.60, 0.0, 0.0, 0.0)
+
+
+func _refresh_wm_detail_mods() -> void:
+	if _wm_selected_world == 0:
+		return
+	var mods : Array = GameData.get_world_modifiers(_wm_selected_world)
+	var is_easy : bool = _wm_selected_difficulty == "easy"
+
+	# Sync glow to current difficulty
+	_set_hard_glow(not is_easy)
+
+	# Update diff label to include mode
+	var WORLD_DIFF : Array = [
+		"⭐", "⭐⭐", "⭐⭐⭐", "⭐⭐⭐", "⭐⭐⭐⭐",
+		"⭐⭐⭐⭐", "⭐⭐⭐⭐⭐", "⭐⭐⭐⭐⭐", "⭐⭐⭐⭐⭐", "⭐⭐⭐⭐⭐",
+	]
+	var stars : String = WORLD_DIFF[_wm_selected_world - 1]
+	var mode_tag : String = "  [Easy]" if is_easy else "  [Hard]"
+	if is_instance_valid(_wm_detail_diff):
+		_wm_detail_diff.text = "Difficulty:  %s%s" % [stars, mode_tag]
+
+	# Rebuild modifier rows with scaled values shown
+	if not is_instance_valid(_wm_detail_mod_box):
+		return
+	for child in _wm_detail_mod_box.get_children():
+		child.queue_free()
+	if mods.is_empty() and is_easy:
+		if _wm_selected_world == 1:
+			var row1 := _label("• Enemies have -10% max health", _font_reg, 13, Color(0.40, 0.90, 0.55))
+			row1.position = Vector2(0, 0)
+			row1.size     = Vector2(460, 24)
+			_wm_detail_mod_box.add_child(row1)
+			var row2 := _label("• Enemies move 5% slower", _font_reg, 13, Color(0.40, 0.90, 0.55))
+			row2.position = Vector2(0, 26)
+			row2.size     = Vector2(460, 24)
+			_wm_detail_mod_box.add_child(row2)
+		else:
+			var no_mod := _label("No modifiers — standard difficulty", _font_reg, 13, Color(0.65, 0.70, 0.68))
+			no_mod.position = Vector2(0, 4)
+			no_mod.size     = Vector2(460, 24)
+			_wm_detail_mod_box.add_child(no_mod)
+	elif not mods.is_empty():
+		for mi in range(mods.size()):
+			var m      : Dictionary = mods[mi]
+			var raw_v  : float      = float(m["value"])
+			var scaled : float      = raw_v * (0.5 if is_easy else 1.0)
+			var row_text : String
+			match m["type"]:
+				"hp_pct":
+					row_text = "• Enemies have +%d%% max health" % int(scaled)
+				"gold_pct":
+					row_text = "• Enemies drop %d%% less gold" % int(abs(scaled))
+				"spd_pct":
+					row_text = "• Enemies move %d%% faster" % int(scaled)
+				"skeleton_pct":
+					row_text = "• %d%% chance to respawn as a Skeleton" % int(scaled)
+				"melee_resist":
+					row_text = "• Enemies take %d%% less melee damage" % int(scaled)
+				_:
+					row_text = "• " + m["label"]
+			var row := _label(row_text, _font_reg, 13, m["color"])
+			row.position = Vector2(0, mi * 26)
+			row.size     = Vector2(460, 24)
+			_wm_detail_mod_box.add_child(row)
+	if not is_easy:
+		var offset : int = mods.size() * 26 + (8 if not mods.is_empty() else 0)
+		var curse_note := _label("☠  Every 3 stages you must choose a curse debuff", _font_reg, 13, Color(0.88, 0.40, 0.38))
+		curse_note.position = Vector2(0, offset)
+		curse_note.size     = Vector2(460, 24)
+		_wm_detail_mod_box.add_child(curse_note)
 
 
 func _build_heroes_screen() -> void:
@@ -7084,7 +7385,7 @@ func _build_heroes_screen() -> void:
 
 	# ── Back button ────────────────────────────────────────────────────────────
 	var back_btn := Button.new()
-	back_btn.text         = "<  Back"
+	back_btn.text         = "BACK"
 	back_btn.position     = Vector2(30, 666)
 	back_btn.size         = Vector2(150, 46)
 	back_btn.focus_mode   = FOCUS_NONE
@@ -7869,7 +8170,8 @@ func _build_towers_screen() -> void:
 	# Full effect description map (same as in show_tower_info)
 	var eff_map : Dictionary = {
 		"none":          "Standard single-target shot.",
-		"focused_shot":  "Consecutive hits on the same target stacks +50% damage up to 2x. Resets when switching targets.",
+		"stack_shot":    "Consecutive hits on the same target stack +50% damage, up to 2×. Resets when switching targets.",
+		"focused_shot":  "Consecutive hits on the same target stack +50% damage, up to 2×. Resets when switching targets.",
 		"dual_shot":     "Fires at 2 separate enemies simultaneously.",
 		"chain":         "Hits primary at full damage, then chains to 2 nearby enemies at 50% damage.",
 		"aoe":           "Hits all enemies currently in range.",
@@ -7956,7 +8258,7 @@ func _build_towers_screen() -> void:
 
 	# ── Back button ────────────────────────────────────────────────────────────
 	var back_btn := Button.new()
-	back_btn.text         = "<  Back"
+	back_btn.text         = "BACK"
 	back_btn.position     = Vector2(30, 666)
 	back_btn.size         = Vector2(150, 46)
 	back_btn.focus_mode   = FOCUS_NONE
@@ -8409,12 +8711,12 @@ func _tw_show_detail(def: Dictionary, eff_map: Dictionary,
 	# Description + Special Effect detail (including upgrade bonus if unlocked)
 	_tw_desc_lbl.text = def.get("desc", "")
 	var special_map : Dictionary = {
-		"archer":   "★ Focused Shot+: Every hit permanently stacks +8% damage (max 10×).",
+		"archer":   "★ Focused Shot: Stack cap raised to 3 (max 2.5×). Beyond the cap, each hit adds cumulative +1 flat damage with no cap.",
 		"crossbow": "★ Triple Bolt: Fires 3 bolts instead of 2.",
 		"mage":     "★ Arcane Chain: Chain now hits 5 enemies.",
 		"catapult": "★ Barrage: Fires 2 shots per attack.",
-		"spearman": "★ War Cry: Every 5th hit stuns enemies for 0.5s.",
-		"rogue":    "★ Hemorrhage: Bleed cap raised to 6; each stack deals +12% damage.",
+		"spearman": "★ War Cry: Every 3rd hit stuns enemies for 0.5s.",
+		"rogue":    "★ Hemorrhage: Bleed cap raised to 4. Enemies at max stacks are slowed by 5%.",
 	}
 	var eff_text : String = eff_map.get(eff_key, "No special effect.")
 	if GameData.turret_has_special(tower_id) and special_map.has(tower_id):
@@ -8791,7 +9093,7 @@ func _build_daily_quests_screen() -> void:
 
 	# ── Back button ───────────────────────────────────────────────────────────
 	var back_btn := Button.new()
-	back_btn.text         = "← Back"
+	back_btn.text         = "BACK"
 	back_btn.position     = Vector2(20, 660)
 	back_btn.size         = Vector2(160, 46)
 	back_btn.focus_mode   = FOCUS_NONE
@@ -10195,6 +10497,251 @@ func _label(text: String, font: Font, size: int, color: Color) -> Label:
 	l.add_theme_font_size_override("font_size", size)
 	l.add_theme_color_override("font_color",    color)
 	return l
+
+
+func show_hard_debuff_cards(debuffs: Array, stage: int) -> void:
+	if is_instance_valid(_hard_debuff_overlay):
+		_hard_debuff_overlay.queue_free()
+
+	const CURSE_COLOR : Color = Color(0.88, 0.14, 0.10)
+
+	var overlay := ColorRect.new()
+	overlay.color        = Color(0, 0, 0, 0.0)
+	overlay.position     = Vector2.ZERO
+	overlay.size         = Vector2(1280, 720)
+	overlay.mouse_filter = MOUSE_FILTER_STOP
+	add_child(overlay)
+	_hard_debuff_overlay = overlay
+
+	var fade_tw := create_tween()
+	fade_tw.tween_property(overlay, "color", Color(0.06, 0.0, 0.0, 0.88), 0.25) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+
+	var title := _label("☠  Hard Mode — Choose Your Burden  ☠", _font_bold, 26, CURSE_COLOR)
+	title.position             = Vector2(0, 48)
+	title.size                 = Vector2(1280, 48)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	title.modulate             = Color(1, 1, 1, 0)
+	overlay.add_child(title)
+	fade_tw.parallel().tween_property(title, "modulate:a", 1.0, 0.35) \
+		.set_delay(0.1).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+
+	var sub := _label("Stage %d  —  One curse will follow you for the rest of this run" % stage,
+		_font_bold, 16, Color(0.75, 0.55, 0.55))
+	sub.position             = Vector2(0, 100)
+	sub.size                 = Vector2(1280, 26)
+	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sub.modulate             = Color(1, 1, 1, 0)
+	overlay.add_child(sub)
+	fade_tw.parallel().tween_property(sub, "modulate:a", 1.0, 0.35) \
+		.set_delay(0.15).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+
+	const CARD_W  : int = 260
+	const CARD_H  : int = 390
+	const CARD_Y  : int = 140
+	const SPACING : int = 50
+	var total_w   : int = debuffs.size() * CARD_W + (debuffs.size() - 1) * SPACING
+	var start_x   : int = (1280 - total_w) / 2
+
+	var all_cards : Array = []
+
+	for i in debuffs.size():
+		var deb        : Dictionary = debuffs[i]
+		var bx         : int        = start_x + i * (CARD_W + SPACING)
+		var flip_delay : float      = 0.28 + i * 0.18
+
+		var card := Panel.new()
+		card.position     = Vector2(bx, CARD_Y)
+		card.size         = Vector2(CARD_W, CARD_H)
+		card.pivot_offset = Vector2(CARD_W / 2.0, CARD_H / 2.0)
+		card.modulate     = Color(1, 1, 1, 0)
+		card.mouse_filter = MOUSE_FILTER_IGNORE
+		card.add_theme_stylebox_override("panel", _rounded(Color(0, 0, 0, 0)))
+		overlay.add_child(card)
+		all_cards.append(card)
+
+		# Back face
+		var back_style := _rounded(Color(0.38, 0.06, 0.06, 1.0))
+		back_style.border_width_left   = 3; back_style.border_width_right  = 3
+		back_style.border_width_top    = 3; back_style.border_width_bottom = 3
+		back_style.border_color        = CURSE_COLOR.darkened(0.3)
+		var back := Panel.new()
+		back.size         = Vector2(CARD_W, CARD_H)
+		back.mouse_filter = MOUSE_FILTER_IGNORE
+		back.add_theme_stylebox_override("panel", back_style)
+		card.add_child(back)
+
+		var q_lbl := _label("☠", _font_bold, 72, CURSE_COLOR.darkened(0.3))
+		q_lbl.position             = Vector2(0, CARD_H / 2 - 56)
+		q_lbl.size                 = Vector2(CARD_W, 88)
+		q_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		q_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+		back.add_child(q_lbl)
+
+		var back_lbl := _label("CURSE", _font_bold, 13, CURSE_COLOR.darkened(0.4))
+		back_lbl.position             = Vector2(0, CARD_H - 52)
+		back_lbl.size                 = Vector2(CARD_W, 22)
+		back_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		back_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+		back.add_child(back_lbl)
+
+		# Front face
+		var front_style := _rounded(Color(0.42, 0.08, 0.08, 1.0))
+		front_style.border_width_left   = 3; front_style.border_width_right  = 3
+		front_style.border_width_top    = 3; front_style.border_width_bottom = 3
+		front_style.border_color        = CURSE_COLOR
+		var front := Panel.new()
+		front.size          = Vector2(CARD_W, CARD_H)
+		front.visible       = false
+		front.clip_contents = true
+		front.mouse_filter  = MOUSE_FILTER_IGNORE
+		front.add_theme_stylebox_override("panel", front_style)
+		card.add_child(front)
+
+		var top_bar := ColorRect.new()
+		top_bar.color    = CURSE_COLOR.darkened(0.15)
+		top_bar.position = Vector2(0, 0)
+		top_bar.size     = Vector2(CARD_W, 8)
+		top_bar.mouse_filter = MOUSE_FILTER_IGNORE
+		front.add_child(top_bar)
+
+		var curse_lbl := _label("CURSE", _font_bold, 12, CURSE_COLOR)
+		curse_lbl.position             = Vector2(0, 12)
+		curse_lbl.size                 = Vector2(CARD_W, 20)
+		curse_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		curse_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+		front.add_child(curse_lbl)
+
+		var div1 := ColorRect.new()
+		div1.color       = CURSE_COLOR.darkened(0.30)
+		div1.position    = Vector2(16, 35)
+		div1.size        = Vector2(CARD_W - 32, 2)
+		div1.mouse_filter = MOUSE_FILTER_IGNORE
+		front.add_child(div1)
+
+		var icon_lbl := _label(deb.get("icon", "☠"), _font_bold, 52, Color(1.0, 0.70, 0.65))
+		icon_lbl.position             = Vector2(0, 44)
+		icon_lbl.size                 = Vector2(CARD_W, 68)
+		icon_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		icon_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+		icon_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+		front.add_child(icon_lbl)
+
+		var div2 := ColorRect.new()
+		div2.color       = CURSE_COLOR.darkened(0.30)
+		div2.position    = Vector2(16, 118)
+		div2.size        = Vector2(CARD_W - 32, 2)
+		div2.mouse_filter = MOUSE_FILTER_IGNORE
+		front.add_child(div2)
+
+		var name_lbl := _label(deb.get("name", ""), _font_bold, 19, Color(1.0, 0.82, 0.80))
+		name_lbl.position             = Vector2(10, 126)
+		name_lbl.size                 = Vector2(CARD_W - 20, 54)
+		name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		name_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+		name_lbl.autowrap_mode        = TextServer.AUTOWRAP_WORD_SMART
+		name_lbl.mouse_filter         = MOUSE_FILTER_IGNORE
+		front.add_child(name_lbl)
+
+		var desc_lbl := _label(deb.get("desc", ""), _font_bold, 15, Color(0.80, 0.65, 0.65))
+		desc_lbl.custom_minimum_size   = Vector2(CARD_W - 32, 0)
+		desc_lbl.autowrap_mode         = TextServer.AUTOWRAP_WORD
+		desc_lbl.horizontal_alignment  = HORIZONTAL_ALIGNMENT_CENTER
+		desc_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		desc_lbl.size_flags_vertical   = Control.SIZE_SHRINK_BEGIN
+		desc_lbl.mouse_filter          = MOUSE_FILTER_IGNORE
+		var desc_scroll := ScrollContainer.new()
+		desc_scroll.position               = Vector2(16, 190)
+		desc_scroll.size                   = Vector2(CARD_W - 32, 155)
+		desc_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		desc_scroll.vertical_scroll_mode   = ScrollContainer.SCROLL_MODE_DISABLED
+		desc_scroll.mouse_filter           = MOUSE_FILTER_IGNORE
+		desc_scroll.add_child(desc_lbl)
+		front.add_child(desc_scroll)
+
+		# Red selection glow
+		var glow_style := _rounded(Color(0, 0, 0, 0))
+		glow_style.border_width_left   = 4; glow_style.border_width_right  = 4
+		glow_style.border_width_top    = 4; glow_style.border_width_bottom = 4
+		glow_style.border_color        = CURSE_COLOR
+		glow_style.shadow_color        = Color(0.90, 0.10, 0.06, 0.65)
+		glow_style.shadow_size         = 10
+		var glow_panel := Panel.new()
+		glow_panel.size         = Vector2(CARD_W, CARD_H)
+		glow_panel.modulate     = Color(1, 1, 1, 0)
+		glow_panel.mouse_filter = MOUSE_FILTER_IGNORE
+		glow_panel.add_theme_stylebox_override("panel", glow_style)
+		front.add_child(glow_panel)
+
+		# Flip animation
+		var back_ref  : Panel   = back
+		var front_ref : Panel   = front
+		var card_ref  : Panel   = card
+		var glow_ref  : Panel   = glow_panel
+		var flip_tw := create_tween()
+		flip_tw.tween_property(card, "modulate:a", 1.0, 0.20) \
+			.set_delay(flip_delay).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		flip_tw.tween_property(card, "scale:x", 0.0, 0.18) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+		flip_tw.tween_callback(func():
+			back_ref.visible  = false
+			front_ref.visible = true
+		)
+		flip_tw.tween_property(card, "scale:x", 1.0, 0.22) \
+			.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+		var did         : String  = deb.get("id", "")
+		var overlay_ref : Control = overlay
+		var all_ref     : Array   = all_cards
+		flip_tw.tween_callback(func():
+			card_ref.mouse_filter = MOUSE_FILTER_STOP
+
+			card_ref.mouse_entered.connect(func():
+				if card_ref.mouse_filter == MOUSE_FILTER_IGNORE:
+					return
+				if _btn_tweens.has(card_ref) and is_instance_valid(_btn_tweens[card_ref]):
+					_btn_tweens[card_ref].kill()
+				var hw := create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+				hw.tween_property(card_ref, "scale", Vector2(1.07, 1.07), 0.14)
+				_btn_tweens[card_ref] = hw
+			)
+			card_ref.mouse_exited.connect(func():
+				if _btn_tweens.has(card_ref) and is_instance_valid(_btn_tweens[card_ref]):
+					_btn_tweens[card_ref].kill()
+				var hw := create_tween().set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+				hw.tween_property(card_ref, "scale", Vector2(1.0, 1.0), 0.12)
+				_btn_tweens[card_ref] = hw
+			)
+			card_ref.gui_input.connect(func(event: InputEvent):
+				if not (event is InputEventMouseButton and \
+						event.button_index == MOUSE_BUTTON_LEFT and event.pressed):
+					return
+				for c in all_ref:
+					if is_instance_valid(c):
+						c.mouse_filter = MOUSE_FILTER_IGNORE
+				var glow_tw := create_tween().set_parallel(true)
+				glow_tw.tween_property(glow_ref, "modulate:a", 1.0, 0.12) \
+					.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+				glow_tw.chain().tween_property(glow_ref, "modulate:a", 0.0, 0.22) \
+					.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+				var pick_tw := create_tween()
+				pick_tw.tween_property(card_ref, "scale", Vector2(0.88, 0.88), 0.08) \
+					.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+				pick_tw.tween_property(card_ref, "scale", Vector2(1.15, 1.15), 0.16) \
+					.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+				pick_tw.tween_property(card_ref, "scale", Vector2(1.0, 1.0), 0.10)
+				var out_tw := create_tween()
+				out_tw.tween_interval(0.36)
+				out_tw.tween_property(overlay_ref, "modulate:a", 0.0, 0.20) \
+					.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+				out_tw.tween_callback(func():
+					overlay_ref.queue_free()
+					_hard_debuff_overlay = null
+					debuff_chosen.emit(did)
+				)
+			)
+		)
 
 
 func show_boss_buff_cards(buffs: Array, stage: int) -> void:

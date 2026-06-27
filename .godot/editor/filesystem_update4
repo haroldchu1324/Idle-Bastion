@@ -1,3 +1,7 @@
-res://scripts/GameData.gd
-res://ui/HUD.gd
+res://scripts/Tower.gd
 res://ui/UpgradeTree.gd
+res://scripts/SummonSystem.gd
+res://ui/HUD.gd
+res://scripts/Enemy.gd
+res://scripts/Main.gd
+res://scripts/GameData.gd

@@ -141,24 +141,24 @@ const STAGES : Array = [
 		[32, 1872.0, 128.0, 11],
 		[30, 2112.0, 128.0, 12],
 	], "boss": [9000.0,  36.0, 450] },
-	# Stage 9  — 135 px/s
+	# Stage 9  — 135 px/s  (1.5× S8 HP)
 	{ "waves": [
-		[28, 2220.0, 135.0, 11],
-		[30, 2520.0, 135.0, 12],
-		[32, 2856.0, 135.0, 12],
-		[30, 3240.0, 135.0, 12],
-		[34, 3672.0, 135.0, 13],
-		[32, 4152.0, 135.0, 13],
-	], "boss": [13000.0, 34.0, 500] },
-	# Stage 10 — Final — 142 px/s
+		[28, 1710.0, 135.0, 11],
+		[30, 1944.0, 135.0, 12],
+		[32, 2196.0, 135.0, 12],
+		[30, 2484.0, 135.0, 12],
+		[34, 2808.0, 135.0, 13],
+		[32, 3168.0, 135.0, 13],
+	], "boss": [13500.0, 34.0, 500] },
+	# Stage 10 — Final — 142 px/s  (1.4× S9 HP)
 	{ "waves": [
-		[30, 4320.0, 142.0, 12],
-		[32, 4920.0, 142.0, 13],
-		[34, 5580.0, 142.0, 14],
-		[32, 6360.0, 142.0, 14],
-		[36, 7200.0, 142.0, 15],
-		[34, 8160.0, 142.0, 15],
-	], "boss": [22000.0, 30.0, 600] },
+		[30, 2394.0, 142.0, 12],
+		[32, 2721.6, 142.0, 13],
+		[34, 3074.4, 142.0, 14],
+		[32, 3477.6, 142.0, 14],
+		[36, 3931.2, 142.0, 15],
+		[34, 4435.2, 142.0, 15],
+	], "boss": [18900.0, 30.0, 600] },
 ]
 
 @onready var _terrain    : TileMapLayer = $TerrainLayer
@@ -173,6 +173,8 @@ var _wave_active       : bool  = false
 var _enemies_alive     : int   = 0
 var _next_wave_id      : int   = 0
 var _wave_remaining    : Dictionary = {}   # wave_id → remaining enemy count
+var _wave_id_to_num   : Dictionary = {}   # wave_id → wave number within stage
+var _last_cleared_wave : int = 0          # last wave in current stage where all enemies were killed
 var _enemies_killed    : int   = 0
 var _bosses_killed     : int   = 0
 var _gems_this_run     : int   = 0
@@ -190,6 +192,15 @@ var _pending_boss_reward  : bool  = false
 var _pending_card_anim    : Array = []
 var _game_over     : bool  = false
 var _game_left     : bool  = false
+var _debug_dummy_mode : bool = false
+
+# ── Hard mode debuff timers ───────────────────────────────────────────────────
+var _rot_cursed_towers  : Array = []   # towers currently penalized by curse_tower_rot
+var _rot_timer          : float = 10.0
+var _regen_timer        : float = 1.0
+var _boss_minion_timer  : float = 1.0
+var _taunt_tank_timer      : float = -1.0  # counts down to 0 then spawns; -1 = inactive
+var _taunt_tank_ref        : Node2D = null
 
 # ── Poison Cloud (Venom Drake) ────────────────────────────────────────────────
 var _poison_cloud : Node2D = null
@@ -222,17 +233,23 @@ func _ready() -> void:
 	_hud.debug_skip_stage_requested.connect(_on_debug_skip_stage)
 	_hud.sell_tower_requested.connect(_on_sell_tower_requested)
 	_hud.debug_summon_requested.connect(_on_debug_summon_requested)
+	_hud.debug_spawn_dummy.connect(_on_debug_spawn_dummy)
 	GameData.current_run_highest_stage = 0
 	GameData.reset_run_buffs()
 	# Reset per-run daily quest counters
 	GameData.dq_sell_run_count = 0
 	_hud.buff_chosen.connect(_on_buff_chosen)
+	_hud.debuff_chosen.connect(_on_debuff_chosen)
 	_hud.game_left.connect(_on_game_left)
 	_gold  = 100
 	_lives = 20
 	_refresh_hud()
 	_spawn_knight()
-	if not GameData.launching_into_game:
+	if GameData.debug_dummy_mode:
+		_debug_dummy_mode          = true
+		GameData.debug_dummy_mode  = false
+		_hud.show_debug_dummy_ui()
+	elif not GameData.launching_into_game:
 		_hud.show_main_menu()
 	elif not GameData.tutorial_complete and GameData.selected_world == 1:
 		_hud.start_tutorial()
@@ -249,7 +266,7 @@ func _spawn_knight() -> void:
 	_build_grid.place(tile)
 	var tower : Node2D = TOWER_SCENE.instantiate()
 	add_child(tower)
-	tower.z_index = 6
+	tower.z_index = 7
 	var hero_base : Dictionary = GameData.HERO_DEFS.get(GameData.selected_hero_id, KNIGHT_DATA)
 	var h_data := hero_base.duplicate()
 	var h_idx  : int = hero_base.get("idx", 4)
@@ -284,6 +301,7 @@ func _find_hero_spawn() -> Vector2i:
 func _process(delta: float) -> void:
 	if _game_over or _game_left:
 		return
+	GameData.active_tower_count = _tower_map.size()
 	var mp := get_viewport().get_mouse_position()
 
 	if _drag_pending_tile != Vector2i(-1, -1) and not is_instance_valid(_held_tower):
@@ -315,6 +333,37 @@ func _process(delta: float) -> void:
 			_on_boss_timer_expired()
 			return
 		_refresh_hud()
+
+	# Sync disabled_tiles so BuildGrid can draw the visual overlay
+	# Includes both Curse of Silence (disabled_timer) and Vampiric Surge (vampiric_timer)
+	_build_grid.disabled_tiles.clear()
+	for _dt in _tower_map:
+		var _dtw : Node2D = _tower_map[_dt]
+		if is_instance_valid(_dtw) and (_dtw._disabled_timer > 0.0 or _dtw._vampiric_timer > 0.0):
+			_build_grid.disabled_tiles[_dt] = true
+
+	if GameData.debuff_regen:
+		_regen_timer -= delta
+		if _regen_timer <= 0.0:
+			_regen_timer = 1.0
+			for _e in get_tree().get_nodes_in_group("enemies"):
+				if is_instance_valid(_e):
+					_e.hp = min(_e.max_hp, _e.hp + 2.0)
+	if GameData.debuff_tower_rot:
+		_rot_timer -= delta
+		if _rot_timer <= 0.0:
+			_rot_timer = 10.0
+			_apply_tower_rot()
+	if GameData.debuff_boss_minions and _boss_active and is_instance_valid(_boss_ref):
+		_boss_minion_timer -= delta
+		if _boss_minion_timer <= 0.0:
+			_boss_minion_timer = 1.0
+			_spawn_boss_minion()
+	if GameData.debuff_taunt_tank and _taunt_tank_timer > 0.0 and _wave_active and not _boss_active:
+		_taunt_tank_timer -= delta
+		if _taunt_tank_timer <= 0.0:
+			_taunt_tank_timer = -1.0
+			_spawn_taunt_tank()
 
 	if _spawn_queue.is_empty():
 		return
@@ -351,9 +400,12 @@ func start_wave() -> void:
 		_next_wave_id += 1
 		_wave_remaining[wid] = 0   # incremented as each enemy actually spawns
 		_wave_start_lives[wid] = _lives
+		_wave_id_to_num[wid] = _wave_in_stage
 		for _i in range(def[0]):
 			_spawn_queue.append({"def": def, "wave_id": wid})
 		_spawn_timer = 0.0
+		if GameData.debuff_taunt_tank:
+			_taunt_tank_timer = 3.0
 	else:
 		_start_boss_wave(stage_data["boss"])
 
@@ -366,12 +418,13 @@ func _start_boss_wave(boss_def: Array) -> void:
 	_wave_active = true
 	var enemy : Node2D = ENEMY_SCENE.instantiate()
 	add_child(enemy)
+	enemy.z_index = 6
 	var w    : int   = GameData.selected_world
-	var hp   : float = boss_def[0] * GameData.world_hp_mult(w)
-	var spd  : float = boss_def[1] * GameData.relic_enemy_slow_mult() * GameData.world_spd_mult(w)
-	var gold : float = boss_def[2] * GameData.total_gold_drop_mult() * GameData.world_gold_mult(w)
+	var hp   : float = boss_def[0] * GameData.effective_world_hp_mult(w)
+	var spd  : float = boss_def[1] * GameData.relic_enemy_slow_mult() * GameData.effective_world_spd_mult(w)
+	var gold : float = boss_def[2] * GameData.total_gold_drop_mult() * GameData.effective_world_gold_mult(w)
 	enemy.setup(PATH, hp, spd, gold, true, 0, _stage)
-	enemy.melee_resist = GameData.world_melee_resist(w)
+	enemy.melee_resist = GameData.effective_world_melee_resist(w)
 	enemy.died.connect(_on_boss_died)
 	enemy.reached_end.connect(_on_boss_reached_end)
 	_boss_ref = enemy
@@ -386,13 +439,15 @@ func _spawn_next_enemy() -> void:
 	var wid   : int        = entry["wave_id"]
 	var enemy : Node2D = ENEMY_SCENE.instantiate()
 	add_child(enemy)
+	enemy.z_index = 6
 	var w     : int   = GameData.selected_world
 	var etype : int   = int((_stage - 1) / 2.0)
-	var hp    : float = def[1] * GameData.world_hp_mult(w)
-	var spd   : float = def[2] * GameData.relic_enemy_slow_mult() * GameData.world_spd_mult(w)
-	var gold  : float = def[3] * GameData.total_gold_drop_mult() * GameData.world_gold_mult(w)
+	var _tower_hp_mult : float = 1.0 + floorf(GameData.active_tower_count / 5.0) * 0.01 if GameData.debuff_tower_penalty else 1.0
+	var hp    : float = def[1] * GameData.effective_world_hp_mult(w) * _tower_hp_mult
+	var spd   : float = def[2] * GameData.relic_enemy_slow_mult() * GameData.effective_world_spd_mult(w)
+	var gold  : float = def[3] * GameData.total_gold_drop_mult() * GameData.effective_world_gold_mult(w)
 	enemy.setup(PATH, hp, spd, gold, false, etype, _stage)
-	enemy.melee_resist = GameData.world_melee_resist(w)
+	enemy.melee_resist = GameData.effective_world_melee_resist(w)
 	enemy.wave_id = wid
 	_wave_remaining[wid] = _wave_remaining.get(wid, 0) + 1   # safe: key may have been erased if tower one-shotted earlier spawns
 	enemy.died.connect(func(r: float): _on_enemy_died(r, enemy); _on_wave_enemy_removed(wid))
@@ -404,12 +459,15 @@ func _spawn_next_enemy() -> void:
 
 
 func _on_enemy_died(reward: float, dead_enemy: Node2D = null) -> void:
-	_gold          += reward
+	var actual_reward : float = reward
+	if GameData.debuff_gold_miss and reward > 0.0 and randf() < 0.05:
+		actual_reward = 0.0
+	_gold          += actual_reward
 	_enemies_alive -= 1
 	_enemies_killed += 1
 	GameData.blue_gems += 1
 	_gems_this_run     += 1
-	_hud.refresh_gems()
+	_hud.refresh_gems(_gems_this_run)
 	# Daily quest 1: kill progress
 	if not GameData.dq_kills_complete:
 		GameData.dq_kills_progress = mini(GameData.dq_kills_progress + 1, GameData.DQ_KILL_TARGET)
@@ -417,12 +475,28 @@ func _on_enemy_died(reward: float, dead_enemy: Node2D = null) -> void:
 			GameData.dq_kills_complete = true
 	# Skeleton respawn modifier (world modifier + mutated daily quest override)
 	var skel_chance : float = maxf(
-		GameData.world_skeleton_chance(GameData.selected_world),
+		GameData.effective_world_skeleton_chance(GameData.selected_world),
 		0.20 if GameData.dq_mode == "mutated_w1" else 0.0
 	)
-	if skel_chance > 0.0 and is_instance_valid(dead_enemy) and not dead_enemy.is_boss:
+	if skel_chance > 0.0 and is_instance_valid(dead_enemy) and not dead_enemy.is_boss and not dead_enemy.is_taunt_tank:
 		if randf() < skel_chance:
 			_spawn_skeleton_from(dead_enemy)
+	if GameData.debuff_revive and is_instance_valid(dead_enemy) and not dead_enemy.is_boss and not dead_enemy.is_taunt_tank:
+		if randf() < 0.05:
+			_spawn_revived_from(dead_enemy)
+	if GameData.debuff_tower_disable and not _tower_map.is_empty() and randf() < 0.20:
+		var _tw_vals : Array = _tower_map.values().filter(func(t): return is_instance_valid(t))
+		_tw_vals.shuffle()
+		for _di in range(mini(2, _tw_vals.size())):
+			_tw_vals[_di]._disabled_timer = 5.0
+	if GameData.debuff_vampiric_surge and randf() < 0.03:
+		var _vamp_pool : Array = _tower_map.values().filter(func(t): return is_instance_valid(t))
+		_vamp_pool.shuffle()
+		var _vamp_count : int = mini(8, _vamp_pool.size())
+		for _vi in range(_vamp_count):
+			_vamp_pool[_vi]._vampiric_timer = 5.0
+		if _vamp_count > 0:
+			_hud.show_notification("🩸  Vampiric Surge!  %d towers are healing enemies!" % _vamp_count)
 	# ── Relic: every-10-kill procs ────────────────────────────────────────────
 	if _enemies_killed % 10 == 0:
 		_apply_relic_kill_procs()
@@ -432,19 +506,144 @@ func _on_enemy_died(reward: float, dead_enemy: Node2D = null) -> void:
 
 
 func _spawn_skeleton_from(src: Node2D) -> void:
-	# Spawn a skeleton at the entrance (index 0) with 50% of src's max_hp and same speed
 	var skel : Node2D = ENEMY_SCENE.instantiate()
 	add_child(skel)
+	skel.z_index = 4
 	var skel_hp  : float = src.max_hp * 0.5
 	var skel_spd : float = src.speed
 	skel.setup(PATH, skel_hp, skel_spd, 0.0, false, 2, src.boss_stage)  # type 2 = skeleton
+	skel.position    = src.position
+	skel._current_wp = src._current_wp
 	skel.melee_resist = src.melee_resist
 	_enemies_alive += 1
 	skel.died.connect(func(r: float): _on_enemy_died(r))
 	skel.reached_end.connect(func(): _on_enemy_reached_end(skel))
 
 
+func _spawn_revived_from(src: Node2D) -> void:
+	var rev : Node2D = ENEMY_SCENE.instantiate()
+	add_child(rev)
+	rev.z_index = 4
+	var rev_hp  : float = src.max_hp * 0.20
+	var rev_spd : float = src._base_speed * 3.0
+	rev.setup(PATH, rev_hp, rev_spd, 0.0, false, src.enemy_type, src.boss_stage)
+	rev.position    = src.position
+	rev._current_wp = src._current_wp
+	rev.melee_resist = src.melee_resist
+	_enemies_alive += 1
+	rev.died.connect(func(r: float): _on_enemy_died(r))
+	rev.reached_end.connect(func(): _on_enemy_reached_end(rev))
+
+
+func _apply_tower_rot() -> void:
+	for tower in _rot_cursed_towers:
+		if is_instance_valid(tower):
+			tower._rot_dmg_penalty  = 0.0
+			tower._rot_rate_penalty = 0.0
+	_rot_cursed_towers.clear()
+	var towers : Array = []
+	for tw in _tower_map.values():
+		if is_instance_valid(tw):
+			towers.append(tw)
+	towers.shuffle()
+	var count : int = mini(2, towers.size())
+	for i in range(count):
+		towers[i]._rot_dmg_penalty  = 0.20
+		towers[i]._rot_rate_penalty = 0.50
+		_rot_cursed_towers.append(towers[i])
+
+
+func _spawn_boss_minion() -> void:
+	var minion : Node2D = ENEMY_SCENE.instantiate()
+	add_child(minion)
+	minion.z_index = 6
+	var etype  : int   = int((_stage - 1) / 2.0)
+	var min_hp : float = _boss_ref.max_hp * 0.05
+	var min_spd: float = _boss_ref._base_speed * 2.0
+	minion.setup(PATH, min_hp, min_spd, 0.0, false, etype, _stage)
+	minion.melee_resist = GameData.effective_world_melee_resist(GameData.selected_world)
+	_enemies_alive += 1
+	minion.died.connect(func(r: float): _on_enemy_died(r))
+	minion.reached_end.connect(func(): _on_enemy_reached_end(minion))
+
+
+func _spawn_taunt_tank() -> void:
+	var tank : Node2D = ENEMY_SCENE.instantiate()
+	add_child(tank)
+	tank.z_index = 7
+	var tank_hp : float = 5000.0 + (_stage - 1) * 200.0
+	tank.setup(PATH, tank_hp, 50.0, 0.0, false, 0, _stage)
+	tank.is_taunt_tank = true
+	_taunt_tank_ref    = tank
+	_enemies_alive += 1
+	tank.died.connect(func(r: float): _taunt_tank_ref = null; _on_enemy_died(r, tank))
+	tank.reached_end.connect(func(): _taunt_tank_ref = null; _on_enemy_reached_end(tank))
+
+
+func _force_remove_towers(count: int) -> void:
+	var tiles : Array = _tower_map.keys()
+	tiles.shuffle()
+	var to_remove : int = mini(count, tiles.size())
+	for i in range(to_remove):
+		var tile : Vector2i = tiles[i]
+		var tw   : Node2D   = _tower_map.get(tile)
+		if is_instance_valid(tw):
+			if tw == _selected_tower:
+				_selected_tower = null
+				_hud.hide_tower_info()
+				_hud.hide_upgrade_popup()
+				_hud.hide_sell_btn()
+			_rot_cursed_towers.erase(tw)
+			tw.queue_free()
+		_tower_map.erase(tile)
+		_build_grid.unplace(tile)
+
+
+func _apply_null_zones() -> void:
+	# Collect buildable tiles
+	var free : Array = []
+	var free_set : Dictionary = {}
+	for c in range(_build_grid._cols):
+		for r in range(_build_grid._rows):
+			var t := Vector2i(c, r)
+			if not _build_grid._path_blocked.has(t):
+				free.append(t)
+				free_set[t] = true
+	# Find all adjacent pairs
+	var pairs : Array = []
+	for t in free:
+		for nb in [Vector2i(t.x + 1, t.y), Vector2i(t.x, t.y + 1)]:
+			if free_set.has(nb):
+				pairs.append([t, nb])
+	pairs.shuffle()
+	# Pick 2 non-overlapping pairs, avoiding already-marked null tiles
+	var chosen : Array = []
+	var used   : Dictionary = {}
+	for pair in pairs:
+		if chosen.size() >= 2:
+			break
+		var a : Vector2i = pair[0]; var b : Vector2i = pair[1]
+		if not used.has(a) and not used.has(b) \
+				and not _build_grid.null_zone_tiles.has(a) \
+				and not _build_grid.null_zone_tiles.has(b):
+			chosen.append(pair)
+			used[a] = true; used[b] = true
+	# Mark tiles and penalise any tower already standing on them
+	for pair in chosen:
+		for tile in pair:
+			_build_grid.null_zone_tiles[tile] = true
+			if _tower_map.has(tile) and is_instance_valid(_tower_map[tile]):
+				var tw : Node2D = _tower_map[tile]
+				tw._tile_null_penalty  = tw.attack_range * 0.5
+				tw.attack_range       -= tw._tile_null_penalty
+
+
 func _on_enemy_reached_end(enemy: Node2D = null) -> void:
+	if _debug_dummy_mode:
+		_enemies_alive -= 1
+		_check_wave_done()
+		_refresh_hud()
+		return
 	_lives         -= 1
 	_enemies_alive -= 1
 	# Relic: Castle Tax — bonus gold per hit the escaping enemy absorbed
@@ -510,6 +709,10 @@ func _on_wave_enemy_removed(wid: int) -> void:
 	_wave_remaining[wid] -= 1
 	if _wave_remaining[wid] <= 0:
 		_wave_remaining.erase(wid)
+		var wave_num : int = _wave_id_to_num.get(wid, 0)
+		_wave_id_to_num.erase(wid)
+		if wave_num > _last_cleared_wave:
+			_last_cleared_wave = wave_num
 		var no_lives_lost : bool = (_lives >= _wave_start_lives.get(wid, _lives))
 		_wave_start_lives.erase(wid)
 		# Hercules: +5 permanent damage only on a perfect wave clear (no lives lost)
@@ -570,7 +773,7 @@ func _on_boss_died(reward: float) -> void:
 	var boss_gems  : int = 10 + (_bosses_killed - 1) * 12
 	GameData.blue_gems += boss_gems
 	_gems_this_run     += boss_gems
-	_hud.refresh_gems()
+	_hud.refresh_gems(_gems_this_run)
 	# Store card drops for stages 8, 9, 10 — animation fires after buff is chosen
 	var boss_pos : Vector2 = _boss_ref.global_position if is_instance_valid(_boss_ref) else Vector2(512, 325)
 	var cards    : Array   = _roll_boss_cards(_stage)
@@ -684,7 +887,6 @@ func _on_game_left() -> void:
 
 
 func _on_buff_chosen(buff_id: String) -> void:
-	Engine.time_scale = _pre_reward_time_scale
 	GameData.apply_buff(buff_id)
 	_hud.refresh_buff_history()
 	if GameData.buff_pending_lives > 0:
@@ -695,6 +897,33 @@ func _on_buff_chosen(buff_id: String) -> void:
 		_rare_roll_cost   = maxi(1, _rare_roll_cost   - 5)
 		_epic_roll_cost   = maxi(1, _epic_roll_cost   - 5)
 		_refresh_roll_costs()
+	if GameData.selected_difficulty == "hard" and _stage % 3 == 0:
+		var debuffs : Array = GameData.pick_hard_debuffs(3)
+		_hud.show_hard_debuff_cards(debuffs, _stage)
+		return  # time scale restored in _on_debuff_chosen
+	Engine.time_scale = _pre_reward_time_scale
+	_complete_stage_advance()
+
+
+func _on_debuff_chosen(debuff_id: String) -> void:
+	Engine.time_scale = _pre_reward_time_scale
+	GameData.apply_hard_debuff(debuff_id)
+	if debuff_id == "curse_tower_rot":
+		_rot_timer = 10.0
+		_rot_cursed_towers.clear()
+	elif debuff_id == "curse_boss_minions":
+		_boss_minion_timer = 1.0
+	elif debuff_id == "curse_remove_towers":
+		_force_remove_towers(3)
+	elif debuff_id == "curse_taunt_tank":
+		_taunt_tank_timer = -1.0
+	elif debuff_id == "curse_null_zones":
+		_apply_null_zones()
+	_refresh_hud()
+	_complete_stage_advance()
+
+
+func _complete_stage_advance() -> void:
 	_advance_stage()
 	_fire_card_anim_deferred()
 	if _build_grid._tiles_animating:
@@ -786,7 +1015,7 @@ func _trigger_game_over() -> void:
 	_hud.hide_sell_btn()
 	_hud.hide_upgrade_popup()
 	_hud.flush_idle_chips_to_loot()
-	_hud.show_run_results(_stage, _enemies_killed, _bosses_killed, gems_earned, turrets, false, _wave_in_stage)
+	_hud.show_run_results(_stage, _enemies_killed, _bosses_killed, gems_earned, turrets, false, _last_cleared_wave)
 
 
 func _on_start_battle_pressed() -> void:
@@ -802,6 +1031,8 @@ func _trigger_victory() -> void:
 	GameData.current_run_highest_stage = 10
 	if 10 > GameData.all_time_highest_stage:
 		GameData.all_time_highest_stage = 10
+	if GameData.selected_difficulty == "easy":
+		GameData.easy_mode_beaten = true
 	# Daily quest completion on victory
 	if GameData.dq_mode == "mutated_w1":
 		GameData.dq_mutated_complete = true
@@ -820,6 +1051,7 @@ func _trigger_victory() -> void:
 
 func _advance_stage() -> void:
 	_wave_in_stage = 0
+	_last_cleared_wave = 0
 	# Relic: War Spoils — end of each stage, gain a random common tower (or gold if full)
 	if GameData.relics_collected.has("war_spoils") and _stage <= STAGES.size():
 		var free_tiles : Array = _get_free_tiles()
@@ -1153,7 +1385,7 @@ func _place_turret_random(data: Dictionary) -> void:
 	_build_grid.place(tile)
 	var tower : Node2D = TOWER_SCENE.instantiate()
 	add_child(tower)
-	tower.z_index = 6
+	tower.z_index = 7
 	tower.init_type(data)
 	tower.gold_proc.connect(func(amount: float): _gold += amount; _refresh_hud())
 	tower.serpent_summon.connect(func(dmg: float): _spawn_infernal_serpent(dmg))
@@ -1212,13 +1444,18 @@ func _apply_tile_bonus(tower: Node2D, tile: Vector2i) -> void:
 			tower.attack_range     += 35.0
 		"green":
 			tower._tile_spd_bonus = 0.25
+	if _build_grid.null_zone_tiles.has(tile):
+		tower._tile_null_penalty = tower.attack_range * 0.5
+		tower.attack_range      -= tower._tile_null_penalty
 
 
 func _remove_tile_bonus(tower: Node2D) -> void:
 	tower.attack_range     -= tower._tile_range_bonus
+	tower.attack_range     += tower._tile_null_penalty
 	tower._tile_dmg_bonus   = 0.0
 	tower._tile_range_bonus = 0.0
 	tower._tile_spd_bonus   = 0.0
+	tower._tile_null_penalty = 0.0
 
 
 # ── Tower placement (click-select) ────────────────────────────────────────────
@@ -1233,7 +1470,7 @@ func _input(event: InputEvent) -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
-		if event.keycode == KEY_SPACE:
+		if event.keycode == KEY_SPACE and not _debug_dummy_mode:
 			_on_wave_btn_pressed()
 		return
 
@@ -1420,6 +1657,17 @@ func _on_debug_skip_stage(target: int) -> void:
 		_setup_special_tiles()
 	_hud.show_notification("🐛 Skipped to Stage %d" % target)
 	_refresh_hud()
+
+
+func _on_debug_spawn_dummy() -> void:
+	if _game_over or _game_left or PATH.is_empty():
+		return
+	var dummy : Node2D = ENEMY_SCENE.instantiate()
+	add_child(dummy)
+	dummy.z_index = 6
+	dummy.setup(PATH, 50000.0, 35.0, 0.0, false, 0, 1)
+	dummy.is_dummy = true
+	dummy.reached_end.connect(func(): dummy.queue_free())
 
 
 func _on_wave_btn_pressed() -> void:

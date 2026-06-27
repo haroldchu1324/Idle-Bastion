@@ -7,7 +7,9 @@ var hp         : float = 10.0
 var max_hp     : float = 10.0
 var speed      : float = 220.0
 var reward     : float = 5.0
-var is_boss    : bool  = false
+var is_boss       : bool  = false
+var is_taunt_tank : bool  = false
+var is_dummy      : bool  = false
 var enemy_type : int   = 0   # 0=slime 1=goblin 2=skeleton 3=orc 4=shadow
 var boss_stage : int   = 1   # 1-10
 
@@ -242,7 +244,7 @@ func _process(delta: float) -> void:
 		_dot_timer += delta
 		if _dot_timer >= 1.0:
 			_dot_timer -= 1.0
-			take_damage(GameData.buff_dot_dps)
+			take_damage(GameData.buff_dot_dps, true)
 	if _current_wp >= _path.size():
 		if not _dead:
 			_dead = true
@@ -257,7 +259,10 @@ func _process(delta: float) -> void:
 	else:
 		var dir : Vector2 = to_target.normalized()
 		_travel_dir = dir
-		position += dir * minf(speed * delta, to_target.length())
+		var _move_spd : float = speed
+		if GameData.debuff_wounded_speed and hp < max_hp * 0.5:
+			_move_spd *= 1.20
+		position += dir * minf(_move_spd * delta, to_target.length())
 	# Perpendicular wobble — oscillates sideways relative to travel direction
 	var perp : Vector2 = Vector2(-_travel_dir.y, _travel_dir.x)
 	var amp  : float   = 4.0 if not is_boss else 2.5
@@ -276,9 +281,20 @@ func take_melee_damage(amount: float) -> void:
 	take_damage(amount * (1.0 - melee_resist))
 
 
-func take_damage(amount: float) -> void:
+func heal(amount: float) -> void:
 	if _dead:
 		return
+	hp = min(max_hp, hp + amount)
+	if GameData.show_damage_numbers:
+		_dmg_floats.append({"val": amount, "x": randf_range(-6.0, 6.0), "y": 0.0, "timer": 1.0, "heal": true})
+	queue_redraw()
+
+
+func take_damage(amount: float, from_dot: bool = false) -> void:
+	if _dead:
+		return
+	if GameData.debuff_armor and not from_dot:
+		amount = max(0.0, amount - 3.0)
 	var _brittle := brittle_bonus
 	if _brittle > 0.0:
 		brittle_bonus      = 0.0
@@ -300,6 +316,8 @@ func take_damage(amount: float) -> void:
 	var _actual : float = (amount + _brittle) * damage_taken_mult
 	hits_taken += 1
 	hp = max(0.0, hp - _actual)
+	if is_dummy:
+		hp = maxf(1.0, hp)
 	# Spawn floating damage number (only if enabled in settings)
 	if GameData.show_damage_numbers:
 		var _x_jitter : float = randf_range(-6.0, 6.0)
@@ -351,7 +369,9 @@ func _draw() -> void:
 
 	# Body — wobble + arc elevation
 	draw_set_transform(_wobble_offset + Vector2(0.0, _knockback_arc_y), 0.0, Vector2.ONE)
-	if is_boss:
+	if is_taunt_tank:
+		_draw_taunt_tank()
+	elif is_boss:
 		_draw_boss()
 	else:
 		_draw_enemy()
@@ -385,22 +405,23 @@ func _draw() -> void:
 		for _df in _dmg_floats:
 			var _t     : float   = _df["timer"] as float
 			var _alpha : float   = _t * _t
-			var _txt   : String  = "%.0f" % (_df["val"] as float)
+			var _is_heal : bool  = _df.get("heal", false)
+			var _txt   : String  = ("%s%.0f" % ["+" if _is_heal else "", _df["val"] as float])
 			# Centre horizontally over the hit point
 			var _tw    : float   = _fnt.get_string_size(_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, _fnsz).x
 			var _pos   : Vector2 = Vector2(_df["x"] - _tw * 0.5, _by - _df["y"])
 			# Dark shadow for readability
 			draw_string(_fnt, _pos + Vector2(1, 1), _txt,
 				HORIZONTAL_ALIGNMENT_LEFT, -1, _fnsz, Color(0.0, 0.0, 0.0, _alpha * 0.80))
-			# Bright yellow-white number
-			draw_string(_fnt, _pos, _txt,
-				HORIZONTAL_ALIGNMENT_LEFT, -1, _fnsz, Color(1.0, 0.95, 0.25, _alpha))
+			# Heal = bright green, damage = bright yellow-white
+			var _num_col : Color = Color(0.25, 1.0, 0.45, _alpha) if _is_heal else Color(1.0, 0.95, 0.25, _alpha)
+			draw_string(_fnt, _pos, _txt, HORIZONTAL_ALIGNMENT_LEFT, -1, _fnsz, _num_col)
 
 
 func _draw_hp_bar() -> void:
-	var bar_w : float = 70.0 if is_boss else 40.0
+	var bar_w : float = 70.0 if is_boss else (60.0 if is_taunt_tank else 40.0)
 	var bar_h : float = 6.0
-	var by    : float = -46.0 if is_boss else -30.0
+	var by    : float = -46.0 if is_boss else (-44.0 if is_taunt_tank else -30.0)
 	var bx    : float = -bar_w * 0.5
 	var frac  : float = clampf(hp / max_hp, 0.0, 1.0)
 	draw_rect(Rect2(bx, by, bar_w, bar_h), Color(0.10, 0.08, 0.12))
@@ -433,6 +454,31 @@ func _draw_hp_bar() -> void:
 		for _bf in _brittle_frags:
 			draw_circle(Vector2(_bf["x"], _bf["y"]), _bf["t"] * 6.0,
 						Color(0.58, 0.38, 0.18, _sf_alpha))
+
+
+func _draw_taunt_tank() -> void:
+	var pulse : float = 0.55 + sin(_anim_time * 3.0) * 0.20
+	# Outer glow ring
+	draw_arc(Vector2.ZERO, 26.0, 0.0, TAU, 32, Color(0.85, 0.12, 0.10, pulse * 0.55), 4.0)
+	# Armored body
+	draw_circle(Vector2.ZERO, 21.0, Color(0.30, 0.30, 0.34))
+	draw_arc(Vector2.ZERO, 21.0, 0.0, TAU, 32, Color(0.58, 0.58, 0.64), 2.5)
+	# Armor plate seams
+	draw_line(Vector2(-15, 0), Vector2(15, 0), Color(0.16, 0.16, 0.20, 0.7), 2.0)
+	draw_line(Vector2(0, -15), Vector2(0, 6), Color(0.16, 0.16, 0.20, 0.7), 2.0)
+	# Shield (kite shape)
+	var sh := PackedVector2Array([
+		Vector2(0, -13), Vector2(10, -4), Vector2(10, 6), Vector2(0, 14), Vector2(-10, 6), Vector2(-10, -4)
+	])
+	draw_colored_polygon(sh, Color(0.62, 0.10, 0.10, 0.95))
+	draw_polyline(PackedVector2Array([sh[0], sh[1], sh[2], sh[3], sh[4], sh[5], sh[0]]),
+		Color(0.92, 0.22, 0.18), 1.5)
+	# Shield center cross
+	draw_line(Vector2(0, -10), Vector2(0, 10), Color(0.90, 0.80, 0.20, 0.8), 1.5)
+	draw_line(Vector2(-7, 0), Vector2(7, 0), Color(0.90, 0.80, 0.20, 0.8), 1.5)
+	# Eyes (visor slits)
+	draw_line(Vector2(-7, -5), Vector2(-3, -5), Color(0.95, 0.35, 0.10), 2.0)
+	draw_line(Vector2( 3, -5), Vector2( 7, -5), Color(0.95, 0.35, 0.10), 2.0)
 
 
 func _draw_enemy() -> void:

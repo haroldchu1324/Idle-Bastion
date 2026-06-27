@@ -75,6 +75,15 @@ For multi-step tasks, state a brief plan:
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
+## 5. Always Disclose Unasked-For Additions
+
+**After every implementation, explicitly flag anything added that the user did not ask for.**
+
+- At the end of each response, list any decisions, behaviors, values, or code that go beyond the literal request.
+- Do not silently add guards, defaults, UX polish, or "sensible" extras.
+- If you made a judgment call the user didn't ask for, name it and ask if it's okay.
+- Examples of things to flag: hardcoded values (HP, speed), hiding/disabling UI elements, spacebar guards, reset logic, error handling, fallback behaviors.
+
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.

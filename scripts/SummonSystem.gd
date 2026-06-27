@@ -75,9 +75,9 @@ const TURRET_DEFS : Dictionary = {
 	# ── Common ────────────────────────────────────────────────────────────────
 	"archer": {
 		"id": "archer", "name": "Archer", "rarity": "common", "idx": 0,
-		"desc": "Focused shots — consecutive hits\non the same target stack +50% dmg,\nup to 2×.",
+		"desc": "Consecutive hits on the same target\nstack +50% damage, up to 2×.",
 		"cost": 0, "damage": 5.0, "range": 200.0, "fire_rate": 1.0,
-		"color": Color(0.35, 0.75, 0.25), "effect": "focused_shot",
+		"color": Color(0.35, 0.75, 0.25), "effect": "stack_shot",
 	},
 	"crossbow": {
 		"id": "crossbow", "name": "Crossbow", "rarity": "common", "idx": 1,

@@ -9,6 +9,8 @@ var territory_states : Array = []
 var hovered_world    : int   = -1   # 0-9 or -1
 var selected_world   : int   = -1   # 0-9 or -1
 
+var _worldmap_tex : Texture2D = preload("res://assets/worldmap.png")
+
 # ── Animation state ───────────────────────────────────────────────────────────
 var _pulse   : float = 0.0
 var _hover_t : Array = []   # float[10]  0→1 lerp
@@ -75,6 +77,7 @@ func _process(delta: float) -> void:
 			if pp[2] > 0.0:
 				alive.append(pp)
 		_burst_particles[i] = alive
+
 	queue_redraw()
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -87,16 +90,17 @@ func _draw() -> void:
 
 # ── Ocean ─────────────────────────────────────────────────────────────────────
 func _draw_ocean() -> void:
-	draw_rect(Rect2(0, 0, 1280, 720), Color(0.05, 0.10, 0.24))
-	for i in range(14):
-		var y : float = 28.0 + float(i) * 50.0
-		draw_line(Vector2(0, y), Vector2(1280, y), Color(0.08, 0.15, 0.32, 0.20), 1.0)
-	for fx in range(6):
-		var fpos := Vector2(55.0 + float(fx) * 28.0, 430.0 + float(fx) * 18.0)
-		draw_circle(fpos, 4.0, Color(0.55, 0.68, 0.85, 0.18))
-	for fx in range(5):
-		var fpos2 := Vector2(1105.0 + float(fx) * 14.0, 180.0 + float(fx) * 22.0)
-		draw_circle(fpos2, 3.5, Color(0.55, 0.68, 0.85, 0.15))
+	draw_rect(Rect2(0, 0, 1280, 720), Color(0.07, 0.12, 0.24))
+	# Subtle wave lines
+	for i in range(16):
+		var y : float = 22.0 + float(i) * 44.0
+		draw_line(Vector2(0, y), Vector2(1280, y), Color(0.12, 0.20, 0.38, 0.22), 1.0)
+	# Corner vignette
+	for corner in [Vector2(0, 0), Vector2(1280, 0), Vector2(0, 720), Vector2(1280, 720)]:
+		draw_circle(corner, 260.0, Color(0.02, 0.04, 0.10, 0.40))
+	# Map border frame
+	draw_rect(Rect2(6, 6, 1268, 708), Color(0.65, 0.52, 0.25, 0.55), false, 3.0)
+	draw_rect(Rect2(11, 11, 1258, 698), Color(0.50, 0.40, 0.18, 0.35), false, 1.5)
 
 # ── Continent + decorations ───────────────────────────────────────────────────
 func _draw_land() -> void:
@@ -326,92 +330,56 @@ func _draw_world_nodes() -> void:
 
 		# Hover glow ring
 		if ht > 0.01:
-			draw_circle(c, 58.0 * sc, Color(clr.r, clr.g, clr.b, 0.18 * ht))
-			draw_circle(c, 44.0 * sc, Color(clr.r + 0.15, clr.g + 0.15, clr.b + 0.15, 0.12 * ht))
+			draw_circle(c, 90.0 * sc, Color(clr.r, clr.g, clr.b, 0.18 * ht))
+			draw_circle(c, 78.0 * sc, Color(clr.r + 0.15, clr.g + 0.15, clr.b + 0.15, 0.12 * ht))
 
-		# Selection ring
+		# Selection ring — only on the one selected world
 		if i == selected_world:
-			var glow_r : float = 64.0 + sin(p * TAU) * 9.0
+			var glow_r : float = 99.0 + sin(p * TAU) * 9.0
 			draw_circle(c, glow_r, Color(clr.r, clr.g, clr.b, 0.26 + sin(p * TAU) * 0.10))
 			var ra : float = p * TAU
-			draw_arc(c, 52.0, ra, ra + TAU * 0.76, 56,
+			draw_arc(c, 87.0, ra, ra + TAU * 0.76, 56,
 				Color(clr.r, clr.g, clr.b, 0.95), 3.2)
-			draw_arc(c, 47.0, -ra * 0.65, -ra * 0.65 + TAU * 0.52, 36,
+			draw_arc(c, 82.0, -ra * 0.65, -ra * 0.65 + TAU * 0.52, 36,
 				Color(1.0, 1.0, 1.0, 0.38), 1.5)
-		elif state == "active":
-			draw_circle(c, 54.0 + sin(p * TAU) * 6.0,
-				Color(clr.r, clr.g, clr.b, 0.14 + sin(p * TAU) * 0.07))
-			var ra : float = p * TAU
-			draw_arc(c, 44.0, ra, ra + TAU * 0.70, 44,
-				Color(1.0, 0.90, 0.28, 0.58 + sin(p * TAU) * 0.18), 2.8)
-		elif state == "cleared":
-			draw_circle(c, 42.0, Color(0.22, 0.92, 0.28, 0.12))
 
 		# Drop shadow (no transform)
-		draw_circle(c + Vector2(4, 7), 36.0, Color(0, 0, 0, 0.38))
+		draw_circle(c + Vector2(5, 8), 76.0, Color(0, 0, 0, 0.32))
+
+		# ── World image circle (drawn in absolute coords, no transform needed) ──
+		if _worldmap_tex:
+			var col_idx : int   = i % 4
+			var row_idx : int   = i / 4
+			var rx      : float = col_idx * 313.0 + 2.0
+			var ry      : float = row_idx * 418.0 + 2.0
+			var tint    : Color = Color(0.35, 0.30, 0.28) if state == "locked" else Color.WHITE
+			var pts  : PackedVector2Array = PackedVector2Array()
+			var uvs  : PackedVector2Array = PackedVector2Array()
+			var clrs : PackedColorArray   = PackedColorArray()
+			const SEGS : int = 36
+			for s in range(SEGS):
+				var a  : float = float(s) / float(SEGS) * TAU
+				pts.append(c + Vector2(cos(a) * 70.0 * sc, sin(a) * 70.0 * sc + lift))
+				uvs.append(Vector2(
+					(rx + 155.0 + cos(a) * 155.0) / 1254.0,
+					(ry + 155.0 + sin(a) * 155.0) / 1254.0
+				))
+				clrs.append(tint)
+			draw_polygon(pts, clrs, uvs, _worldmap_tex)
 
 		# ── Apply hover transform ──────────────────────────────────────────────
 		draw_set_transform(c + Vector2(0.0, lift), 0.0, Vector2(sc, sc))
 
-		# Base disc
-		var bc : Color = clr if state != "locked" else Color(0.22, 0.20, 0.18)
-		if state == "locked":
-			bc = bc.darkened(0.50)
-		draw_circle(Vector2.ZERO, 35.0, bc.darkened(0.58))
-		draw_circle(Vector2.ZERO, 33.0, bc.darkened(0.30))
-		draw_circle(Vector2.ZERO, 31.0, bc)
-		draw_circle(Vector2.ZERO, 27.0, bc.lightened(0.13))
-		# Specular highlight
-		draw_circle(Vector2(-5, -7), 7.5, Color(1, 1, 1, 0.17))
-
-		# Draw the biome landmark
-		match i:
-			0: _draw_lm_garden_plains(Vector2.ZERO)
-			1: _draw_lm_deep_forest(Vector2.ZERO)
-			2: _draw_lm_desert_ruins(Vector2.ZERO)
-			3: _draw_lm_frost_peaks(Vector2.ZERO)
-			4: _draw_lm_volcanic_wastes(Vector2.ZERO)
-			5: _draw_lm_swamplands(Vector2.ZERO)
-			6: _draw_lm_crystal_highlands(Vector2.ZERO)
-			7: _draw_lm_shadow_realm(Vector2.ZERO)
-			8: _draw_lm_celestial_kingdom(Vector2.ZERO)
-			9: _draw_lm_eternal_citadel(Vector2.ZERO)
-
-		# Locked overlay + padlock
-		if state == "locked":
-			draw_circle(Vector2.ZERO, 32.0, Color(0.04, 0.03, 0.10, 0.65))
-			var lk : Color = Color(0.62, 0.60, 0.56, 0.92)
-			draw_arc(Vector2(0, -2), 6.5, PI, TAU, 18, lk, 2.5)
-			draw_rect(Rect2(-6, -2, 12, 11), lk)
-			draw_rect(Rect2(-4, 0, 8, 9), Color(0.24, 0.22, 0.28, 0.85))
-			draw_circle(Vector2(0, 4), 2.0, lk)
-
-		# Active / cleared interior indicator
-		match state:
-			"active":
-				var ca : float = 0.68 + sin(p * TAU) * 0.22
-				draw_circle(Vector2.ZERO, 16.0, Color(clr.r, clr.g, clr.b, ca))
-				draw_circle(Vector2.ZERO,  8.0, Color(1.0, 1.0, 1.0, ca * 0.50))
-			"cleared":
-				draw_circle(Vector2.ZERO, 16.0, Color(0.10, 0.70, 0.14, 0.82))
-				draw_arc(Vector2.ZERO, 9.0, -PI * 0.25, PI * 1.22, 20, Color(1, 1, 1, 0.92), 3.5)
-
-		# Outer border ring
+		# Outer border ring — cleared uses world clr, active gold, locked gray
 		var bclr : Color
 		match state:
 			"active":  bclr = Color(1.0, 0.92, 0.30, 0.90 + sin(p * TAU) * 0.10)
-			"cleared": bclr = Color(0.28, 0.96, 0.32, 0.88)
-			_:         bclr = Color(0.38, 0.36, 0.34, 0.50)
+			"cleared": bclr = Color(clr.r, clr.g, clr.b, 0.90)
+			_:         bclr = Color(0.38, 0.36, 0.34, 0.55)
 		if i == selected_world:
 			bclr = Color(clr.r, clr.g, clr.b, 1.0)
-			# Extra bright inner ring on selected
-			draw_arc(Vector2.ZERO, 27.0, 0, TAU, 36, Color(1, 1, 1, 0.28), 1.5)
-		draw_arc(Vector2.ZERO, 33.0, 0, TAU, 48, bclr, 2.5)
-
-		# Dimming overlay for non-selected worlds
-		if selected_world >= 0 and i != selected_world:
-			var dim : float = (1.0 - ht) * 0.42
-			draw_circle(Vector2.ZERO, 35.0, Color(0.02, 0.02, 0.06, dim))
+			draw_arc(Vector2.ZERO, 77.0, 0, TAU, 48, Color(1, 1, 1, 0.28), 1.5)
+		draw_arc(Vector2.ZERO, 72.0, 0, TAU, 48, bclr, 3.5)
 
 		# Reset transform
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
