@@ -32,6 +32,9 @@ var _war_cry_counter    : int     = 0    # spearman war cry: cumulative hit coun
 var _bleed_stacks  : Dictionary = {}
 var _bleed_tick_timer : float = 0.0
 var _arcane_charge : int = 0   # persistent hit counter for arcane_cannon, never resets
+var _ac_perm_dmg_pct  : float = 0.0   # arcane cannon: accumulated % damage from buff procs
+var _ac_perm_range    : float = 0.0   # arcane cannon: accumulated range (px) from buff procs
+var _ac_perm_spd_pct  : float = 0.0   # arcane cannon: accumulated % fire rate from buff procs
 var _arcane_laser_targets : Array = []
 var _arcane_laser_timer   : float = 0.0
 var _arcane_laser_alpha   : float = 0.0
@@ -71,6 +74,7 @@ var _ranger_rate_bonus : float = 0.0  # ranger hero: +10% fire rate buff from ne
 var _ranger_rate_timer : float = 0.0  # seconds until ranger fire rate buff expires
 var _rock_zones        : Array = []   # stone guardian: active brittle zones [{pos,timer,hit_dict}]
 var _debuff_cd         : Dictionary = {}  # dual debuff: per-enemy cooldown {enemy:{type:timer}}
+var _taunt_cd          : Dictionary = {}  # taunt/stun: per-enemy cooldown {enemy: timer}
 var _frost_speed_bonus : float = 0.0      # frost herald: accumulated +5% atk speed per slowed hit (max 50%)
 var _frost_idle_timer  : float = 0.0      # frost herald: seconds since last attack; resets bonus at 3s
 var _tile_dmg_bonus    : float = 0.0      # special tile (red): +30% damage multiplier
@@ -132,7 +136,8 @@ func init_type(data: Dictionary) -> void:
 	if _tid != "":
 		attack_range = _base_range * GameData.tower_level_range_mult(_tid) + GameData.category_rng_flat_bonus(_tid)
 		tower_data = tower_data.duplicate()
-		tower_data["range"] = attack_range
+		tower_data["range"]     = attack_range
+		tower_data["dmg_dealt"] = 0.0
 
 	tower_color     = data.get("color",     Color(0.50, 0.55, 0.70))
 	_sw_base_color  = tower_color   # save for shadow weaver phase swap
@@ -150,6 +155,8 @@ func recalc_upgrades() -> void:
 	if tid == "" or _base_range <= 0.0:
 		return
 	attack_range = _base_range * GameData.tower_level_range_mult(tid) + GameData.category_rng_flat_bonus(tid)
+	if tid == "arcane_cannon" and _ac_perm_range > 0.0:
+		attack_range += _ac_perm_range
 	tower_data["range"] = attack_range
 	if tid == "archer":
 		tower_effect = "focused_shot" if GameData.turret_has_special("archer") else "stack_shot"
@@ -230,9 +237,11 @@ func _process(delta: float) -> void:
 			_beam_tick_timer -= delta
 			if _beam_tick_timer <= 0.0:
 				_beam_tick_timer = 0.25
-				var lock_mult := 1.0 + minf(_beam_lock_time / 5.0, 1.0)
-				var tick_dmg := damage * fire_rate * 0.25 * lock_mult * \
-					(GameData.relic_boss_dmg_mult() if _beam_target.is_boss else 1.0)
+				var _infernal_max := 4.0 if GameData.turret_has_special("infernal_core") else 1.0
+				var lock_mult := 1.0 + minf(_beam_lock_time / 5.0, _infernal_max)
+				var tick_dmg := damage * fire_rate * 0.25 * lock_mult \
+					* GameData.tower_total_damage_mult(tower_data.get("id", "")) \
+					* (GameData.relic_boss_dmg_mult() if _beam_target.is_boss else 1.0)
 				_apply_damage(_beam_target, tick_dmg)
 		if _beam_timer <= 0.0:
 			_beam_timer      = 0.0
@@ -258,9 +267,11 @@ func _process(delta: float) -> void:
 			_beam_tick_timer2 -= delta
 			if _beam_tick_timer2 <= 0.0:
 				_beam_tick_timer2 = 0.25
-				var lock_mult2 := 1.0 + minf(_beam_lock_time2 / 5.0, 1.0)
-				var tick_dmg2 := damage * fire_rate * 0.25 * lock_mult2 * \
-					(GameData.relic_boss_dmg_mult() if _beam_target2.is_boss else 1.0)
+				var _infernal_max2 := 4.0 if GameData.turret_has_special("infernal_core") else 1.0
+				var lock_mult2 := 1.0 + minf(_beam_lock_time2 / 5.0, _infernal_max2)
+				var tick_dmg2 := damage * fire_rate * 0.25 * lock_mult2 \
+					* GameData.tower_total_damage_mult(tower_data.get("id", "")) \
+					* (GameData.relic_boss_dmg_mult() if _beam_target2.is_boss else 1.0)
 				_apply_damage(_beam_target2, tick_dmg2)
 		if _beam_timer2 <= 0.0:
 			_beam_timer2      = 0.0
@@ -297,9 +308,12 @@ func _process(delta: float) -> void:
 						if not _blade_hit_set.has(enemy):
 							_blade_hit_set[enemy] = true
 							var bdmg := (damage * 0.5 + GameData.buff_damage_flat) \
-								* GameData.turret_damage_mult(tid_b) \
+								* GameData.tower_total_damage_mult(tid_b) \
 								* (GameData.relic_boss_dmg_mult() if enemy.is_boss else 1.0)
 							_apply_damage(enemy, bdmg)
+							if GameData.turret_has_special("blade_assassin"):
+								enemy.apply_bleed()
+								_bleed_stacks[enemy] = {"stacks": 1, "timer": 3.0, "dmg_per_tick": bdmg}
 			var _leave : Array = []
 			for _he in _blade_hit_set.keys():
 				if not _in_range_now.has(_he):
@@ -506,6 +520,18 @@ func _process(delta: float) -> void:
 				_dc_remove.append(_dc_e)
 		for _dc_rem in _dc_remove:
 			_debuff_cd.erase(_dc_rem)
+	# Taunt cooldown: tick per-enemy timers, remove expired entries
+	if not _taunt_cd.is_empty():
+		var _tc_remove : Array = []
+		for _tc_e in _taunt_cd.keys():
+			if not is_instance_valid(_tc_e):
+				_tc_remove.append(_tc_e)
+				continue
+			_taunt_cd[_tc_e] -= delta
+			if _taunt_cd[_tc_e] <= 0.0:
+				_tc_remove.append(_tc_e)
+		for _tc_rem in _tc_remove:
+			_taunt_cd.erase(_tc_rem)
 	if tower_data.get("effect", "") == "world_tree_buff":
 		_wt_passive_tick -= delta
 		if _wt_passive_tick <= 0.0:
@@ -573,7 +599,7 @@ func _process(delta: float) -> void:
 				var _stacks : int = _bentry["stacks"]
 				# Hemorrhage: apply 5% slow while enemy has 4 stacks
 				if _hemorrhage and _stacks >= 4:
-					_be2.apply_frost_slow(1.5)
+					_be2.apply_slow(self, 1.5, 0.05)
 				# Custom dmg_per_tick overrides the default formula (e.g. Shadow Blade combo bleed)
 				var _base_tick : float = _bentry["dmg_per_tick"] if _bentry.has("dmg_per_tick") \
 					else (damage / 3.0) * _stacks
@@ -689,8 +715,13 @@ func _try_shoot() -> void:
 			for i in range(min(2, in_range.size())):
 				_fire(in_range[i], damage)
 		"aoe":
-			for enemy in in_range:
-				_fire(enemy, damage)
+			var _is_wildfire : bool = tower_data.get("id","") == "flame_tower" and GameData.turret_has_special("flame_tower")
+			var _aoe_targets := in_range.duplicate()
+			var _aoe_dmg := damage
+			for enemy in _aoe_targets:
+				_fire(enemy, _aoe_dmg)
+				if _is_wildfire and randf() < 0.10:
+					_spawn_fire_zone(enemy.position)
 		"poison_cloud":
 			for enemy in in_range:
 				_fire(enemy, damage)
@@ -726,7 +757,15 @@ func _try_shoot() -> void:
 					_fire(enemy, damage)
 			if _war_cry_counter % 3 == 0 and tower_data.get("id","") == "spearman" and GameData.turret_has_special("spearman"):
 				for enemy in in_range:
-					enemy.apply_taunt(0.5)
+					if _taunt_cd.get(enemy, 0.0) <= 0.0:
+						enemy.apply_taunt(0.5)
+						_taunt_cd[enemy] = 5.0
+			# Iron Discipline: every 5th cleave (15 hits) stuns all in range for 0.3s
+			if _hit_counter == 0 and _war_cry_counter % 15 == 0 and tower_data.get("id","") == "elite_knight" and GameData.turret_has_special("elite_knight"):
+				for enemy in in_range:
+					if _taunt_cd.get(enemy, 0.0) <= 0.0:
+						enemy.apply_taunt(0.3)
+						_taunt_cd[enemy] = 5.0
 		"bleed_aoe":
 			# Hits all enemies in range; applies a bleed stack to each
 			# Hemorrhage (rogue special) raises cap from 3 → 4
@@ -741,30 +780,53 @@ func _try_shoot() -> void:
 				_bleed_stacks[enemy] = _bentry
 				enemy.apply_bleed()   # visual trail only
 		"poison_debuff":
-			# Prioritise un-poisoned enemies; apply poison on hit
-			var sorted := in_range.duplicate()
-			sorted.sort_custom(func(a, b): return int(a.is_poisoned) < int(b.is_poisoned))
-			var target_enemy : Node2D = sorted[0]
+			var target_enemy : Node2D = in_range[0]
 			_fire(target_enemy, damage)
-			target_enemy.apply_poison(5.0)
+			var _poison_dur := 8.0 if GameData.turret_has_special("poison_tower") else 5.0
+			var _poison_bonus := 0.15 if GameData.turret_has_special("poison_tower") else 0.10
+			target_enemy.apply_poison_source(tower_data.get("id", "poison_tower"), _poison_dur, _poison_bonus)
 		"execute_shot":
 			# Scales up to 2× damage based on enemy's current HP fraction
 			var hp_frac := clampf(primary.hp / primary.max_hp, 0.0, 1.0)
-			_fire(primary, damage * (1.0 + hp_frac))
+			var _exec_mult := 1.0 + hp_frac
+			if hp_frac < 0.25 and GameData.turret_has_special("sniper_tower"):
+				_exec_mult *= 1.5  # Execution: extra 1.5× below 25% HP
+			_fire(primary, damage * _exec_mult)
 		"hp_strike":
-			# Base damage + 1% of current HP on non-boss enemies
-			var hp_bonus : float = primary.hp * 0.01 if not primary.is_boss else 0.0
+			# Base damage + 1% of current HP on non-boss enemies (Siege Shot: 0.5% on bosses)
+			var hp_bonus : float
+			if not primary.is_boss:
+				hp_bonus = primary.hp * 0.01
+			elif GameData.turret_has_special("ballista"):
+				hp_bonus = primary.hp * 0.005  # Siege Shot: half effectiveness on bosses
+			else:
+				hp_bonus = 0.0
 			_fire(primary, damage + hp_bonus)
 		"arcane_charge":
-			# Persistent charge — every 20th hit releases a blue ray at double damage
+			# Persistent charge — every 15 hits releases a blue ray hitting all in range for 2× damage.
+			# With upgrade: each ray proc randomly grants this tower +1 dmg, +1% dmg, +2px range, or +1% atk spd.
 			_arcane_charge += 1
-			_fire(primary, damage)
+			var _ac_dmg := damage * (1.0 + _ac_perm_dmg_pct)
+			_fire(primary, _ac_dmg)
 			if _arcane_charge % 15 == 0:
 				_arcane_laser_targets = in_range.duplicate()
-				_arcane_laser_timer   = 2.0   # 1s full + 1s fade
+				_arcane_laser_timer   = 2.0
 				_arcane_laser_alpha   = 1.0
 				for enemy in in_range:
-					_fire(enemy, damage * 2.0)
+					_fire(enemy, _ac_dmg * 2.0)
+				if GameData.turret_has_special("arcane_cannon"):
+					match randi() % 3:
+						0:
+							_ac_perm_dmg_pct += 0.01
+							damage           *= 1.01
+						1:
+							_ac_perm_range += 2.0
+							attack_range   += 2.0
+							tower_data["range"] = attack_range
+						2:
+							_ac_perm_spd_pct += 0.01
+							fire_rate        *= 1.01
+							tower_data["fire_rate"] = fire_rate
 		"knight_slam":
 			# Hits 1 & 2: single sword at primary, no knockback.
 			# Hit 3: up to 3 swords at 3 DIFFERENT enemies (in-range order),
@@ -772,13 +834,21 @@ func _try_shoot() -> void:
 			_hit_counter += 1
 			if _hit_counter >= 3:
 				_hit_counter = 0
-				var _thrown  := 0
-				var _offsets := [Vector2(0, 0), Vector2(-14, 0), Vector2(14, 0)]
-				for _kt in in_range:
-					if _thrown >= 3:
-						break
-					_fire(_kt, damage, true, _offsets[_thrown])
-					_thrown += 1
+				var _is_earthshatter : bool = tower_data.get("id","") == "iron_guard" and GameData.turret_has_special("iron_guard")
+				if _is_earthshatter:
+					# Earthshatter: hit ALL enemies in range with knockback + apply Brittle
+					for _kt in in_range:
+						_fire(_kt, damage, true, Vector2.ZERO)
+						_kt.brittle_bonus    = 20.0
+						_kt._brittle_popin_t = 0.15
+				else:
+					var _thrown  := 0
+					var _offsets := [Vector2(0, 0), Vector2(-14, 0), Vector2(14, 0)]
+					for _kt in in_range:
+						if _thrown >= 3:
+							break
+						_fire(_kt, damage, true, _offsets[_thrown])
+						_thrown += 1
 			else:
 				_fire(primary, damage)
 		"taunt_slam":
@@ -790,7 +860,9 @@ func _try_shoot() -> void:
 			if _hit_counter >= 5:
 				_hit_counter = 0
 				for enemy in in_range:
-					enemy.apply_taunt(2.0)
+					if _taunt_cd.get(enemy, 0.0) <= 0.0:
+						enemy.apply_taunt(2.0)
+						_taunt_cd[enemy] = 5.0
 		"hercules_cleave":
 			# Hercules: strikes primary + 1 additional enemy; damage grows +5 per wave
 			var herc_dmg := damage + _hercules_wave_bonus
@@ -882,7 +954,7 @@ func _try_shoot() -> void:
 					break
 			for _fs_t in _fs_targets:
 				_fire(_fs_t, damage)
-				_fs_t.apply_frost_slow(2.0)
+				_fs_t.apply_slow(self, 2.0, 0.05)
 			# Count slowed enemies on the map and recalculate bonus
 			var _slowed_count : int = 0
 			for _fm_e in get_tree().get_nodes_in_group("enemies"):
@@ -927,13 +999,24 @@ func _try_shoot() -> void:
 				_tw_slash_launched = false
 				_chrono_pulse = 0.50
 		"axe_warrior":
-			# AoE melee — hits up to 5 enemies; applies bleed + poison stacks to each
+			# AoE melee — hits up to 2 enemies (4 with Pestilence); applies bleed + poison
 			_shoot_anim = 0.35
+			var _axe_max := 2
+			var _axe_has_special := GameData.turret_has_special("axe_warrior")
 			var hit_count := 0
 			for enemy in in_range:
-				if hit_count >= 2:
+				if hit_count >= _axe_max:
 					break
-				_fire(enemy, damage)
+				var _axe_dmg := damage
+				if _axe_has_special:
+					var _dc := 0
+					if enemy.is_bleeding: _dc += 1
+					if enemy.is_poisoned: _dc += 1
+					if not enemy._slow_sources.is_empty(): _dc += 1
+					if enemy.brittle_bonus > 0.0: _dc += 1
+					if enemy.is_taunted: _dc += 1
+					_axe_dmg *= 1.0 + 0.10 * _dc
+				_fire(enemy, _axe_dmg)
 				# Bleed: cap at 1 stack, always refresh 3s duration
 				var _axe_bentry : Dictionary = _bleed_stacks.get(enemy, {"stacks": 0, "timer": 0.0})
 				_axe_bentry["stacks"] = 1
@@ -941,10 +1024,7 @@ func _try_shoot() -> void:
 				_bleed_stacks[enemy] = _axe_bentry
 				enemy.apply_bleed()   # visual trail only
 				# Poison: refresh duration if already poisoned, apply 1 stack if not
-				if enemy.is_poisoned:
-					enemy.poison_timer = max(enemy.poison_timer, 5.0)
-				else:
-					enemy.apply_poison(5.0)
+				enemy.apply_poison_source(tower_data.get("id", "axe_warrior"), 5.0, 0.05)
 				# Spawn slash visual at enemy position
 				_spawn_slash(enemy.position)
 				hit_count += 1
@@ -952,15 +1032,17 @@ func _try_shoot() -> void:
 			# Dual shot — fire at up to 2 enemies simultaneously
 			for i in range(min(2, in_range.size())):
 				_fire(in_range[i], damage)
-			# 10% chance per volley to proc spinning blades (3s duration)
-			if randf() < 0.10:
-				_blade_timer = 3.0
+			# 10% chance (25% with Whirlwind) to proc spinning blades (3s, 5s with Whirlwind)
+			var _bs_chance := 0.25 if GameData.turret_has_special("blade_assassin") else 0.10
+			var _bs_dur    := 5.0  if GameData.turret_has_special("blade_assassin") else 3.0
+			if randf() < _bs_chance:
+				_blade_timer = _bs_dur
 				_blade_hit_set.clear()
 		"lightning":
 			# Tesla Tower: hits primary + chains to 3 more enemies globally (4 total)
 			var _lt_tid : String = tower_data.get("id", "")
 			var _lt_pdmg := (damage + GameData.buff_damage_flat + _wt_dmg_bonus) \
-				* GameData.turret_damage_mult(_lt_tid) \
+				* GameData.tower_total_damage_mult(_lt_tid) \
 				* (GameData.relic_boss_dmg_mult() if primary.is_boss else 1.0)
 			_apply_damage(primary, _lt_pdmg)
 			_lightning_bolts.append({
@@ -976,7 +1058,7 @@ func _try_shoot() -> void:
 			var _lt_prev : Node2D = primary
 			for _lt_ce in _lt_all:
 				var _lt_cdmg := (damage + GameData.buff_damage_flat + _wt_dmg_bonus) \
-					* GameData.turret_damage_mult(_lt_tid) \
+					* GameData.tower_total_damage_mult(_lt_tid) \
 					* (GameData.relic_boss_dmg_mult() if _lt_ce.is_boss else 1.0)
 				_apply_damage(_lt_ce, _lt_cdmg)
 				_lightning_bolts.append({
@@ -987,12 +1069,34 @@ func _try_shoot() -> void:
 				_lt_chained += 1
 				if _lt_chained >= 3:
 					break
+			# Overcharge bonus: switching to a different enemy has 30% chance to zap a nearby enemy after 0.5s
+			if GameData.turret_has_special("tesla_tower") and primary != _last_target and randf() < 0.30:
+				var _zap_origin : Vector2 = primary.position
+				get_tree().create_timer(0.5, false).timeout.connect(func():
+					var _zap_all : Array = get_tree().get_nodes_in_group("enemies")
+					var _zap_target : Node2D = null
+					var _zap_best   : float  = INF
+					for _ze in _zap_all:
+						if not is_instance_valid(_ze) or _ze._dead:
+							continue
+						var _zd : float = _zap_origin.distance_to(_ze.position)
+						if _zd < _zap_best:
+							_zap_best   = _zd
+							_zap_target = _ze
+					if is_instance_valid(_zap_target) and not _zap_target._dead:
+						_zap_target.take_damage(20.0)
+						_lightning_bolts.append({
+							"pts":      _gen_lightning(_zap_origin - position, _zap_target.position - position, 2),
+							"life":     0.25, "max_life": 0.25, "delay": 0.0, "thick": false
+						})
+				, CONNECT_ONE_SHOT)
+			_last_target = primary
 
 		"storm_chain":
 			# Storm Lord: primary at full damage (instant, no bullet), nearest 4 globally at 150%
 			var _sc_tid : String = tower_data.get("id", "")
 			var _sc_pdmg := (damage + GameData.buff_damage_flat + _wt_dmg_bonus) \
-				* GameData.turret_damage_mult(_sc_tid) \
+				* GameData.tower_total_damage_mult(_sc_tid) \
 				* (GameData.relic_boss_dmg_mult() if primary.is_boss else 1.0)
 			_apply_damage(primary, _sc_pdmg)
 			_lightning_bolts.append({
@@ -1007,7 +1111,7 @@ func _try_shoot() -> void:
 			var _sc_chained := 0
 			for _ce in _sc_all:
 				var _sc_cdmg := (damage * 1.5 + GameData.buff_damage_flat + _wt_dmg_bonus) \
-					* GameData.turret_damage_mult(_sc_tid) \
+					* GameData.tower_total_damage_mult(_sc_tid) \
 					* (GameData.relic_boss_dmg_mult() if _ce.is_boss else 1.0)
 				_apply_damage(_ce, _sc_cdmg)
 				_lightning_bolts.append({
@@ -1023,7 +1127,7 @@ func _try_shoot() -> void:
 			_chrono_pulse = 0.45
 			for _ce2 in in_range:
 				_fire(_ce2, damage)
-				_ce2.apply_chrono_slow(2.0)
+				_ce2.apply_slow(self, 2.0, 0.15)
 		"world_tree_buff":
 			# World Tree: passive buff handled in _process; still fires at primary enemy
 			_fire(primary, damage)
@@ -1060,7 +1164,7 @@ func _try_shoot() -> void:
 				for _ao_e in _ao_list:
 					if is_instance_valid(_ao_e):
 						var _ao_dmg : float = (AO_LASER_DMG + GameData.buff_damage_flat + _wt_dmg_bonus) \
-							* GameData.turret_damage_mult(_ao_tid) \
+							* GameData.tower_total_damage_mult(_ao_tid) \
 							* (GameData.relic_boss_dmg_mult() if _ao_e.is_boss else 1.0)
 						_apply_damage(_ao_e, _ao_dmg)
 
@@ -1077,7 +1181,7 @@ func _try_shoot() -> void:
 				var _fc_dmg : float = damage * FC_BOSS_MULT if _fc_t.is_boss else damage
 				_fire(_fc_t, _fc_dmg)
 				if _fc_t.is_boss:
-					_fc_t.apply_mild_slow(FC_BOSS_SLOW_DUR)
+					_fc_t.apply_slow(self, FC_BOSS_SLOW_DUR, 0.10)
 				_fc_impacts.append({
 					"pos":   _fc_t.position,
 					"t":     FC_BOSS_DUR if _fc_t.is_boss else FC_NORMAL_DUR,
@@ -1101,6 +1205,8 @@ func _fire(target: Node2D, dmg: float, p_pushback: bool = false, spawn_offset: V
 		final_dmg = (dmg * GameData.tower_total_damage_mult(tid) * (1.0 + _tile_dmg_bonus) + GameData.buff_damage_flat + _wt_dmg_bonus + _relic_dmg_bonus) * boss_mult * (1.0 - _rot_dmg_penalty)
 	if GameData.debuff_legend_penalty and tower_data.get("rarity", "") in ["legendary", "fusion"]:
 		final_dmg *= 0.85
+
+	tower_data["dmg_dealt"] = tower_data.get("dmg_dealt", 0.0) + final_dmg
 
 	# Melee towers — instant direct damage, no projectile
 	if tower_type in [26, 27, 28, 29, 30, 31, 32, 33]:
@@ -1208,6 +1314,19 @@ func _fire(target: Node2D, dmg: float, p_pushback: bool = false, spawn_offset: V
 			_apply_damage(b._target, b._damage)
 		b.queue_free()
 		return
+	get_parent().add_child(b)
+
+
+func _spawn_fire_zone(world_pos: Vector2) -> void:
+	for existing in get_tree().get_nodes_in_group("fire_zones"):
+		if is_instance_valid(existing) and world_pos.distance_to(existing.position) < 32.0:
+			existing._fire_zone_timer = 3.0
+			return
+	var b : Node2D = _bullet_scene.instantiate()
+	b.position       = world_pos
+	b.bullet_type    = "fire_zone"
+	b._is_fire_zone  = true
+	b.add_to_group("fire_zones")
 	get_parent().add_child(b)
 
 
@@ -1528,9 +1647,9 @@ func _apply_dual_debuff(target: Node2D) -> void:
 			_bleed_stacks[target] = _be
 			target.apply_bleed()
 		"slow":
-			target.apply_mild_slow(1.0)
+			target.apply_slow(self, 1.0, 0.10)
 		"poison":
-			target.apply_poison(1.0)
+			target.apply_poison_source(tower_data.get("id", ""), 1.0, 0.05)
 	if not _debuff_cd.has(target):
 		_debuff_cd[target] = {}
 	_debuff_cd[target][_chosen] = 5.0

@@ -9603,52 +9603,65 @@ func _rebuild_fusion_icons() -> void:
 	for c in _fusion_icon_row.get_children():
 		c.queue_free()
 
-	const ICON_SZ : int = 52
-	const GAP     : int = 6
-	var x := 0
+	const ICON_SZ  : int = 52
+	const GAP      : int = 6
+	const MAX_COLS : int = 4
+	const ROW_W    : int = 232  # icon_row width (w - 16)
+
+	# Collect valid fusions first so we can center each row
+	var valid : Array = []
 	for fusion in _cached_fusions:
 		var result_id : String = fusion["recipe"]["result"]
 		var def : Dictionary   = SummonSystem.TURRET_DEFS.get(result_id, {})
-		if def.is_empty():
-			continue
-		var rarity : String = def.get("rarity", "common")
-		var rcol   : Color  = SummonSystem.RARITY_COLORS.get(rarity, C_WHITE)
+		if not def.is_empty():
+			valid.append({"result_id": result_id, "def": def})
 
-		# Tile-style frame
-		var tile_s := StyleBoxFlat.new()
-		tile_s.bg_color = Color(0.08, 0.08, 0.14)
-		tile_s.border_color = rcol
-		tile_s.set_border_width_all(2)
-		tile_s.set_corner_radius_all(6)
+	for fi in range(valid.size()):
+		var entry     = valid[fi]
+		var result_id : String     = entry["result_id"]
+		var def       : Dictionary = entry["def"]
+
+		var row : int = fi / MAX_COLS
+		var col : int = fi % MAX_COLS
+
+		var x : int = col * (ICON_SZ + GAP)
+		var y         : int = row * (ICON_SZ + GAP)
+
+		var tile_s := _rounded(Color(0.07, 0.07, 0.10, 1.0))
+		tile_s.border_width_left   = 3
+		tile_s.border_width_right  = 3
+		tile_s.border_width_top    = 3
+		tile_s.border_width_bottom = 3
+		tile_s.border_color        = Color(1.0, 1.0, 1.0, 1.0)
 		var tile := Panel.new()
 		tile.add_theme_stylebox_override("panel", tile_s)
-		tile.position     = Vector2(x, 0)
+		tile.position     = Vector2(x, y)
 		tile.size         = Vector2(ICON_SZ, ICON_SZ)
 		tile.mouse_filter = MOUSE_FILTER_STOP
-		tile.clip_children = CanvasItem.CLIP_CHILDREN_ONLY
-		tile.tooltip_text  = def.get("name", result_id)
+		tile.tooltip_text = def.get("name", result_id)
 		_fusion_icon_row.add_child(tile)
 
-		# Hover highlight
 		var tile_h := tile_s.duplicate() as StyleBoxFlat
-		tile_h.bg_color = Color(0.18, 0.18, 0.30)
-		tile_h.border_color = Color(rcol.r, rcol.g, rcol.b, 1.0)
+		tile_h.bg_color = Color(0.16, 0.16, 0.22, 1.0)
 		tile.mouse_entered.connect(func(): tile.add_theme_stylebox_override("panel", tile_h))
 		tile.mouse_exited.connect(func():  tile.add_theme_stylebox_override("panel", tile_s))
 
-		# Mini tower preview (uses same _TurretPreview; draws at cx=28,cy=32 internally)
 		var prev := _TurretPreview.new()
 		prev.turret_data = def
-		prev.position    = Vector2(2, 2)
+		prev.compact     = true
+		prev.position    = Vector2(-2, -6)
 		tile.add_child(prev)
 
-		# Click to fusion summon
 		var cap_id := result_id
 		tile.gui_input.connect(func(ev: InputEvent):
 			if ev is InputEventMouseButton and ev.button_index == MOUSE_BUTTON_LEFT and ev.pressed:
 				recipe_fusion_requested.emit(cap_id)
 		)
-		x += ICON_SZ + GAP
+
+	# Resize container to fit all rows
+	var total_rows : int = (valid.size() + MAX_COLS - 1) / MAX_COLS
+	if total_rows > 0:
+		_fusion_icon_row.size = Vector2(ROW_W, total_rows * ICON_SZ + (total_rows - 1) * GAP)
 
 
 func _rebuild_recipe_cards() -> void:
@@ -11958,20 +11971,23 @@ class _StatueBtn extends Control:
 
 class _TurretPreview extends Node2D:
 	var turret_data : Dictionary = {}
+	var compact     : bool       = false
 
 	func _draw() -> void:
 		if turret_data.is_empty():
 			return
-		# Center in preview box; scale per-turret (only the ones that looked too small get bumped up)
 		var cx  : float = 28.0
 		var cy  : float = 32.0
 		var idx : int   = turret_data.get("idx", -1)
 		var sc  : float
 		match idx:
-			6, 7, 8, 10, 12:     sc = 0.67   # frost spire, poison, sniper, infernal core, arcane cannon
-			17, 18, 19, 20, 21, 22, 23, 24, 25:  sc = 0.60   # fusion turrets
-			30, 31, 32, 33:                       sc = 0.56   # melee epics/legendaries
-			_:                   sc = 0.56   # all others stay at original size
+			6, 7, 8, 10, 12:                      sc = 0.67
+			17, 18, 19, 20, 21, 22, 23, 24, 25:   sc = 0.60
+			30, 31, 32, 33:                        sc = 0.56
+			_:                                     sc = 0.56
+		if compact:
+			sc *= 0.80
+			cy += 5.0
 		draw_set_transform(Vector2(cx, cy), 0.0, Vector2(sc, sc))
 		var tc := turret_data.get("color", Color(0.5, 0.5, 0.5)) as Color
 		match turret_data.get("idx", -1):
@@ -12250,159 +12266,1653 @@ class _TurretPreview extends Node2D:
 		draw_circle(Vector2(3,10),2.5,Color(0.50,1.00,0.55,0.5))
 
 	func _pv_venom_drake() -> void:
-		var grn  := Color(0.20, 0.80, 0.28); var drk  := Color(0.10, 0.40, 0.14)
-		var purp := Color(0.60, 0.20, 0.80); var yel  := Color(0.85, 0.95, 0.20)
-		# Body
-		draw_colored_polygon(PackedVector2Array([Vector2(-10,2),Vector2(10,2),Vector2(12,22),Vector2(-12,22)]),drk)
-		draw_colored_polygon(PackedVector2Array([Vector2(-8,-10),Vector2(8,-10),Vector2(10,2),Vector2(-10,2)]),grn)
-		# Neck/head
-		draw_circle(Vector2(0,-18),8,grn)
-		draw_circle(Vector2(0,-18),6,drk.lightened(0.1))
-		# Fangs
-		draw_colored_polygon(PackedVector2Array([Vector2(-5,-14),Vector2(-2,-14),Vector2(-3,-8)]),yel)
-		draw_colored_polygon(PackedVector2Array([Vector2(2,-14),Vector2(5,-14),Vector2(3,-8)]),yel)
-		# Wings
-		draw_colored_polygon(PackedVector2Array([Vector2(-10,-6),Vector2(-22,-18),Vector2(-16,-2),Vector2(-10,2)]),purp.darkened(0.1))
-		draw_colored_polygon(PackedVector2Array([Vector2(10,-6),Vector2(22,-18),Vector2(16,-2),Vector2(10,2)]),purp.darkened(0.1))
-		# Toxic orb glow
-		draw_circle(Vector2(0,-18),4,Color(0.30,1.00,0.40,0.7))
-		draw_circle(Vector2(0,-18),2,Color(1,1,1,0.5))
+		var grn    := Color(0.14, 0.65, 0.20)
+		var grn_l  := Color(0.38, 0.92, 0.44)
+		var grn_d  := Color(0.06, 0.28, 0.10)
+		var blk    := Color(0.08, 0.10, 0.08)
+		var purp   := Color(0.42, 0.10, 0.58)
+		var purp_l := Color(0.68, 0.22, 0.88)
+		var acid   := Color(0.78, 1.00, 0.08)
+		var acid_l := Color(0.94, 1.00, 0.55)
+		var scale  := Color(0.08, 0.22, 0.10)
+
+		var pulse    := 0.0
+		var orb_rot  := 0.0
+		var rune_rot := 0.0
+		var drip_a : float = 0.65 + pulse * 0.25
+
+		draw_circle(Vector2(0, 24), 20, Color(0, 0, 0, 0.22))
+
+		for _i in range(4):
+			var _mt : float = fmod(0.0 + float(_i) * 0.25, 1.0)
+			var _mr : float = 8.0 + _mt * 10.0
+			var _ma : float = (1.0 - _mt) * 0.26
+			draw_circle(Vector2(float(_i - 1) * 7.0, 18 + 0.0), _mr, Color(acid.r, acid.g, acid.b, _ma))
+
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-14, 4),  Vector2(14, 4),
+			Vector2(16, 22),  Vector2(-16, 22)
+		]), scale)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-14, 4), Vector2(14, 4),
+			Vector2(12, 6),  Vector2(-12, 6)
+		]), Color(grn_d.r, grn_d.g, grn_d.b, 0.82))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(11, 6), Vector2(14, 4),
+			Vector2(16, 22), Vector2(12, 22)
+		]), Color(blk.r, blk.g, blk.b, 0.55))
+
+		var p_xs : Array = [-11.0, -5.5, 0.0, 5.5, 11.0]
+		var p_hs : Array = [3.5, 5.0, 6.5, 5.0, 3.5]
+		for _i in range(5):
+			var _px : float = p_xs[_i]
+			var _ph : float = p_hs[_i]
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(_px - 2, 4), Vector2(_px + 2, 4),
+				Vector2(_px + 1, 4 - _ph), Vector2(_px - 1, 4 - _ph)
+			]), Color(purp.r, purp.g, purp.b, 0.85))
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(_px - 1, 4), Vector2(_px + 1, 4),
+				Vector2(_px, 4 - _ph + 1.5)
+			]), Color(acid.r, acid.g, acid.b, 0.52))
+			draw_circle(Vector2(_px, 4 - _ph), 1.4, Color(acid_l.r, acid_l.g, acid_l.b, 0.78))
+		draw_line(Vector2(-14, 4), Vector2(14, 4), Color(acid.r, acid.g, acid.b, 0.42), 1.2)
+
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-10, -6),  Vector2(-28, -18),
+			Vector2(-30, -7),  Vector2(-26, 6),
+			Vector2(-12, 6)
+		]), Color(purp.r, purp.g, purp.b, 0.82))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-11, -5), Vector2(-24, -15),
+			Vector2(-26, -6), Vector2(-22, 4),
+			Vector2(-13, 4)
+		]), Color(purp_l.r, purp_l.g, purp_l.b, 0.28))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-11, -4), Vector2(-20, -11),
+			Vector2(-22, -4), Vector2(-17, 2)
+		]), Color(acid.r, acid.g, acid.b, 0.14))
+		draw_line(Vector2(-10, -6), Vector2(-28, -18), Color(grn_d.r, grn_d.g, grn_d.b, 0.72), 1.4)
+		draw_line(Vector2(-10, -6), Vector2(-30, -7),  Color(grn_d.r, grn_d.g, grn_d.b, 0.62), 1.0)
+		draw_line(Vector2(-10, -6), Vector2(-24, 5),   Color(grn_d.r, grn_d.g, grn_d.b, 0.55), 0.9)
+		draw_circle(Vector2(-28, -18), 2.5, blk)
+		draw_circle(Vector2(-30, -7),  2.0, blk)
+
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(10, -6),  Vector2(28, -18),
+			Vector2(30, -7),  Vector2(26, 6),
+			Vector2(12, 6)
+		]), Color(purp.r, purp.g, purp.b, 0.82))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(11, -5), Vector2(24, -15),
+			Vector2(26, -6), Vector2(22, 4),
+			Vector2(13, 4)
+		]), Color(purp_l.r, purp_l.g, purp_l.b, 0.28))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(11, -4), Vector2(20, -11),
+			Vector2(22, -4), Vector2(17, 2)
+		]), Color(acid.r, acid.g, acid.b, 0.14))
+		draw_line(Vector2(10, -6), Vector2(28, -18),  Color(grn_d.r, grn_d.g, grn_d.b, 0.72), 1.4)
+		draw_line(Vector2(10, -6), Vector2(30, -7),   Color(grn_d.r, grn_d.g, grn_d.b, 0.62), 1.0)
+		draw_line(Vector2(10, -6), Vector2(24, 5),    Color(grn_d.r, grn_d.g, grn_d.b, 0.55), 0.9)
+		draw_circle(Vector2(28, -18), 2.5, blk)
+		draw_circle(Vector2(30, -7),  2.0, blk)
+
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-13, -4), Vector2(13, -4),
+			Vector2(12, 4),   Vector2(-12, 4)
+		]), scale)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-12, 4), Vector2(-5, 4),
+			Vector2(-6, 13), Vector2(-14, 13)
+		]), grn_d)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(5, 4),   Vector2(12, 4),
+			Vector2(14, 13), Vector2(6, 13)
+		]), grn_d)
+		draw_arc(Vector2(-10, 8), 4.5, PI * 0.1, PI * 0.9, 8, Color(blk.r, blk.g, blk.b, 0.52), 1.5)
+		draw_arc(Vector2(10, 8),  4.5, PI * 0.1, PI * 0.9, 8, Color(blk.r, blk.g, blk.b, 0.52), 1.5)
+
+		var vs_pulse : float = 0.88 + pulse * 0.10
+		draw_circle(Vector2(-14, -2), 7.0 * vs_pulse, Color(purp.r, purp.g, purp.b, 0.88))
+		draw_circle(Vector2(-14, -2), 5.0 * vs_pulse, Color(purp_l.r, purp_l.g, purp_l.b, 0.62))
+		draw_circle(Vector2(-14, -2), 3.2 * vs_pulse, Color(acid.r, acid.g, acid.b, 0.58))
+		draw_circle(Vector2(-15, -3), 1.6,             Color(acid_l.r, acid_l.g, acid_l.b, 0.75))
+		draw_line(Vector2(-14, -2), Vector2(-18, 0),  Color(acid.r, acid.g, acid.b, 0.42), 0.9)
+		draw_line(Vector2(-14, -2), Vector2(-17, -6), Color(acid.r, acid.g, acid.b, 0.36), 0.9)
+		draw_line(Vector2(-14, -2), Vector2(-12, -6), Color(acid.r, acid.g, acid.b, 0.30), 0.8)
+		draw_circle(Vector2(14, -2),  7.0 * vs_pulse, Color(purp.r, purp.g, purp.b, 0.88))
+		draw_circle(Vector2(14, -2),  5.0 * vs_pulse, Color(purp_l.r, purp_l.g, purp_l.b, 0.62))
+		draw_circle(Vector2(14, -2),  3.2 * vs_pulse, Color(acid.r, acid.g, acid.b, 0.58))
+		draw_circle(Vector2(15, -3),  1.6,             Color(acid_l.r, acid_l.g, acid_l.b, 0.75))
+		draw_line(Vector2(14, -2), Vector2(18, 0),  Color(acid.r, acid.g, acid.b, 0.42), 0.9)
+		draw_line(Vector2(14, -2), Vector2(17, -6), Color(acid.r, acid.g, acid.b, 0.36), 0.9)
+		draw_line(Vector2(14, -2), Vector2(12, -6), Color(acid.r, acid.g, acid.b, 0.30), 0.8)
+		draw_circle(Vector2(0, 2), 4.0, Color(purp.r, purp.g, purp.b, 0.72))
+		draw_circle(Vector2(0, 2), 2.5, Color(acid.r, acid.g, acid.b, 0.52))
+
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-12, -4), Vector2(12, -4),
+			Vector2(10, -14), Vector2(-10, -14)
+		]), grn)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-12, -4), Vector2(12, -4),
+			Vector2(10, -5),  Vector2(-10, -5)
+		]), grn_l)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(8, -14), Vector2(12, -4),
+			Vector2(10, -5), Vector2(7, -12)
+		]), grn_d)
+		for _i in range(2):
+			for _j in range(3):
+				draw_arc(Vector2(float(_j - 1) * 7.0, -7.5 + float(_i) * 5.0),
+					3.0, PI * 0.1, PI * 0.9, 6, Color(blk.r, blk.g, blk.b, 0.46), 1.2)
+		draw_line(Vector2(-8, -10), Vector2(-5, -5), Color(acid.r, acid.g, acid.b, 0.52), 0.9)
+		draw_line(Vector2(5, -11),  Vector2(8, -6),  Color(acid.r, acid.g, acid.b, 0.46), 0.9)
+		draw_line(Vector2(-12, -4), Vector2(12, -4), Color(acid.r, acid.g, acid.b, 0.28), 1.0)
+
+		var sp_xs : Array = [-12.0, -8.0, -4.0, 0.0, 4.0, 8.0, 12.0]
+		var sp_hs : Array = [4.5, 6.0, 7.5, 10.0, 7.5, 6.0, 4.5]
+		for _i in range(7):
+			var _spx : float = sp_xs[_i]
+			var _sph : float = sp_hs[_i]
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(_spx - 2, -14), Vector2(_spx + 2, -14),
+				Vector2(_spx + 1, -14 - _sph), Vector2(_spx - 1, -14 - _sph)
+			]), grn_d)
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(_spx - 1, -14), Vector2(_spx + 1, -14),
+				Vector2(_spx, -14 - _sph + 1.5)
+			]), acid)
+			draw_circle(Vector2(_spx, -14 - _sph), 1.5, Color(acid_l.r, acid_l.g, acid_l.b, 0.85))
+
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-7, -14), Vector2(7, -14),
+			Vector2(5, -20),  Vector2(-5, -20)
+		]), grn)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-7, -14), Vector2(7, -14),
+			Vector2(5, -15),  Vector2(-5, -15)
+		]), grn_l)
+		draw_arc(Vector2(-4, -17), 2.0, PI * 0.2, PI * 0.85, 5, Color(blk.r, blk.g, blk.b, 0.42), 1.0)
+		draw_arc(Vector2(4, -17),  2.0, PI * 0.2, PI * 0.85, 5, Color(blk.r, blk.g, blk.b, 0.42), 1.0)
+
+		draw_circle(Vector2(0, -24), 11.0, scale)
+		draw_circle(Vector2(0, -24), 9.8,  grn)
+		draw_circle(Vector2(-1, -25), 7.8, grn.lightened(0.08))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-11, -25), Vector2(11, -25),
+			Vector2(9, -20),   Vector2(-9, -20)
+		]), grn_d)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-11, -25), Vector2(11, -25),
+			Vector2(9, -24),   Vector2(-9, -24)
+		]), Color(grn_l.r, grn_l.g, grn_l.b, 0.38))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(7, -25), Vector2(11, -25),
+			Vector2(9, -20), Vector2(6, -20)
+		]), scale)
+		draw_arc(Vector2(-5, -23), 3.2, PI * 0.1, PI * 0.8, 6, Color(blk.r, blk.g, blk.b, 0.40), 1.2)
+		draw_arc(Vector2(4, -22),  2.6, PI * 0.2, PI * 0.8, 5, Color(blk.r, blk.g, blk.b, 0.38), 1.0)
+		draw_line(Vector2(-8, -23), Vector2(-5, -19), Color(acid.r, acid.g, acid.b, 0.48), 0.9)
+
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-6, -29), Vector2(-3, -29),
+			Vector2(-1, -36), Vector2(-6, -40), Vector2(-9, -34)
+		]), grn_d)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-6, -29), Vector2(-3, -29),
+			Vector2(-2, -35), Vector2(-6, -39), Vector2(-8, -33)
+		]), grn)
+		draw_line(Vector2(-5, -29), Vector2(-7, -34), Color(acid.r, acid.g, acid.b, 0.40), 0.9)
+		draw_circle(Vector2(-6, -39), 2.0, Color(acid.r, acid.g, acid.b, 0.78))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-3, -28), Vector2(-1, -28), Vector2(-2, -33)
+		]), acid)
+		draw_circle(Vector2(-2, -33), 1.3, Color(acid_l.r, acid_l.g, acid_l.b, 0.72))
+
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(3, -29), Vector2(6, -29),
+			Vector2(9, -34), Vector2(6, -40), Vector2(1, -36)
+		]), grn_d)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(3, -29), Vector2(6, -29),
+			Vector2(8, -33), Vector2(6, -39), Vector2(2, -35)
+		]), grn)
+		draw_line(Vector2(5, -29), Vector2(7, -34), Color(acid.r, acid.g, acid.b, 0.40), 0.9)
+		draw_circle(Vector2(6, -39), 2.0, Color(acid.r, acid.g, acid.b, 0.78))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(1, -28), Vector2(3, -28), Vector2(2, -33)
+		]), acid)
+		draw_circle(Vector2(2, -33), 1.3, Color(acid_l.r, acid_l.g, acid_l.b, 0.72))
+
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-8, -20), Vector2(8, -20),
+			Vector2(7, -16),  Vector2(-7, -16)
+		]), grn_d)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-8, -20), Vector2(8, -20),
+			Vector2(7, -19),  Vector2(-7, -19)
+		]), Color(grn_l.r, grn_l.g, grn_l.b, 0.36))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-7, -16), Vector2(7, -16),
+			Vector2(8, -13),  Vector2(-8, -13)
+		]), scale)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-6, -16), Vector2(6, -16),
+			Vector2(7, -14),  Vector2(-7, -14)
+		]), Color(grn_d.r * 0.7, grn_d.g * 0.7, grn_d.b * 0.7))
+		for _fi in range(3):
+			var _fx : float = float(_fi - 1) * 4.5
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(_fx - 1.8, -16), Vector2(_fx + 1.8, -16),
+				Vector2(_fx, -12.5)
+			]), Color(0.90, 1.0, 0.86, 0.95))
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(_fx - 0.9, -16), Vector2(_fx + 0.9, -16),
+				Vector2(_fx, -13.5)
+			]), Color(acid_l.r, acid_l.g, acid_l.b, 0.58))
+		draw_line(Vector2(-4.5, -12.5), Vector2(-4.5, -9),  Color(acid.r, acid.g, acid.b, drip_a), 1.3)
+		draw_circle(Vector2(-4.5, -9),  1.6, Color(acid.r, acid.g, acid.b, drip_a))
+		draw_line(Vector2(0, -12.5),    Vector2(0, -10),     Color(acid.r, acid.g, acid.b, drip_a * 0.88), 1.1)
+		draw_circle(Vector2(0, -10),    1.3, Color(acid.r, acid.g, acid.b, drip_a * 0.82))
+		draw_line(Vector2(4.5, -12.5),  Vector2(4.5, -9.5), Color(acid.r, acid.g, acid.b, drip_a * 0.72), 1.0)
+		draw_circle(Vector2(4.5, -9.5), 1.1, Color(acid.r, acid.g, acid.b, drip_a * 0.65))
+
+		draw_circle(Vector2(-5, -23), 4.2, Color(acid.r, acid.g, acid.b, 0.32))
+		draw_circle(Vector2(-5, -23), 3.4, acid)
+		draw_circle(Vector2(-5, -23), 1.8, blk)
+		draw_circle(Vector2( 5, -23), 4.2, Color(acid.r, acid.g, acid.b, 0.32))
+		draw_circle(Vector2( 5, -23), 3.4, acid)
+		draw_circle(Vector2( 5, -23), 1.8, blk)
+		draw_circle(Vector2(-5.6, -24), 1.1, Color(1, 1, 1, 0.72))
+
+		for _i in range(3):
+			var _ft : float = fmod(0.0 + float(_i) * 0.33, 1.0)
+			var _fy : float = -26 - _ft * 14
+			var _fa : float = (1.0 - _ft) * 0.42
+			draw_circle(Vector2(float(_i - 1) * 4.5, _fy), 2.5 + _ft * 3.0, Color(acid.r, acid.g, acid.b, _fa))
+
+		for _i in range(4):
+			var _oa  : float = orb_rot + float(_i) * TAU / 4.0
+			var _ox  : float = cos(_oa) * 20.0
+			var _oy  : float = sin(_oa) * 9.0 - 6.0
+			var _oa2 : float = 0.52 + pulse * 0.18
+			draw_circle(Vector2(_ox, _oy), 5.5, Color(purp.r, purp.g, purp.b, _oa2 * 0.52))
+			draw_circle(Vector2(_ox, _oy), 3.8, Color(acid.r, acid.g, acid.b, _oa2))
+			draw_circle(Vector2(_ox, _oy), 1.8, Color(acid_l.r, acid_l.g, acid_l.b, _oa2 * 0.85))
+			draw_arc(Vector2(_ox, _oy), 3.8, 0, TAU, 6, Color(grn_d.r, grn_d.g, grn_d.b, _oa2 * 0.50), 0.9)
+
+		for _i in range(2):
+			var _sa  : float = -rune_rot * 0.75 + float(_i) * PI
+			var _scx : float = cos(_sa) * 27.0
+			var _scy : float = sin(_sa) * 12.0 - 4.0
+			for _j in range(5):
+				var _sr  : float = 2.2 - float(_j) * 0.32
+				var _sbx : float = _scx + float(_j) * 2.0
+				var _sby : float = _scy + sin(float(_j) * 0.9 + 0.0 * 4.5 + float(_i) * PI) * 2.5
+				draw_circle(Vector2(_sbx, _sby), maxf(0.5, _sr), Color(acid.r, acid.g, acid.b, 0.68 - float(_j) * 0.10))
+			draw_circle(Vector2(_scx, _scy), 2.8, grn_l)
+			draw_circle(Vector2(_scx - 1.0, _scy - 0.8), 1.0, acid)
+
+		for _i in range(3):
+			var _ca  : float = rune_rot + float(_i) * TAU / 3.0
+			var _ctx : float = cos(_ca) * 31.0
+			var _cty : float = sin(_ca) * 13.0 - 4.0
+			var _ca2 : float = 0.44 + pulse * 0.16
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(_ctx, _cty - 7),   Vector2(_ctx - 3, _cty + 1),
+				Vector2(_ctx, _cty + 3),   Vector2(_ctx + 3, _cty + 1)
+			]), Color(purp.r, purp.g, purp.b, _ca2))
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(_ctx, _cty - 5.5), Vector2(_ctx - 2, _cty + 0),
+				Vector2(_ctx, _cty + 2),   Vector2(_ctx + 2, _cty + 0)
+			]), Color(acid.r, acid.g, acid.b, _ca2 + 0.14))
+			draw_circle(Vector2(_ctx, _cty - 3.5), 1.8, Color(acid_l.r, acid_l.g, acid_l.b, _ca2 * 0.88))
+
+		var ga : float = 0.12 + pulse * 0.05
+		draw_arc(Vector2(0, -10), 32, 0, TAU, 36, Color(grn_l.r, grn_l.g, grn_l.b, ga), 3.5)
 
 	func _pv_frost_cannon() -> void:
-		var ice  := Color(0.55, 0.90, 1.00); var ice2 := Color(0.85, 0.97, 1.00)
-		var dark := Color(0.25, 0.45, 0.65); var gold := Color(0.90, 0.78, 0.22)
-		# Wheels
-		draw_circle(Vector2(-16,18),9,dark.darkened(0.2)); draw_circle(Vector2(-16,18),7,dark)
-		draw_circle(Vector2(16,18),9,dark.darkened(0.2));  draw_circle(Vector2(16,18),7,dark)
-		draw_line(Vector2(-16,18),Vector2(16,18),dark.darkened(0.2),3.5)
-		# Carriage
-		draw_colored_polygon(PackedVector2Array([Vector2(-14,2),Vector2(14,2),Vector2(16,16),Vector2(-16,16)]),dark)
-		# Barrel
-		draw_line(Vector2(-4,-4),Vector2(20,-20),dark.darkened(0.2),18)
-		draw_line(Vector2(-4,-4),Vector2(20,-20),ice,14)
-		draw_line(Vector2(-4,-4),Vector2(20,-20),ice2,5)
-		draw_circle(Vector2(20,-20),9,ice)
-		draw_circle(Vector2(20,-20),4,ice2)
-		# Frost crystals on barrel
-		for i in range(3):
-			var t := 0.25 + i * 0.25
-			var bp := Vector2(-4 + t*24, -4 - t*16)
-			draw_colored_polygon(PackedVector2Array([bp+Vector2(-3,0),bp+Vector2(0,-6),bp+Vector2(3,0)]),ice2)
-		# Gold ring
-		draw_arc(Vector2(-4,-4),7,-PI*0.6,PI*0.6,10,gold,2.0)
+		var ice    := Color(0.42, 0.78, 1.00)
+		var ice_l  := Color(0.76, 0.95, 1.00)
+		var ice_d  := Color(0.20, 0.46, 0.78)
+		var cyan   := Color(0.18, 0.95, 1.00)
+		var cyan_l := Color(0.68, 1.00, 1.00)
+		var armor  := Color(0.28, 0.38, 0.54)
+		var armor_l:= Color(0.44, 0.56, 0.72)
+		var armor_d:= Color(0.14, 0.22, 0.36)
+		var silver := Color(0.60, 0.72, 0.84)
+		var rune   := Color(0.20, 0.78, 1.00)
+
+		var pulse     := 0.0
+		var shard_rot := 0.0
+		var rune_rot  := 0.0
+		var b_recoil  := 0.0
+
+		var b_left_base   := Vector2(-7, 2)
+		var b_left_tip    := Vector2(-24 + b_recoil * 0.8, -20)
+		var b_center_base := Vector2(0, -2)
+		var b_center_tip  := Vector2(0, -32 + b_recoil)
+		var b_right_base  := Vector2(7, 2)
+		var b_right_tip   := Vector2(24 - b_recoil * 0.8, -20)
+
+		draw_circle(Vector2(0, 24), 22, Color(0, 0, 0, 0.24))
+
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-22, 8), Vector2(-27, 6),
+			Vector2(-28, -2), Vector2(-24, -12), Vector2(-20, -2)
+		]), ice_d)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-22, 6), Vector2(-26, 5),
+			Vector2(-27, -1), Vector2(-24, -10), Vector2(-21, -1)
+		]), ice)
+		draw_line(Vector2(-25, 4), Vector2(-24, -9), Color(cyan_l.r, cyan_l.g, cyan_l.b, 0.55), 1.0)
+		draw_circle(Vector2(-24, -8), 1.8, Color(cyan.r, cyan.g, cyan.b, 0.75))
+
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-16, 10), Vector2(-21, 8),
+			Vector2(-22, 0), Vector2(-18, -10), Vector2(-14, 0)
+		]), ice_d)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-16, 8), Vector2(-20, 7),
+			Vector2(-21, 0), Vector2(-18, -8), Vector2(-15, 0)
+		]), ice)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-18, 5), Vector2(-19, 1), Vector2(-18, -5)
+		]), Color(cyan_l.r, cyan_l.g, cyan_l.b, 0.52))
+		draw_circle(Vector2(-18, -7), 1.5, Color(cyan.r, cyan.g, cyan.b, 0.72))
+
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-13, 10), Vector2(-17, 9),
+			Vector2(-17, 3), Vector2(-15, -5), Vector2(-12, 3)
+		]), ice_d)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-13, 9), Vector2(-16, 8),
+			Vector2(-16, 3), Vector2(-15, -4), Vector2(-12.5, 3)
+		]), ice.lightened(0.08))
+		draw_circle(Vector2(-15, -3), 1.2, Color(cyan.r, cyan.g, cyan.b, 0.65))
+
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(22, 8), Vector2(27, 6),
+			Vector2(28, -2), Vector2(24, -12), Vector2(20, -2)
+		]), ice_d)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(22, 6), Vector2(26, 5),
+			Vector2(27, -1), Vector2(24, -10), Vector2(21, -1)
+		]), ice)
+		draw_line(Vector2(25, 4), Vector2(24, -9), Color(cyan_l.r, cyan_l.g, cyan_l.b, 0.55), 1.0)
+		draw_circle(Vector2(24, -8), 1.8, Color(cyan.r, cyan.g, cyan.b, 0.75))
+
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(16, 10), Vector2(21, 8),
+			Vector2(22, 0), Vector2(18, -10), Vector2(14, 0)
+		]), ice_d)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(16, 8), Vector2(20, 7),
+			Vector2(21, 0), Vector2(18, -8), Vector2(15, 0)
+		]), ice)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(18, 5), Vector2(19, 1), Vector2(18, -5)
+		]), Color(cyan_l.r, cyan_l.g, cyan_l.b, 0.52))
+		draw_circle(Vector2(18, -7), 1.5, Color(cyan.r, cyan.g, cyan.b, 0.72))
+
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(13, 10), Vector2(17, 9),
+			Vector2(17, 3), Vector2(15, -5), Vector2(12, 3)
+		]), ice_d)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(13, 9), Vector2(16, 8),
+			Vector2(16, 3), Vector2(15, -4), Vector2(12.5, 3)
+		]), ice.lightened(0.08))
+		draw_circle(Vector2(15, -3), 1.2, Color(cyan.r, cyan.g, cyan.b, 0.65))
+
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-20, 10), Vector2(20, 10),
+			Vector2(22, 22),  Vector2(-22, 22)
+		]), armor_d)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-20, 10), Vector2(20, 10),
+			Vector2(16, 7),   Vector2(-16, 7)
+		]), armor)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(15, 10), Vector2(20, 10),
+			Vector2(22, 22), Vector2(17, 22)
+		]), Color(armor_d.r * 0.80, armor_d.g * 0.80, armor_d.b * 0.80))
+		draw_line(Vector2(-20, 10), Vector2(20, 10), silver, 2.0)
+
+		for _i in range(5):
+			var _bx := float(_i - 2) * 8.0
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(_bx - 3, 10), Vector2(_bx + 3, 10),
+				Vector2(_bx + 2, 7),  Vector2(_bx - 2, 7)
+			]), Color(ice_d.r, ice_d.g, ice_d.b, 0.72))
+			draw_line(Vector2(_bx - 2.5, 10), Vector2(_bx, 7.5), Color(ice_l.r, ice_l.g, ice_l.b, 0.50), 0.8)
+
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-20, 10), Vector2(-16, 10),
+			Vector2(-18, 22), Vector2(-22, 22)
+		]), Color(armor_d.r, armor_d.g, armor_d.b, 0.90))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(16, 10),  Vector2(20, 10),
+			Vector2(22, 22),  Vector2(18, 22)
+		]), Color(armor_d.r, armor_d.g, armor_d.b, 0.90))
+		draw_line(Vector2(-20, 10), Vector2(-22, 22), silver, 1.2)
+		draw_line(Vector2( 20, 10), Vector2( 22, 22), silver, 1.2)
+
+		var ch_a := 0.70
+		draw_line(Vector2(-20, 12), Vector2(-12, 10), Color(silver.r, silver.g, silver.b, ch_a), 1.8)
+		draw_line(Vector2(-12, 10), Vector2(  0, 13), Color(silver.r, silver.g, silver.b, ch_a), 1.8)
+		draw_line(Vector2(  0, 13), Vector2( 12, 10), Color(silver.r, silver.g, silver.b, ch_a), 1.8)
+		draw_line(Vector2( 12, 10), Vector2( 20, 12), Color(silver.r, silver.g, silver.b, ch_a), 1.8)
+		for _cx in [-16.0, -6.0, 6.0, 16.0]:
+			draw_circle(Vector2(_cx, 11), 1.5, Color(silver.r, silver.g, silver.b, ch_a + 0.10))
+
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-14, -6), Vector2(14, -6),
+			Vector2(16, 2),   Vector2(14, 10),
+			Vector2(-14, 10), Vector2(-16, 2)
+		]), armor)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-14, -6), Vector2(14, -6),
+			Vector2(12, -4),  Vector2(-12, -4)
+		]), armor_l)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(10, -6), Vector2(14, -6),
+			Vector2(16, 2),  Vector2(14, 10),
+			Vector2(10, 10)
+		]), armor_d)
+		draw_line(Vector2(-14, -6), Vector2(14, -6), silver, 1.5)
+		draw_line(Vector2(-14, 10), Vector2(14, 10), silver, 1.2)
+
+		for _i in range(6):
+			var _ra := float(_i) * TAU / 6.0 + rune_rot
+			var _rx := cos(_ra) * 9.0
+			var _ry := sin(_ra) * 5.5 + 2.0
+			var _runa := 0.50 + pulse * 0.22
+			draw_circle(Vector2(_rx, _ry), 1.8, Color(rune.r, rune.g, rune.b, _runa))
+			draw_circle(Vector2(_rx, _ry), 0.9, Color(1.0, 1.0, 1.0, _runa * 0.75))
+
+		draw_circle(Vector2(-15, 2), 4.0, armor_d)
+		draw_circle(Vector2(-15, 2), 2.8, Color(ice.r, ice.g, ice.b, 0.72))
+		draw_circle(Vector2( 15, 2), 4.0, armor_d)
+		draw_circle(Vector2( 15, 2), 2.8, Color(ice.r, ice.g, ice.b, 0.72))
+		var vent_a := 0.28 + pulse * 0.14
+		draw_circle(Vector2(-20, 1), 3.5, Color(ice_l.r, ice_l.g, ice_l.b, vent_a))
+		draw_circle(Vector2(-23, 0), 2.5, Color(ice_l.r, ice_l.g, ice_l.b, vent_a * 0.60))
+		draw_circle(Vector2( 20, 1), 3.5, Color(ice_l.r, ice_l.g, ice_l.b, vent_a))
+		draw_circle(Vector2( 23, 0), 2.5, Color(ice_l.r, ice_l.g, ice_l.b, vent_a * 0.60))
+
+		var cr := 7.5 + pulse * 1.2
+		draw_circle(Vector2(0, 2), cr + 5.0, Color(cyan.r, cyan.g, cyan.b, 0.14 + pulse * 0.06))
+		draw_circle(Vector2(0, 2), cr + 2.0, Color(cyan.r, cyan.g, cyan.b, 0.30))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(0, 2 - cr),  Vector2(-cr * 0.6, 2),
+			Vector2(0, 2 + cr),  Vector2(cr * 0.6, 2)
+		]), Color(ice_d.r, ice_d.g, ice_d.b, 0.90))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(0, 2 - cr),  Vector2(-cr * 0.6, 2),
+			Vector2(0, 2 + cr),  Vector2(cr * 0.6, 2)
+		]), Color(ice.r, ice.g, ice.b, 0.82))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(0, 2 - cr), Vector2(-cr * 0.6, 2),
+			Vector2(0, 2 + cr * 0.4)
+		]), Color(cyan_l.r, cyan_l.g, cyan_l.b, 0.55))
+		draw_circle(Vector2(0, 2), cr * 0.45, Color(cyan.r, cyan.g, cyan.b, 0.88))
+		draw_circle(Vector2(0, 2), cr * 0.25, Color(1.0, 1.0, 1.0, 0.90))
+		draw_circle(Vector2(-1, 1), cr * 0.12, Color(1.0, 1.0, 1.0, 0.95))
+
+		draw_circle(b_left_base, 7.0, armor_d)
+		draw_circle(b_left_base, 5.5, armor)
+		draw_circle(b_left_base, 4.0, ice_d)
+		draw_circle(b_left_base, 2.5, Color(cyan.r, cyan.g, cyan.b, 0.70))
+		draw_line(b_left_base, b_left_tip, armor_d, 11.0)
+		draw_line(b_left_base, b_left_tip, ice_d,   8.0)
+		draw_line(b_left_base, b_left_tip, ice,     5.0)
+		draw_line(b_left_base, b_left_tip, Color(ice_l.r, ice_l.g, ice_l.b, 0.70), 1.8)
+		for _i in range(3):
+			var _t := 0.25 + float(_i) * 0.22
+			var _rp := b_left_base.lerp(b_left_tip, _t)
+			draw_circle(_rp, 7.5, armor_d)
+			draw_circle(_rp, 6.0, ice_d)
+			draw_line(_rp + Vector2(-5, 0), _rp + Vector2(5, 0), Color(silver.r, silver.g, silver.b, 0.60), 1.2)
+		draw_circle(b_left_tip, 10.0, armor_d)
+		draw_circle(b_left_tip, 8.0,  ice_d)
+		draw_circle(b_left_tip, 6.5,  ice)
+		draw_circle(b_left_tip, 4.5,  Color(cyan.r, cyan.g, cyan.b, 0.80 + pulse * 0.15))
+		draw_circle(b_left_tip, 2.5,  Color(ice_l.r, ice_l.g, ice_l.b, 0.90))
+		draw_circle(b_left_tip + Vector2(-1, -1), 1.2, Color(1, 1, 1, 0.88))
+		draw_arc(b_left_tip, 8.5, 0, TAU, 16, Color(rune.r, rune.g, rune.b, 0.65), 1.5)
+
+		draw_circle(b_right_base, 7.0, armor_d)
+		draw_circle(b_right_base, 5.5, armor)
+		draw_circle(b_right_base, 4.0, ice_d)
+		draw_circle(b_right_base, 2.5, Color(cyan.r, cyan.g, cyan.b, 0.70))
+		draw_line(b_right_base, b_right_tip, armor_d, 11.0)
+		draw_line(b_right_base, b_right_tip, ice_d,   8.0)
+		draw_line(b_right_base, b_right_tip, ice,     5.0)
+		draw_line(b_right_base, b_right_tip, Color(ice_l.r, ice_l.g, ice_l.b, 0.70), 1.8)
+		for _i in range(3):
+			var _t := 0.25 + float(_i) * 0.22
+			var _rp := b_right_base.lerp(b_right_tip, _t)
+			draw_circle(_rp, 7.5, armor_d)
+			draw_circle(_rp, 6.0, ice_d)
+			draw_line(_rp + Vector2(-5, 0), _rp + Vector2(5, 0), Color(silver.r, silver.g, silver.b, 0.60), 1.2)
+		draw_circle(b_right_tip, 10.0, armor_d)
+		draw_circle(b_right_tip, 8.0,  ice_d)
+		draw_circle(b_right_tip, 6.5,  ice)
+		draw_circle(b_right_tip, 4.5,  Color(cyan.r, cyan.g, cyan.b, 0.80 + pulse * 0.15))
+		draw_circle(b_right_tip, 2.5,  Color(ice_l.r, ice_l.g, ice_l.b, 0.90))
+		draw_circle(b_right_tip + Vector2(1, -1), 1.2, Color(1, 1, 1, 0.88))
+		draw_arc(b_right_tip, 8.5, 0, TAU, 16, Color(rune.r, rune.g, rune.b, 0.65), 1.5)
+
+		draw_circle(b_center_base, 9.0, armor_d)
+		draw_circle(b_center_base, 7.5, armor)
+		draw_circle(b_center_base, 5.5, ice_d)
+		draw_circle(b_center_base, 3.5, Color(cyan.r, cyan.g, cyan.b, 0.80))
+		draw_line(b_center_base, b_center_tip, armor_d, 15.0)
+		draw_line(b_center_base, b_center_tip, ice_d,   11.0)
+		draw_line(b_center_base, b_center_tip, ice,     7.5)
+		draw_line(b_center_base, b_center_tip, Color(ice_l.r, ice_l.g, ice_l.b, 0.72), 2.5)
+		for _i in range(4):
+			var _t := 0.18 + float(_i) * 0.20
+			var _rp := b_center_base.lerp(b_center_tip, _t)
+			draw_circle(_rp, 9.0, armor_d)
+			draw_circle(_rp, 7.5, ice_d)
+			draw_line(_rp + Vector2(-6, 0), _rp + Vector2(6, 0), Color(silver.r, silver.g, silver.b, 0.65), 1.5)
+		draw_circle(b_center_tip, 13.0, armor_d)
+		draw_circle(b_center_tip, 11.0, ice_d)
+		draw_circle(b_center_tip, 9.0,  ice)
+		draw_circle(b_center_tip, 7.0,  Color(cyan.r, cyan.g, cyan.b, 0.82 + pulse * 0.14))
+		draw_circle(b_center_tip, 4.5,  Color(ice_l.r, ice_l.g, ice_l.b, 0.92))
+		draw_circle(b_center_tip, 2.5,  Color(1.0, 1.0, 1.0, 0.92))
+		draw_circle(b_center_tip + Vector2(-1.5, -1.5), 1.5, Color(1, 1, 1, 0.95))
+		draw_arc(b_center_tip, 11.5, 0, TAU, 20, Color(rune.r, rune.g, rune.b, 0.75), 2.0)
+		draw_arc(b_center_tip, 8.0,  0, TAU, 16, Color(cyan.r,  cyan.g,  cyan.b,  0.45 + pulse * 0.20), 1.2)
+
+		for _i in range(3):
+			var _sa  := shard_rot + float(_i) * TAU / 3.0
+			var _sx  := cos(_sa) * 22.0
+			var _sy  := sin(_sa) * 10.0 - 2.0
+			var _sca := 0.55 + pulse * 0.20
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(_sx, _sy - 5), Vector2(_sx - 3, _sy + 1),
+				Vector2(_sx, _sy + 3), Vector2(_sx + 3, _sy + 1)
+			]), Color(ice_d.r, ice_d.g, ice_d.b, _sca))
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(_sx, _sy - 4), Vector2(_sx - 2, _sy + 1),
+				Vector2(_sx, _sy + 2), Vector2(_sx + 2, _sy + 1)
+			]), Color(ice_l.r, ice_l.g, ice_l.b, _sca))
+			draw_circle(Vector2(_sx, _sy - 2), 1.2, Color(cyan.r, cyan.g, cyan.b, _sca * 0.80))
+
+		for _i in range(3):
+			var _ra  := -rune_rot * 1.2 + float(_i) * TAU / 3.0
+			var _rx  := cos(_ra) * 30.0
+			var _ry  := sin(_ra) * 13.0 - 2.0
+			var _rua := 0.30 + pulse * 0.12
+			draw_arc(Vector2(_rx, _ry), 4.5, 0, TAU, 6, Color(rune.r, rune.g, rune.b, _rua + 0.10), 1.5)
+			draw_line(Vector2(_rx - 2.5, _ry), Vector2(_rx + 2.5, _ry), Color(ice_l.r, ice_l.g, ice_l.b, _rua + 0.20), 0.9)
+			draw_line(Vector2(_rx, _ry - 2.5), Vector2(_rx, _ry + 2.5), Color(ice_l.r, ice_l.g, ice_l.b, _rua + 0.20), 0.9)
+			draw_circle(Vector2(_rx, _ry), 1.5, Color(cyan.r, cyan.g, cyan.b, _rua + 0.15))
+
+		var fa2 := 0.10 + pulse * 0.04
+		draw_arc(Vector2(0, 0), 34, 0, TAU, 40, Color(ice.r, ice.g, ice.b, fa2), 3.0)
 
 	func _pv_arcane_overlord() -> void:
-		var orng := Color(0.90, 0.42, 0.12); var purp := Color(0.85, 0.30, 0.95)
-		var gold := Color(0.90, 0.78, 0.22); var wht  := Color(1.00, 0.95, 0.85)
-		# Floating core
-		draw_circle(Vector2(0,-6),13,orng.darkened(0.3))
-		draw_circle(Vector2(0,-6),10,orng)
-		draw_circle(Vector2(0,-6),6,Color(1,0.75,0.40))
-		draw_circle(Vector2(-2,-8),3,wht)
-		# Arcane rings
-		draw_arc(Vector2(0,-6),16,0,TAU,20,Color(purp.r,purp.g,purp.b,0.7),2.5)
-		draw_arc(Vector2(0,-6),20,-PI*0.4,PI*0.4,10,Color(gold.r,gold.g,gold.b,0.5),1.5)
-		# Flame tendrils
-		for i in range(4):
-			var ang := i * TAU / 4.0 + PI * 0.25
-			var ep  := Vector2(cos(ang)*18 + 0, sin(ang)*14 - 6)
-			draw_line(Vector2(0,-6),ep,Color(orng.r,orng.g,orng.b,0.8),2.5)
-			draw_circle(ep,3,Color(purp.r,purp.g,purp.b,0.6))
-		# Base pillar
-		draw_colored_polygon(PackedVector2Array([Vector2(-5,6),Vector2(5,6),Vector2(6,22),Vector2(-6,22)]),gold.darkened(0.3))
-		draw_rect(Rect2(-8,4,16,6),gold.darkened(0.2))
+		var pink   := Color(1.00, 0.28, 0.72)
+		var pink_l := Color(1.00, 0.70, 0.92)
+		var purp   := Color(0.62, 0.12, 0.95)
+		var purp_l := Color(0.82, 0.50, 1.00)
+		var blue   := Color(0.28, 0.52, 1.00)
+		var white  := Color(1.00, 0.95, 1.00)
+		var gold   := Color(0.90, 0.72, 0.22)
+
+		var pulse    := 0.0
+		var ring_rot := 0.0
+		var orb_rot  := 0.0
+
+		draw_circle(Vector2(0, 24), 14, Color(0, 0, 0, 0.18))
+
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-5, 6), Vector2(5, 6),
+			Vector2(6, 22), Vector2(-6, 22)
+		]), Color(purp.r * 0.4, purp.g * 0.4, purp.b * 0.4))
+		draw_rect(Rect2(-8, 4, 16, 6), Color(purp.r * 0.5, purp.g * 0.5, purp.b * 0.5))
+		draw_line(Vector2(-8, 4), Vector2(8, 4), Color(pink.r, pink.g, pink.b, 0.60), 1.2)
+
+		for _i in range(4):
+			var _ox : float = ([-16.0, 16.0, -16.0, 16.0])[_i]
+			var _oy : float = ([-4.0, -4.0, 8.0, 8.0])[_i]
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(_ox - 2.5, _oy - 14), Vector2(_ox + 2.5, _oy - 14),
+				Vector2(_ox + 3.0, _oy + 4),  Vector2(_ox - 3.0, _oy + 4)
+			]), Color(purp.r * 0.55, purp.g * 0.55, purp.b * 0.55))
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(_ox - 2.5, _oy - 14), Vector2(_ox + 2.5, _oy - 14),
+				Vector2(_ox + 1.5, _oy - 12), Vector2(_ox - 1.5, _oy - 12)
+			]), Color(purp_l.r * 0.7, purp_l.g * 0.7, purp_l.b * 0.7))
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(_ox - 2.5, _oy - 14), Vector2(_ox + 2.5, _oy - 14),
+				Vector2(_ox, _oy - 20)
+			]), purp_l)
+			var _opa := 0.62 + pulse * 0.20
+			draw_circle(Vector2(_ox, _oy - 12), 2.5, Color(pink.r, pink.g, pink.b, _opa))
+			draw_circle(Vector2(_ox, _oy - 12), 1.5, Color(1, 1, 1, _opa * 0.70))
+			draw_line(Vector2(_ox, _oy - 11), Vector2(0, -6), Color(pink.r, pink.g, pink.b, 0.28), 0.8)
+
+		var cy := -6.0 + sin(0.0 * 2.2) * 2.0
+		var cr  := 13.0 + pulse * 1.0
+		draw_circle(Vector2(0, cy), cr + 6.0, Color(purp.r, purp.g, purp.b, 0.16 + pulse * 0.06))
+		draw_circle(Vector2(0, cy), cr,        Color(pink.r, pink.g, pink.b, 0.80))
+		draw_circle(Vector2(0, cy), cr - 3.0,  Color(purp_l.r, purp_l.g, purp_l.b, 0.85))
+		draw_circle(Vector2(0, cy), cr - 7.0,  Color(pink_l.r, pink_l.g, pink_l.b, 0.88))
+		draw_circle(Vector2(0, cy), cr - 10.0, Color(1.00, 0.95, 1.00, 0.90))
+		draw_circle(Vector2(-2, cy - 2), 3.5, Color(1, 1, 1, 0.85))
+
+		draw_arc(Vector2(0, cy), cr + 4,       ring_rot,         ring_rot + TAU,         24, Color(pink.r, pink.g, pink.b, 0.70), 2.5)
+		draw_arc(Vector2(0, cy), cr + 8,       ring_rot * 0.7,   ring_rot * 0.7 + TAU,   28, Color(purp.r, purp.g, purp.b, 0.55), 2.0)
+		draw_arc(Vector2(0, cy), cr + 12,      -ring_rot * 0.5,  -ring_rot * 0.5 + TAU,  32, Color(blue.r, blue.g, blue.b, 0.40), 1.5)
+
+		for _i in range(4):
+			var _oa := orb_rot + float(_i) * TAU / 4.0
+			var _nx := cos(_oa) * (cr + 12)
+			var _ny := sin(_oa) * (cr + 12) + cy - 0.0
+			var _na := 0.55 + pulse * 0.18
+			draw_circle(Vector2(_nx, _ny), 4.0, Color(purp_l.r, purp_l.g, purp_l.b, _na * 0.60))
+			draw_circle(Vector2(_nx, _ny), 2.5, Color(pink.r, pink.g, pink.b, _na + 0.10))
+			draw_circle(Vector2(_nx, _ny), 1.2, Color(1, 1, 1, _na + 0.20))
+
+		for _i in range(4):
+			var _ra := -orb_rot * 0.4 + float(_i) * TAU / 4.0
+			var _rx := cos(_ra) * 28.0
+			var _ry := sin(_ra) * 12.0 + 0.0 - 6.0
+			var _rua := 0.28 + pulse * 0.10
+			draw_arc(Vector2(_rx, _ry), 4.0, 0, TAU, 8, Color(pink_l.r, pink_l.g, pink_l.b, _rua), 1.2)
+			draw_line(Vector2(_rx - 2, _ry), Vector2(_rx + 2, _ry), Color(white.r, white.g, white.b, _rua + 0.20), 0.8)
+			draw_line(Vector2(_rx, _ry - 2), Vector2(_rx, _ry + 2), Color(white.r, white.g, white.b, _rua + 0.20), 0.8)
+
+		var cga := 0.12 + pulse * 0.05
+		draw_arc(Vector2(0, cy), 32, 0, TAU, 36, Color(pink.r, pink.g, pink.b, cga), 4.0)
 
 	func _pv_dragon_lich() -> void:
-		var dkpur := Color(0.30, 0.10, 0.45); var gold := Color(0.90, 0.78, 0.22)
-		var grn   := Color(0.20, 0.90, 0.40); var bone := Color(0.88, 0.84, 0.72)
-		# Skeletal body
-		draw_colored_polygon(PackedVector2Array([Vector2(-9,2),Vector2(9,2),Vector2(11,22),Vector2(-11,22)]),dkpur)
-		draw_colored_polygon(PackedVector2Array([Vector2(-8,-10),Vector2(8,-10),Vector2(9,2),Vector2(-9,2)]),dkpur.lightened(0.1))
-		# Rib cage lines
-		for i in range(3):
-			draw_line(Vector2(-8,4+i*5),Vector2(-2,4+i*5),bone,1.5)
-			draw_line(Vector2(2,4+i*5),Vector2(8,4+i*5),bone,1.5)
-		# Dragon skull
-		draw_circle(Vector2(0,-18),9,dkpur.lightened(0.05))
-		draw_circle(Vector2(-4,-17),3,grn); draw_circle(Vector2(4,-17),3,grn)
-		draw_circle(Vector2(-4,-17),1.5,Color(0.80,1.00,0.10)); draw_circle(Vector2(4,-17),1.5,Color(0.80,1.00,0.10))
-		draw_colored_polygon(PackedVector2Array([Vector2(-7,-12),Vector2(-4,-12),Vector2(-5,-8)]),bone)
-		draw_colored_polygon(PackedVector2Array([Vector2(4,-12),Vector2(7,-12),Vector2(5,-8)]),bone)
-		# Horns
-		draw_colored_polygon(PackedVector2Array([Vector2(-6,-24),Vector2(-4,-24),Vector2(-8,-36)]),gold)
-		draw_colored_polygon(PackedVector2Array([Vector2(4,-24),Vector2(6,-24),Vector2(8,-36)]),gold)
-		# Death aura
-		draw_arc(Vector2(0,-18),14,0,TAU,20,Color(grn.r,grn.g,grn.b,0.25),3.0)
+		var purp   := Color(0.35, 0.10, 0.52)
+		var purp_l := Color(0.58, 0.28, 0.82)
+		var blk    := Color(0.08, 0.06, 0.12)
+		var bone   := Color(0.88, 0.84, 0.72)
+		var bone_l := Color(1.00, 0.98, 0.88)
+		var cyan   := Color(0.20, 0.92, 0.82)
+		var cyan_l := Color(0.65, 1.00, 0.95)
+		var ghost  := Color(0.42, 1.00, 0.78)
+
+		var pulse  : float = 0.0
+		var orb_t  : float = 0.0
+		var ea     : float = 0.70 + pulse * 0.30
+
+		draw_circle(Vector2(0, 24), 18, Color(0, 0, 0, 0.22))
+
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-12, 2), Vector2(12, 2),
+			Vector2(14, 22), Vector2(-14, 22)
+		]), purp.darkened(0.15))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-12, 2), Vector2(12, 2),
+			Vector2(10, 4),  Vector2(-10, 4)
+		]), purp_l)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(8, 4), Vector2(12, 2),
+			Vector2(14, 22), Vector2(10, 22)
+		]), blk)
+		for _i in range(3):
+			var _ry : float = 6.0 + float(_i) * 5.5
+			draw_line(Vector2(-10, _ry), Vector2(-3, _ry), Color(bone.r, bone.g, bone.b, 0.68), 1.8)
+			draw_line(Vector2(  3, _ry), Vector2(10, _ry), Color(bone.r, bone.g, bone.b, 0.68), 1.8)
+			draw_circle(Vector2(0, _ry), 2.0, Color(cyan.r, cyan.g, cyan.b, 0.42))
+
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-10, -10), Vector2(-24, -24),
+			Vector2(-28, -12), Vector2(-24, -2),
+			Vector2(-16, 2),   Vector2(-10, 2)
+		]), Color(purp.r, purp.g, purp.b, 0.78))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-12, -9),  Vector2(-20, -20),
+			Vector2(-24, -12), Vector2(-20, -3),
+			Vector2(-14, 0)
+		]), Color(purp.r * 0.45, purp.g * 0.45, purp.b * 0.45, 0.58))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-22, -18), Vector2(-28, -14), Vector2(-26, -10)
+		]), Color(purp_l.r, purp_l.g, purp_l.b, 0.32))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-16, -22), Vector2(-20, -26), Vector2(-13, -24)
+		]), Color(purp_l.r, purp_l.g, purp_l.b, 0.25))
+		draw_line(Vector2(-10, -10), Vector2(-24, -24), Color(bone.r, bone.g, bone.b, 0.60), 1.4)
+		draw_line(Vector2(-10, -7),  Vector2(-22, -18), Color(bone.r, bone.g, bone.b, 0.46), 1.0)
+		draw_line(Vector2(-10, -3),  Vector2(-20, -12), Color(bone.r, bone.g, bone.b, 0.38), 0.8)
+		draw_circle(Vector2(-24, -24), 2.8, bone)
+
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(10, -10), Vector2(24, -24),
+			Vector2(28, -12), Vector2(24, -2),
+			Vector2(16, 2),   Vector2(10, 2)
+		]), Color(purp.r, purp.g, purp.b, 0.78))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(12, -9),  Vector2(20, -20),
+			Vector2(24, -12), Vector2(20, -3),
+			Vector2(14, 0)
+		]), Color(purp.r * 0.45, purp.g * 0.45, purp.b * 0.45, 0.58))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(22, -18), Vector2(28, -14), Vector2(26, -10)
+		]), Color(purp_l.r, purp_l.g, purp_l.b, 0.32))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(16, -22), Vector2(20, -26), Vector2(13, -24)
+		]), Color(purp_l.r, purp_l.g, purp_l.b, 0.25))
+		draw_line(Vector2(10, -10), Vector2(24, -24), Color(bone.r, bone.g, bone.b, 0.60), 1.4)
+		draw_line(Vector2(10, -7),  Vector2(22, -18), Color(bone.r, bone.g, bone.b, 0.46), 1.0)
+		draw_line(Vector2(10, -3),  Vector2(20, -12), Color(bone.r, bone.g, bone.b, 0.38), 0.8)
+		draw_circle(Vector2(24, -24), 2.8, bone)
+
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-11, -10), Vector2(11, -10),
+			Vector2(13, 2),    Vector2(-13, 2)
+		]), purp)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-11, -10), Vector2(11, -10),
+			Vector2(9, -8),    Vector2(-9, -8)
+		]), purp_l)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(7, -10), Vector2(11, -10),
+			Vector2(13, 2),  Vector2(9, 2)
+		]), blk)
+		for _i in range(3):
+			var _ry : float = -7.5 + float(_i) * 3.5
+			draw_arc(Vector2(-2, _ry), 7.5, PI * 0.15, PI * 0.88, 7, Color(bone.r, bone.g, bone.b, 0.78), 2.0)
+			draw_arc(Vector2(-2, _ry), 7.5, PI * 0.15, PI * 0.88, 7, Color(cyan.r, cyan.g, cyan.b, 0.24), 0.8)
+			draw_arc(Vector2( 2, _ry), 7.5, PI * 0.12, PI * 0.85, 7, Color(bone.r, bone.g, bone.b, 0.78), 2.0)
+			draw_arc(Vector2( 2, _ry), 7.5, PI * 0.12, PI * 0.85, 7, Color(cyan.r, cyan.g, cyan.b, 0.24), 0.8)
+			draw_circle(Vector2(-8, _ry), 2.2, Color(bone_l.r, bone_l.g, bone_l.b, 0.68))
+			draw_circle(Vector2( 8, _ry), 2.2, Color(bone_l.r, bone_l.g, bone_l.b, 0.68))
+
+		var sc_r : float = 5.0 + pulse * 1.0
+		draw_circle(Vector2(0, -3), sc_r + 3.5, Color(cyan.r,   cyan.g,   cyan.b,   0.16))
+		draw_circle(Vector2(0, -3), sc_r + 1.5, Color(purp_l.r, purp_l.g, purp_l.b, 0.24))
+		draw_circle(Vector2(0, -3), sc_r,        Color(cyan.r,   cyan.g,   cyan.b,   0.82))
+		draw_circle(Vector2(0, -3), sc_r - 2.0,  Color(cyan_l.r, cyan_l.g, cyan_l.b, 0.90))
+		draw_circle(Vector2(0, -3), sc_r - 3.5,  Color(1.0, 1.0, 1.0, 0.85))
+		draw_circle(Vector2(-1, -4), 1.6, Color(1, 1, 1, 0.88))
+
+		var lz : float = 0.38 + pulse * 0.28
+		var _jx : float = sin(0.0 * 13.0) * 4.0
+		var _jy : float = -11.5 + cos(0.0 * 10.5) * 2.5
+		draw_line(Vector2(0, -3),    Vector2(_jx, _jy),   Color(purp_l.r, purp_l.g, purp_l.b, lz * 0.82), 0.9)
+		draw_line(Vector2(_jx, _jy), Vector2(-5, -22),    Color(purp_l.r, purp_l.g, purp_l.b, lz * 0.82), 0.9)
+		draw_line(Vector2(0, -3),    Vector2(5, -22),     Color(purp_l.r, purp_l.g, purp_l.b, lz * 0.62), 0.8)
+		draw_line(Vector2(-2, -3),   Vector2(-5, -22),    Color(1.0, 0.88, 1.0, lz * 0.38), 0.7)
+		draw_line(Vector2(2, -3),    Vector2(5, -22),     Color(1.0, 0.88, 1.0, lz * 0.38), 0.7)
+
+		draw_circle(Vector2(0, -22), 13.0, purp.darkened(0.30))
+		draw_circle(Vector2(0, -22), 12.0, purp.lightened(0.02))
+		draw_circle(Vector2(-11, -20), 4.5, bone.darkened(0.12))
+		draw_circle(Vector2( 11, -20), 4.5, bone.darkened(0.12))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-11, -26), Vector2(11, -26),
+			Vector2(13, -18),  Vector2(-13, -18)
+		]), bone)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-11, -26), Vector2(11, -26),
+			Vector2(9, -25),   Vector2(-9, -25)
+		]), bone_l)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(7, -26), Vector2(11, -26),
+			Vector2(13, -18), Vector2(9, -18)
+		]), Color(bone.r * 0.78, bone.g * 0.78, bone.b * 0.78))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-3.5, -19), Vector2(3.5, -19),
+			Vector2(2.5, -15),  Vector2(-2.5, -15)
+		]), Color(blk.r, blk.g, blk.b, 0.82))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-11, -18), Vector2(11, -18),
+			Vector2(10, -13),  Vector2(-10, -13)
+		]), bone)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-10, -13), Vector2(10, -13),
+			Vector2(9, -9),    Vector2(-9, -9)
+		]), Color(bone.r * 0.88, bone.g * 0.88, bone.b * 0.88))
+		for _i in range(5):
+			var _tx : float = float(_i - 2) * 3.8
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(_tx - 2, -9), Vector2(_tx + 2, -9),
+				Vector2(_tx, -6)
+			]), bone_l)
+			draw_circle(Vector2(_tx, -6.5), 1.0, Color(cyan.r, cyan.g, cyan.b, 0.42))
+		draw_circle(Vector2(-5, -22), 5.5, Color(cyan.r, cyan.g, cyan.b, 0.28))
+		draw_circle(Vector2(-5, -22), 4.2, Color(cyan.r, cyan.g, cyan.b, ea))
+		draw_circle(Vector2(-5, -22), 2.4, Color(1.0, 1.0, 1.0, ea))
+		draw_circle(Vector2( 5, -22), 5.5, Color(cyan.r, cyan.g, cyan.b, 0.28))
+		draw_circle(Vector2( 5, -22), 4.2, Color(cyan.r, cyan.g, cyan.b, ea))
+		draw_circle(Vector2( 5, -22), 2.4, Color(1.0, 1.0, 1.0, ea))
+
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-8, -30), Vector2(-4, -30),
+			Vector2(-2, -37), Vector2(-6, -42), Vector2(-10, -36)
+		]), bone.darkened(0.12))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-8, -30), Vector2(-4, -30),
+			Vector2(-3, -36), Vector2(-6, -41), Vector2(-9, -35)
+		]), bone)
+		draw_line(Vector2(-7, -31), Vector2(-9, -36), Color(cyan.r, cyan.g, cyan.b, 0.44), 0.9)
+		draw_circle(Vector2(-6, -41), 2.2, Color(cyan.r, cyan.g, cyan.b, ea * 0.88))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(4, -30), Vector2(8, -30),
+			Vector2(10, -36), Vector2(6, -42), Vector2(2, -37)
+		]), bone.darkened(0.12))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(4, -30), Vector2(8, -30),
+			Vector2(9, -35), Vector2(6, -41), Vector2(3, -36)
+		]), bone)
+		draw_line(Vector2(7, -31), Vector2(9, -36), Color(cyan.r, cyan.g, cyan.b, 0.44), 0.9)
+		draw_circle(Vector2(6, -41), 2.2, Color(cyan.r, cyan.g, cyan.b, ea * 0.88))
+
+		for _i in range(3):
+			var _ft : float = fmod(0.0 + float(_i) * 0.33, 1.0)
+			var _fy : float = -30.0 - _ft * 18.0
+			var _fa : float = (1.0 - _ft) * 0.55
+			draw_circle(Vector2(float(_i - 1) * 5.5, _fy), 2.5 + _ft * 2.2, Color(cyan.r, cyan.g, cyan.b, _fa))
+
+		for _i in range(4):
+			var _oa    : float = orb_t + float(_i) * TAU / 4.0
+			var _ox    : float = cos(_oa) * 19.0
+			var _oy    : float = sin(_oa) * 8.0 - 8.0
+			var _oa2   : float = 0.55 + pulse * 0.18
+			var _rstart: float = _oa + PI * 0.25
+			var _rend  : float = _oa + PI * 1.05
+			draw_arc(Vector2(_ox, _oy), 5.5, _rstart, _rend, 8, Color(bone.r, bone.g, bone.b, _oa2), 2.8)
+			draw_arc(Vector2(_ox, _oy), 5.5, _rstart, _rend, 8, Color(cyan.r, cyan.g, cyan.b, _oa2 * 0.36), 1.0)
+			draw_circle(Vector2(_ox + cos(_rstart) * 5.5, _oy + sin(_rstart) * 5.5),
+				1.8, Color(bone_l.r, bone_l.g, bone_l.b, _oa2 * 0.85))
+
+		for _i in range(3):
+			var _ra  : float = orb_t * 0.8 + float(_i) * TAU / 3.0
+			var _rx  : float = cos(_ra) * 24.0
+			var _ry  : float = sin(_ra) * 10.0 - 8.0
+			var _ra2 : float = 0.36 + pulse * 0.12
+			draw_arc(Vector2(_rx, _ry), 4.5, 0, TAU, 6, Color(purp_l.r, purp_l.g, purp_l.b, _ra2 + 0.12), 1.8)
+			draw_arc(Vector2(_rx, _ry), 2.8, 0, TAU, 6, Color(cyan.r,   cyan.g,   cyan.b,   _ra2 + 0.18), 1.2)
+			draw_line(Vector2(_rx - 3, _ry), Vector2(_rx + 3, _ry), Color(bone.r, bone.g, bone.b, _ra2 + 0.22), 0.9)
+			draw_line(Vector2(_rx, _ry - 3), Vector2(_rx, _ry + 3), Color(bone.r, bone.g, bone.b, _ra2 + 0.22), 0.9)
+			draw_circle(Vector2(_rx, _ry), 1.5, Color(cyan_l.r, cyan_l.g, cyan_l.b, _ra2 * 0.78))
+
+		for _i in range(3):
+			var _ta  : float = -orb_t * 0.55 + float(_i) * TAU / 3.0
+			var _tsx : float = cos(_ta) * 28.0
+			var _tsy : float = sin(_ta) * 12.0 - 8.0
+			var _ta2 : float = 0.42 + pulse * 0.14
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(_tsx - 2.5, _tsy + 5),  Vector2(_tsx - 3.5, _tsy - 1),
+				Vector2(_tsx, _tsy - 7),         Vector2(_tsx + 3.5, _tsy - 1),
+				Vector2(_tsx + 2.5, _tsy + 5)
+			]), Color(blk.r, blk.g, blk.b, _ta2 + 0.18))
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(_tsx - 1.5, _tsy + 3), Vector2(_tsx - 2.5, _tsy - 0.5),
+				Vector2(_tsx, _tsy - 5),        Vector2(_tsx + 2.5, _tsy - 0.5),
+				Vector2(_tsx + 1.5, _tsy + 3)
+			]), Color(purp.r, purp.g, purp.b, _ta2))
+			draw_circle(Vector2(_tsx, _tsy - 4), 1.4, Color(cyan.r, cyan.g, cyan.b, _ta2 * 0.82))
+
+		var aura_a : float = 0.16 + pulse * 0.07
+		draw_arc(Vector2(0, -16), 30, 0, TAU, 32, Color(cyan.r, cyan.g, cyan.b, aura_a), 3.5)
 
 	func _pv_tempest_warden() -> void:
-		var storm := Color(0.45, 0.75, 1.00); var dark  := Color(0.20, 0.30, 0.55)
-		var wht   := Color(0.90, 0.95, 1.00); var gold  := Color(0.90, 0.78, 0.22)
-		# Armored body
-		draw_colored_polygon(PackedVector2Array([Vector2(-10,-8),Vector2(10,-8),Vector2(11,8),Vector2(-11,8)]),dark)
-		draw_colored_polygon(PackedVector2Array([Vector2(-9,8),Vector2(9,8),Vector2(10,22),Vector2(-10,22)]),dark.darkened(0.1))
-		draw_line(Vector2(-10,-8),Vector2(10,-8),storm,2.5)
-		draw_line(Vector2(-10,8),Vector2(10,8),storm,2.0)
-		# Helmet
-		draw_circle(Vector2(0,-18),9,dark.lightened(0.05))
-		draw_rect(Rect2(-9,-22,18,5),dark.lightened(0.1))
-		draw_rect(Rect2(-3,-28,6,10),storm)
-		# Storm wings
-		draw_colored_polygon(PackedVector2Array([Vector2(-10,-4),Vector2(-24,-16),Vector2(-20,-2),Vector2(-11,4)]),storm.darkened(0.15))
-		draw_colored_polygon(PackedVector2Array([Vector2(10,-4),Vector2(24,-16),Vector2(20,-2),Vector2(11,4)]),storm.darkened(0.15))
-		# Lightning bolts on wings
-		draw_line(Vector2(-14,-10),Vector2(-18,-2),wht,2.0)
-		draw_line(Vector2(-18,-2),Vector2(-15,4),wht,2.0)
-		draw_line(Vector2(14,-10),Vector2(18,-2),wht,2.0)
-		draw_line(Vector2(18,-2),Vector2(15,4),wht,2.0)
-		# Gold pauldrons
-		draw_circle(Vector2(-12,-4),5,gold.darkened(0.1))
-		draw_circle(Vector2(12,-4),5,gold.darkened(0.1))
+		var steel := Color(0.48, 0.54, 0.68)
+		var steel_l := Color(0.72, 0.78, 0.92)
+		var steel_d := Color(0.24, 0.28, 0.40)
+		var wind := Color(0.40, 0.86, 1.00)
+		var wind_l := Color(0.80, 0.96, 1.00)
+		var elec := Color(0.55, 0.82, 1.00)
+		var b := 0.0
+		draw_circle(Vector2(0, 24), 16, Color(0, 0, 0, 0.20))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-13, -12 + b), Vector2(11, -10 + b),
+			Vector2(10, 4 + b), Vector2(-12, 4 + b)
+		]), steel)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-13, -12 + b), Vector2(11, -10 + b),
+			Vector2(9, -9 + b), Vector2(-12, -10 + b)
+		]), steel_l)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(7, -10 + b), Vector2(11, -10 + b),
+			Vector2(10, 4 + b), Vector2(6, 4 + b)
+		]), steel_d)
+		draw_line(Vector2(-9, -10 + b), Vector2(-5, -3 + b), Color(wind.r, wind.g, wind.b, 0.65), 1.0)
+		draw_line(Vector2(-5, -3 + b), Vector2(-7, 2 + b), Color(wind.r, wind.g, wind.b, 0.48), 0.9)
+		draw_line(Vector2(2, -9 + b), Vector2(5, -3 + b), Color(wind.r, wind.g, wind.b, 0.55), 0.9)
+		draw_line(Vector2(-12, 4 + b), Vector2(10, 4 + b), Color(steel_l.r, steel_l.g, steel_l.b, 0.38), 1.0)
+		var ec_r := 4.8
+		draw_circle(Vector2(-1, -2 + b), ec_r + 3.0, Color(wind.r, wind.g, wind.b, 0.16))
+		draw_circle(Vector2(-1, -2 + b), ec_r, Color(elec.r, elec.g, elec.b, 0.80))
+		draw_circle(Vector2(-1, -2 + b), ec_r - 2.0, Color(wind_l.r, wind_l.g, wind_l.b, 0.90))
+		draw_circle(Vector2(-2, -3 + b), 1.6, Color(1, 1, 1, 0.88))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-12, -12 + b), Vector2(-18, -8 + b),
+			Vector2(-20, -2 + b), Vector2(-16, 0 + b),
+			Vector2(-12, -4 + b)
+		]), steel_d)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-12, -12 + b), Vector2(-17, -8 + b),
+			Vector2(-19, -3 + b), Vector2(-15, -1 + b),
+			Vector2(-12, -5 + b)
+		]), steel)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-12, -12 + b), Vector2(-15, -10 + b),
+			Vector2(-14, -5 + b), Vector2(-12, -4 + b)
+		]), steel_l)
+		draw_circle(Vector2(-16, -6 + b), 2.5, Color(wind.r, wind.g, wind.b, 0.72))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(10, -10 + b), Vector2(16, -6 + b),
+			Vector2(16, 0 + b), Vector2(12, 0 + b),
+			Vector2(10, -4 + b)
+		]), steel_d)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(10, -10 + b), Vector2(15, -6 + b),
+			Vector2(15, -1 + b), Vector2(11, -1 + b),
+			Vector2(10, -5 + b)
+		]), steel)
+		draw_circle(Vector2(14, -4 + b), 2.0, Color(wind.r, wind.g, wind.b, 0.62))
+		draw_line(Vector2(-13, -6 + b), Vector2(-18, 8 + b), steel, 5.0)
+		draw_line(Vector2(-13, -6 + b), Vector2(-18, 8 + b), steel_l, 2.0)
+		draw_circle(Vector2(-18, 8 + b), 4.0, steel_d)
+		draw_circle(Vector2(-18, 8 + b), 2.5, steel)
+		var sp_base := Vector2(20, 9 + b)
+		var sp_tip := Vector2(-5, -28 + b)
+		draw_line(Vector2(11, -8 + b), sp_base, steel, 5.0)
+		draw_line(Vector2(11, -8 + b), sp_base, steel_l, 1.8)
+		draw_circle(sp_base, 4.5, steel_d)
+		draw_circle(sp_base, 3.0, steel)
+		draw_line(sp_base, sp_tip, Color(steel_d.r, steel_d.g, steel_d.b, 0.95), 5.0)
+		draw_line(sp_base, sp_tip, Color(steel.r, steel.g, steel.b, 0.92), 3.5)
+		draw_line(sp_base, sp_tip, Color(wind_l.r, wind_l.g, wind_l.b, 0.62), 1.2)
+		for _ri in range(3):
+			var _rp := sp_base.lerp(sp_tip, 0.25 + float(_ri) * 0.22)
+			draw_circle(_rp, 3.2, steel_d)
+			draw_circle(_rp, 2.0, steel_l)
+		for _i in range(4):
+			var _t := float(_i) * 0.22
+			var _bp := sp_base.lerp(sp_tip, _t + 0.08)
+			var _ep := sp_base.lerp(sp_tip, _t + 0.18)
+			var _perp := Vector2(_ep.y - _bp.y, _bp.x - _ep.x).normalized() * 2.8
+			draw_line(_bp + _perp, _ep - _perp, Color(1, 1, 1, 0.55), 0.8)
+		var _sgp := sp_base.lerp(sp_tip, 0.14)
+		var _sgperp := Vector2(sp_tip.y - sp_base.y, sp_base.x - sp_tip.x).normalized() * 8.0
+		draw_line(_sgp - _sgperp, _sgp + _sgperp, steel_d, 3.5)
+		draw_line(_sgp - _sgperp, _sgp + _sgperp, steel_l, 1.5)
+		draw_colored_polygon(PackedVector2Array([
+			sp_tip + Vector2(-4, 7), sp_tip + Vector2(4, 7),
+			sp_tip + Vector2(1.5, 0), sp_tip + Vector2(0, -10), sp_tip + Vector2(-1.5, 0)
+		]), Color(wind.r, wind.g, wind.b, 0.95))
+		draw_colored_polygon(PackedVector2Array([
+			sp_tip + Vector2(-2, 5), sp_tip + Vector2(2, 5),
+			sp_tip + Vector2(0, -8)
+		]), Color(1, 1, 1, 0.88))
+		draw_circle(sp_tip, 7.0, Color(wind.r, wind.g, wind.b, 0.38))
+		draw_circle(sp_tip, 4.5, Color(wind.r, wind.g, wind.b, 0.65))
+		draw_circle(sp_tip, 2.5, Color(1, 1, 1, 0.90))
+		draw_circle(Vector2(0, -20 + b), 9.5, steel_d)
+		draw_circle(Vector2(0, -21 + b), 8.5, steel)
+		draw_circle(Vector2(0, -22 + b), 7.0, steel_l)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-7, -22 + b), Vector2(7, -22 + b),
+			Vector2(4, -16 + b), Vector2(-4, -16 + b)
+		]), Color(wind.r, wind.g, wind.b, 0.72))
+		draw_line(Vector2(-7, -22 + b), Vector2(7, -22 + b), Color(wind_l.r, wind_l.g, wind_l.b, 0.60), 0.9)
+		draw_rect(Rect2(-8, -27 + b, 16, 4), steel_d)
+		draw_rect(Rect2(-8, -27 + b, 16, 2), steel_l)
+		for _i in range(4):
+			var _ba := float(_i) * TAU / 4.0
+			var _bx := cos(_ba) * 22.0
+			var _by := sin(_ba) * 9.0 - 4.0 + b
+			var _tx := -sin(_ba)
+			var _ty := cos(_ba) * 0.42
+			var _fwd := Vector2(_tx * 9.0, _ty * 9.0)
+			var _side := Vector2(cos(_ba) * 2.8, sin(_ba) * 1.1)
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(_bx, _by) + _fwd, Vector2(_bx, _by) + _side,
+				Vector2(_bx, _by) - _fwd, Vector2(_bx, _by) - _side
+			]), Color(wind.r, wind.g, wind.b, 0.74))
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(_bx, _by) + _fwd * 0.55, Vector2(_bx, _by) + _side * 0.45,
+				Vector2(_bx, _by) - _fwd * 0.55, Vector2(_bx, _by) - _side * 0.45
+			]), Color(wind_l.r, wind_l.g, wind_l.b, 0.88))
+			draw_circle(Vector2(_bx, _by), 1.5, Color(1, 1, 1, 0.70))
+		for _i in range(3):
+			var _wa := float(_i) * TAU / 3.0
+			var _wx := cos(_wa) * 28.0
+			var _wy := sin(_wa) * 12.0 - 4.0 + b
+			var _wsa := 0.32
+			draw_arc(Vector2(_wx, _wy), 4.2, 0, TAU, 8, Color(wind.r, wind.g, wind.b, _wsa + 0.10), 1.5)
+			draw_arc(Vector2(_wx, _wy), 2.6, 0.0, TAU * 0.7, 6, Color(wind_l.r, wind_l.g, wind_l.b, _wsa + 0.20), 1.0)
+			draw_circle(Vector2(_wx, _wy), 1.4, Color(1, 1, 1, _wsa * 0.80))
 
 	func _pv_infernal_serpent() -> void:
-		var red  := Color(1.00, 0.30, 0.05); var drk  := Color(0.45, 0.10, 0.02)
-		var gold := Color(1.00, 0.72, 0.10); var yel  := Color(1.00, 0.90, 0.20)
-		draw_colored_polygon(PackedVector2Array([Vector2(-11,-6),Vector2(11,-6),Vector2(12,10),Vector2(-12,10)]),drk)
-		draw_colored_polygon(PackedVector2Array([Vector2(-8,-6),Vector2(8,-6),Vector2(7,4),Vector2(-7,4)]),red)
-		draw_circle(Vector2(0,-17),10,drk)
-		draw_colored_polygon(PackedVector2Array([Vector2(-5,-26),Vector2(-8,-36),Vector2(-3,-26)]),gold)
-		draw_colored_polygon(PackedVector2Array([Vector2(5,-26),Vector2(8,-36),Vector2(3,-26)]),gold)
-		draw_circle(Vector2(-4,-18),2.5,yel); draw_circle(Vector2(4,-18),2.5,yel)
-		draw_colored_polygon(PackedVector2Array([Vector2(-6,-12),Vector2(6,-12),Vector2(9,-4),Vector2(-9,-4)]),Color(1.0,0.55,0.05,0.85))
+		var red := Color(0.88, 0.18, 0.04)
+		var red_l := Color(1.00, 0.38, 0.08)
+		var drk := Color(0.28, 0.06, 0.02)
+		var orange := Color(1.00, 0.55, 0.05)
+		var gold := Color(1.00, 0.72, 0.10)
+		var yel := Color(1.00, 0.92, 0.22)
+		var wh_hot := Color(1.00, 0.98, 0.82)
+		var scale := Color(0.52, 0.10, 0.04)
+		var scale_l := Color(0.72, 0.20, 0.06)
+		var b := 0.0
+		draw_circle(Vector2(0, 24), 18, Color(0, 0, 0, 0.26))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-8, -10 + b), Vector2(8, -10 + b),
+			Vector2(20, 2 + b), Vector2(22, 14 + b),
+			Vector2(0, 18 + b), Vector2(-22, 14 + b),
+			Vector2(-20, 2 + b)
+		]), Color(drk.r, drk.g, drk.b, 0.88))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-6, -8 + b), Vector2(6, -8 + b),
+			Vector2(16, 2 + b), Vector2(18, 12 + b),
+			Vector2(0, 16 + b), Vector2(-18, 12 + b),
+			Vector2(-16, 2 + b)
+		]), Color(red.r, red.g, red.b, 0.75))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-4, -6 + b), Vector2(4, -6 + b),
+			Vector2(10, 4 + b), Vector2(8, 14 + b),
+			Vector2(0, 16 + b), Vector2(-8, 14 + b),
+			Vector2(-10, 4 + b)
+		]), Color(orange.r, orange.g, orange.b, 0.55))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-20, 2 + b), Vector2(-24, -4 + b), Vector2(-18, 0 + b)
+		]), Color(orange.r, orange.g, orange.b, 0.72))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-18, 8 + b), Vector2(-26, 4 + b), Vector2(-20, 6 + b)
+		]), Color(red_l.r, red_l.g, red_l.b, 0.68))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(20, 2 + b), Vector2(24, -4 + b), Vector2(18, 0 + b)
+		]), Color(orange.r, orange.g, orange.b, 0.72))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(18, 8 + b), Vector2(26, 4 + b), Vector2(20, 6 + b)
+		]), Color(red_l.r, red_l.g, red_l.b, 0.68))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-12, 4 + b), Vector2(-2, 4 + b),
+			Vector2(-3, 22 + b), Vector2(-13, 22 + b)
+		]), scale)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(2, 4 + b), Vector2(12, 4 + b),
+			Vector2(13, 22 + b), Vector2(3, 22 + b)
+		]), scale)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-12, 4 + b), Vector2(-2, 4 + b),
+			Vector2(-2, 7 + b), Vector2(-12, 7 + b)
+		]), scale_l)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(2, 4 + b), Vector2(12, 4 + b),
+			Vector2(12, 7 + b), Vector2(2, 7 + b)
+		]), scale_l)
+		draw_line(Vector2(-10, 8 + b), Vector2(-8, 14 + b), Color(orange.r, orange.g, orange.b, 0.72), 1.0)
+		draw_line(Vector2(-8, 14 + b), Vector2(-10, 18 + b), Color(orange.r, orange.g, orange.b, 0.58), 0.9)
+		draw_line(Vector2(8, 8 + b), Vector2(10, 14 + b), Color(orange.r, orange.g, orange.b, 0.72), 1.0)
+		draw_line(Vector2(10, 14 + b), Vector2(8, 18 + b), Color(orange.r, orange.g, orange.b, 0.58), 0.9)
+		draw_line(Vector2(-13, 18 + b), Vector2(-3, 18 + b), gold, 1.5)
+		draw_line(Vector2(3, 18 + b), Vector2(13, 18 + b), gold, 1.5)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-13, -12 + b), Vector2(13, -12 + b),
+			Vector2(12, 4 + b), Vector2(-12, 4 + b)
+		]), scale)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-13, -12 + b), Vector2(13, -12 + b),
+			Vector2(11, -10 + b), Vector2(-11, -10 + b)
+		]), scale_l)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(8, -12 + b), Vector2(13, -12 + b),
+			Vector2(12, 4 + b), Vector2(8, 4 + b)
+		]), drk)
+		for _i in range(3):
+			for _j in range(3):
+				var _sx := float(_j - 1) * 7.0
+				var _sy := -9.0 + float(_i) * 5.5 + b
+				draw_arc(Vector2(_sx, _sy), 3.0, PI * 0.1, PI * 0.9, 6, Color(drk.r, drk.g, drk.b, 0.55), 1.2)
+		draw_line(Vector2(-8, -10 + b), Vector2(-5, -4 + b), Color(orange.r, orange.g, orange.b, 0.78), 1.2)
+		draw_line(Vector2(-5, -4 + b), Vector2(-7, 2 + b), Color(orange.r, orange.g, orange.b, 0.62), 1.0)
+		draw_line(Vector2(4, -9 + b), Vector2(7, -3 + b), Color(orange.r, orange.g, orange.b, 0.72), 1.0)
+		draw_line(Vector2(7, -3 + b), Vector2(5, 2 + b), Color(orange.r, orange.g, orange.b, 0.55), 0.9)
+		var cg_r := 4.5
+		draw_circle(Vector2(0, -4 + b), cg_r + 2.5, Color(orange.r, orange.g, orange.b, 0.20))
+		draw_circle(Vector2(0, -4 + b), cg_r, Color(red_l.r, red_l.g, red_l.b, 0.85))
+		draw_circle(Vector2(0, -4 + b), cg_r - 2.0, Color(gold.r, gold.g, gold.b, 0.88))
+		draw_circle(Vector2(0, -4 + b), cg_r - 3.5, Color(wh_hot.r, wh_hot.g, wh_hot.b, 0.90))
+		draw_circle(Vector2(-1, -5 + b), 1.2, Color(1, 1, 1, 0.88))
+		draw_line(Vector2(-13, -12 + b), Vector2(13, -12 + b), gold, 1.5)
+		draw_line(Vector2(-12, 4 + b), Vector2(12, 4 + b), gold, 1.2)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-12, -6 + b), Vector2(-16, -8 + b),
+			Vector2(-22, -6 + b), Vector2(-26, -2 + b),
+			Vector2(-22, 0 + b), Vector2(-14, -2 + b)
+		]), scale)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-12, -6 + b), Vector2(-16, -8 + b),
+			Vector2(-22, -6 + b), Vector2(-18, -5 + b),
+			Vector2(-14, -4 + b)
+		]), scale_l)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-14, 0 + b), Vector2(-20, 2 + b),
+			Vector2(-24, 4 + b), Vector2(-20, 5 + b),
+			Vector2(-14, 3 + b)
+		]), drk)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-14, 1 + b), Vector2(-19, 2 + b),
+			Vector2(-22, 4 + b), Vector2(-19, 4.5 + b),
+			Vector2(-14, 2.5 + b)
+		]), Color(red.r * 0.7, red.g * 0.7, red.b * 0.7))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-16, -1 + b), Vector2(-18, -1 + b), Vector2(-17, 3 + b)
+		]), Color(wh_hot.r, wh_hot.g, wh_hot.b, 0.90))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-20, -1 + b), Vector2(-22, -1 + b), Vector2(-21, 3 + b)
+		]), Color(wh_hot.r, wh_hot.g, wh_hot.b, 0.85))
+		var tfa := 0.55
+		draw_line(Vector2(-24, 1 + b), Vector2(-28, -1 + b), Color(red_l.r, red_l.g, red_l.b, tfa), 1.2)
+		draw_line(Vector2(-24, 1 + b), Vector2(-28, 3 + b), Color(red_l.r, red_l.g, red_l.b, tfa), 1.2)
+		draw_circle(Vector2(-20, -5 + b), 3.2, yel)
+		draw_circle(Vector2(-20, -5 + b), 1.8, Color(0.20, 0.04, 0.00))
+		draw_circle(Vector2(-20.8, -5.8 + b), 0.8, Color(1, 1, 1, 0.72))
+		draw_arc(Vector2(-18, -7 + b), 5.0, -PI * 0.6, PI * 0.1, 8, Color(drk.r, drk.g, drk.b, 0.70), 1.2)
+		draw_line(Vector2(-12, -8 + b), Vector2(-22, -7 + b), gold, 1.2)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(12, -6 + b), Vector2(16, -8 + b),
+			Vector2(22, -6 + b), Vector2(26, -2 + b),
+			Vector2(22, 0 + b), Vector2(14, -2 + b)
+		]), scale)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(12, -6 + b), Vector2(16, -8 + b),
+			Vector2(22, -6 + b), Vector2(18, -5 + b),
+			Vector2(14, -4 + b)
+		]), scale_l)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(14, 0 + b), Vector2(20, 2 + b),
+			Vector2(24, 4 + b), Vector2(20, 5 + b),
+			Vector2(14, 3 + b)
+		]), drk)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(14, 1 + b), Vector2(19, 2 + b),
+			Vector2(22, 4 + b), Vector2(19, 4.5 + b),
+			Vector2(14, 2.5 + b)
+		]), Color(red.r * 0.7, red.g * 0.7, red.b * 0.7))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(16, -1 + b), Vector2(18, -1 + b), Vector2(17, 3 + b)
+		]), Color(wh_hot.r, wh_hot.g, wh_hot.b, 0.90))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(20, -1 + b), Vector2(22, -1 + b), Vector2(21, 3 + b)
+		]), Color(wh_hot.r, wh_hot.g, wh_hot.b, 0.85))
+		draw_line(Vector2(24, 1 + b), Vector2(28, -1 + b), Color(red_l.r, red_l.g, red_l.b, tfa), 1.2)
+		draw_line(Vector2(24, 1 + b), Vector2(28, 3 + b), Color(red_l.r, red_l.g, red_l.b, tfa), 1.2)
+		draw_circle(Vector2(20, -5 + b), 3.2, yel)
+		draw_circle(Vector2(20, -5 + b), 1.8, Color(0.20, 0.04, 0.00))
+		draw_circle(Vector2(20.8, -5.8 + b), 0.8, Color(1, 1, 1, 0.72))
+		draw_arc(Vector2(18, -7 + b), 5.0, -PI * 0.1, PI * 0.6, 8, Color(drk.r, drk.g, drk.b, 0.70), 1.2)
+		draw_line(Vector2(12, -8 + b), Vector2(22, -7 + b), gold, 1.2)
+		draw_line(Vector2(-12, -8 + b), Vector2(-18, 6 + b), scale, 7.0)
+		draw_line(Vector2(12, -8 + b), Vector2(18, 6 + b), scale, 7.0)
+		draw_line(Vector2(-12, -8 + b), Vector2(-18, 6 + b), scale_l, 3.0)
+		draw_line(Vector2(12, -8 + b), Vector2(18, 6 + b), scale_l, 3.0)
+		draw_circle(Vector2(-18, 6 + b), 4.5, drk)
+		draw_circle(Vector2(18, 6 + b), 4.5, drk)
+		draw_circle(Vector2(-18, 6 + b), 3.0, scale)
+		draw_circle(Vector2(18, 6 + b), 3.0, scale)
+		for _c in [-1, 0, 1]:
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(-18 + _c * 2.5 - 1, 9 + b),
+				Vector2(-18 + _c * 2.5 + 1, 9 + b),
+				Vector2(-18 + _c * 2.5, 13 + b)
+			]), Color(drk.r, drk.g, drk.b, 0.90))
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(18 + _c * 2.5 - 1, 9 + b),
+				Vector2(18 + _c * 2.5 + 1, 9 + b),
+				Vector2(18 + _c * 2.5, 13 + b)
+			]), Color(drk.r, drk.g, drk.b, 0.90))
+		draw_arc(Vector2(-18, 6 + b), 4.5, -PI * 0.5, PI * 0.5, 8, gold, 1.2)
+		draw_arc(Vector2(18, 6 + b), 4.5, -PI * 0.5, PI * 0.5, 8, gold, 1.2)
+		draw_circle(Vector2(0, -22 + b), 10, drk)
+		draw_circle(Vector2(0, -23 + b), 9, scale)
+		draw_circle(Vector2(0, -24 + b), 7.5, scale_l)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-11, -24 + b), Vector2(11, -24 + b),
+			Vector2(9, -18 + b), Vector2(-9, -18 + b)
+		]), scale)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-11, -24 + b), Vector2(11, -24 + b),
+			Vector2(9, -23 + b), Vector2(-9, -23 + b)
+		]), scale_l)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(7, -24 + b), Vector2(11, -24 + b),
+			Vector2(9, -18 + b), Vector2(6, -18 + b)
+		]), drk)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-7, -18 + b), Vector2(7, -18 + b),
+			Vector2(6, -14 + b), Vector2(-6, -14 + b)
+		]), drk.lightened(0.06))
+		draw_circle(Vector2(-4, -21 + b), 3.5, yel)
+		draw_circle(Vector2(4, -21 + b), 3.5, yel)
+		draw_circle(Vector2(-4, -21 + b), 2.0, Color(0.18, 0.04, 0.00))
+		draw_circle(Vector2(4, -21 + b), 2.0, Color(0.18, 0.04, 0.00))
+		draw_circle(Vector2(-4.5, -22 + b), 0.9, Color(1, 1, 1, 0.72))
+		draw_line(Vector2(-8, -22 + b), Vector2(-4, -18 + b), Color(orange.r, orange.g, orange.b, 0.68), 0.9)
+		draw_line(Vector2(5, -22 + b), Vector2(8, -18 + b), Color(orange.r, orange.g, orange.b, 0.62), 0.9)
+		draw_line(Vector2(-11, -24 + b), Vector2(11, -24 + b), gold, 1.5)
+		draw_line(Vector2(-9, -18 + b), Vector2(9, -18 + b), gold, 1.2)
+		draw_arc(Vector2(0, -28 + b), 8.0, 0, TAU, 16, Color(drk.r, drk.g, drk.b, 0.88), 3.5)
+		draw_arc(Vector2(0, -28 + b), 8.0, 0, TAU, 16, Color(gold.r, gold.g, gold.b, 0.75), 1.5)
+		for _i in range(5):
+			var _ca := float(_i) * TAU / 5.0 - PI * 0.5
+			var _csx := cos(_ca) * 8.0
+			var _csy := sin(_ca) * 5.0 - 28.0 + b
+			var _cth := 5.0 if abs(_i - 0) == 0 else 3.5
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(_csx - 2, _csy), Vector2(_csx + 2, _csy),
+				Vector2(_csx, _csy - _cth)
+			]), Color(red_l.r, red_l.g, red_l.b, 0.90))
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(_csx - 1, _csy), Vector2(_csx + 1, _csy),
+				Vector2(_csx, _csy - _cth + 1)
+			]), Color(orange.r, orange.g, orange.b, 0.80))
+			draw_circle(Vector2(_csx, _csy - _cth), 1.5, Color(yel.r, yel.g, yel.b, 0.88))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-8, -27 + b), Vector2(-4, -27 + b),
+			Vector2(-2, -34 + b), Vector2(-8, -42 + b), Vector2(-12, -36 + b)
+		]), drk)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-8, -27 + b), Vector2(-4, -27 + b),
+			Vector2(-3, -33 + b), Vector2(-8, -40 + b), Vector2(-11, -35 + b)
+		]), scale)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-7, -27 + b), Vector2(-4.5, -27 + b),
+			Vector2(-4, -32 + b), Vector2(-7, -36 + b)
+		]), scale_l)
+		draw_line(Vector2(-8, -27 + b), Vector2(-12, -36 + b), Color(gold.r, gold.g, gold.b, 0.45), 0.8)
+		draw_line(Vector2(-6, -29 + b), Vector2(-7, -36 + b), Color(orange.r, orange.g, orange.b, 0.55), 0.8)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(4, -27 + b), Vector2(8, -27 + b),
+			Vector2(12, -36 + b), Vector2(8, -42 + b), Vector2(2, -34 + b)
+		]), drk)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(4, -27 + b), Vector2(8, -27 + b),
+			Vector2(11, -35 + b), Vector2(8, -40 + b), Vector2(3, -33 + b)
+		]), scale)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(4.5, -27 + b), Vector2(7, -27 + b),
+			Vector2(7, -36 + b), Vector2(4, -32 + b)
+		]), scale_l)
+		draw_line(Vector2(8, -27 + b), Vector2(12, -36 + b), Color(gold.r, gold.g, gold.b, 0.45), 0.8)
+		draw_line(Vector2(6, -29 + b), Vector2(7, -36 + b), Color(orange.r, orange.g, orange.b, 0.55), 0.8)
+		for _i in range(3):
+			var _oa := float(_i) * TAU / 3.0
+			var _ox := cos(_oa) * 20.0
+			var _oy := sin(_oa) * 9.0 - 4.0 + b
+			var _oa2 := 0.55
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(_ox, _oy - 6), Vector2(_ox - 3, _oy + 1),
+				Vector2(_ox, _oy + 3), Vector2(_ox + 3, _oy + 1)
+			]), Color(red.r, red.g, red.b, _oa2))
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(_ox, _oy - 5), Vector2(_ox - 2, _oy + 0),
+				Vector2(_ox, _oy + 2), Vector2(_ox + 2, _oy + 0)
+			]), Color(orange.r, orange.g, orange.b, _oa2 + 0.10))
+			draw_circle(Vector2(_ox, _oy - 3), 1.5, Color(yel.r, yel.g, yel.b, _oa2 * 0.80))
+		for _i in range(3):
+			var _ra := float(_i) * TAU / 3.0
+			var _rx := cos(_ra) * 28.0
+			var _ry := sin(_ra) * 12.0 - 4.0 + b
+			var _rua := 0.32
+			draw_circle(Vector2(_rx, _ry), 4.0, Color(red.r, red.g, red.b, _rua * 0.50))
+			draw_arc(Vector2(_rx, _ry), 3.8, 0, TAU, 8, Color(gold.r, gold.g, gold.b, _rua + 0.10), 1.5)
+			draw_line(Vector2(_rx - 2, _ry), Vector2(_rx + 2, _ry), Color(yel.r, yel.g, yel.b, _rua + 0.20), 0.9)
+			draw_line(Vector2(_rx, _ry - 2), Vector2(_rx, _ry + 2), Color(yel.r, yel.g, yel.b, _rua + 0.20), 0.9)
+			draw_circle(Vector2(_rx, _ry), 1.8, Color(orange.r, orange.g, orange.b, _rua + 0.15))
+		var aura_a := 0.12
+		draw_arc(Vector2(0, -4 + b), 32, 0, TAU, 36, Color(red_l.r, red_l.g, red_l.b, aura_a), 3.5)
 
 	func _pv_shadow_weaver() -> void:
-		var voidc := Color(0.20, 0.08, 0.35); var purp := Color(0.55, 0.20, 0.85)
-		var wht  := Color(0.92, 0.88, 1.00); var dark := Color(0.10, 0.05, 0.20)
-		draw_colored_polygon(PackedVector2Array([Vector2(-12,-4),Vector2(12,-4),Vector2(14,22),Vector2(-14,22)]),voidc)
-		draw_colored_polygon(PackedVector2Array([Vector2(-12,-4),Vector2(12,-4),Vector2(10,8),Vector2(-10,8)]),voidc.lightened(0.08))
-		draw_circle(Vector2(0,-16),10,dark)
-		draw_colored_polygon(PackedVector2Array([Vector2(-12,-14),Vector2(12,-14),Vector2(8,-4),Vector2(-8,-4)]),dark)
-		draw_colored_polygon(PackedVector2Array([Vector2(-6,-24),Vector2(6,-24),Vector2(10,-14),Vector2(-10,-14)]),dark)
-		draw_circle(Vector2(-3,-17),2,purp); draw_circle(Vector2(3,-17),2,purp)
-		draw_line(Vector2(14,20),Vector2(14,-30),purp.darkened(0.2),4.0)
-		draw_circle(Vector2(14,-30),7,dark); draw_circle(Vector2(14,-30),4,purp)
+		var robe := Color(0.28, 0.10, 0.48)
+		var robe_d := Color(0.16, 0.05, 0.30)
+		var robe_l := Color(0.45, 0.18, 0.72)
+		var gold := Color(0.72, 0.52, 0.95)
+		var gold_d := Color(0.48, 0.32, 0.70)
+		var skin := Color(0.94, 0.80, 0.62)
+		var stf := Color(0.22, 0.12, 0.38)
+		var cx := Color(0.72, 0.25, 1.00)
+		var b := 0.0
+		draw_circle(Vector2(0, 24), 13, Color(0, 0, 0, 0.16))
+		draw_line(Vector2(16, 22 + b), Vector2(19, -28 + b), stf, 4.0)
+		draw_line(Vector2(16, 22 + b), Vector2(19, -28 + b), stf.lightened(0.28), 1.5)
+		for ry in [-18, -8, 2, 12]:
+			draw_line(Vector2(16, ry + b), Vector2(22, ry + b), gold_d, 1.0)
+		var ra1 := 0.0
+		draw_arc(Vector2(19, -20 + b), 5, ra1, ra1 + TAU * 0.70, 12, cx, 1.5)
+		var cg := 7.5
+		draw_circle(Vector2(19, -33 + b), cg, cx)
+		draw_circle(Vector2(22, -36 + b), 3.5, cx.lightened(0.30))
+		draw_circle(Vector2(16, -36 + b), 2.5, cx.lightened(0.25))
+		draw_circle(Vector2(19, -28 + b), 2.0, cx.lightened(0.15))
+		draw_circle(Vector2(21, -35 + b), 2.0, Color(1, 1, 1, 0.50))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-14, -10 + b), Vector2(14, -10 + b),
+			Vector2(17, 24 + b), Vector2(-17, 24 + b)
+		]), robe)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(5, -10 + b), Vector2(14, -10 + b),
+			Vector2(17, 24 + b), Vector2(8, 24 + b)
+		]), robe_d)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-5, -10 + b), Vector2(5, -10 + b),
+			Vector2(6, 24 + b), Vector2(-6, 24 + b)
+		]), robe_l)
+		draw_line(Vector2(-17, 19 + b), Vector2(17, 19 + b), gold, 2.0)
+		draw_line(Vector2(-17, 22 + b), Vector2(17, 22 + b), gold_d, 1.0)
+		draw_line(Vector2(-5, -10 + b), Vector2(-6, 24 + b), gold_d, 1.0)
+		draw_line(Vector2(5, -10 + b), Vector2(6, 24 + b), gold_d, 1.0)
+		draw_circle(Vector2(-19, -7 + b), 8, robe_d)
+		draw_arc(Vector2(-19, -7 + b), 8, -PI * 0.9, PI * 0.1, 10, gold, 1.5)
+		draw_circle(Vector2(-19, -11 + b), 5, robe)
+		draw_arc(Vector2(-19, -11 + b), 5, -PI, 0, 8, gold, 1.0)
+		draw_circle(Vector2(19, -7 + b), 8, robe_d)
+		draw_arc(Vector2(19, -7 + b), 8, -PI * 0.1, PI * 0.9, 10, gold, 1.5)
+		draw_circle(Vector2(19, -11 + b), 5, robe)
+		draw_arc(Vector2(19, -11 + b), 5, -PI, 0, 8, gold, 1.0)
+		draw_rect(Rect2(-13, -2 + b, 26, 5), gold_d)
+		draw_rect(Rect2(-13, -2 + b, 26, 2), gold)
+		draw_rect(Rect2(-4, -3 + b, 8, 7), gold)
+		draw_rect(Rect2(-2, -1 + b, 4, 3), robe_d)
+		draw_rect(Rect2(-17, 2 + b, 5, 7), robe_d)
+		draw_line(Vector2(-17, 4 + b), Vector2(-12, 4 + b), gold_d, 1.0)
+		draw_rect(Rect2(12, 2 + b, 4, 9), Color(0.30, 0.14, 0.48))
+		draw_rect(Rect2(12, 2 + b, 4, 2), gold)
+		draw_rect(Rect2(-22, -7 + b, 10, 5), skin)
+		draw_rect(Rect2(12, -7 + b, 10, 5), skin)
+		draw_circle(Vector2(0, -17 + b), 7, skin)
+		var ge := 0.70
+		var eye_c := Color(0.72, 0.25, 1.00, ge)
+		draw_circle(Vector2(-3, -18 + b), 1.5, eye_c)
+		draw_circle(Vector2(3, -18 + b), 1.5, eye_c)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-4, -13 + b), Vector2(4, -13 + b),
+			Vector2(3, -9 + b), Vector2(-3, -9 + b)
+		]), Color(0.80, 0.70, 0.56))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-11, -16 + b), Vector2(11, -16 + b),
+			Vector2(9, -26 + b), Vector2(-9, -26 + b)
+		]), robe_d)
+		draw_rect(Rect2(-10, -28 + b, 20, 6), robe)
+		draw_line(Vector2(-10, -28 + b), Vector2(10, -28 + b), gold, 1.5)
+		draw_line(Vector2(-10, -22 + b), Vector2(10, -22 + b), gold, 1.5)
+		draw_rect(Rect2(-9, -35 + b, 18, 8), robe_d)
+		draw_line(Vector2(-9, -35 + b), Vector2(9, -35 + b), gold, 2.0)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-8, -35 + b), Vector2(-4, -35 + b), Vector2(-6, -41 + b)
+		]), gold)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-2, -35 + b), Vector2(2, -35 + b), Vector2(0, -42 + b)
+		]), gold)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(4, -35 + b), Vector2(8, -35 + b), Vector2(6, -41 + b)
+		]), gold)
+		draw_circle(Vector2(-6, -31 + b), 2.0, cx)
+		draw_circle(Vector2(0, -31 + b), 2.5, cx)
+		draw_circle(Vector2(6, -31 + b), 2.0, cx)
+		for rx in [-7, -3, 3, 7]:
+			draw_line(Vector2(rx, -28 + b), Vector2(rx, -26 + b), gold_d, 1.0)
+		for bi in range(2):
+			var bang := float(bi) * PI
+			var bx := cos(bang) * 24
+			var by := -3.0 + b + sin(bang) * 7
+			var ba := 0.72
+			var bc := Color(0.30, 0.14, 0.48, ba)
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(bx - 5, by - 4), Vector2(bx + 5, by - 4),
+				Vector2(bx + 5, by + 4), Vector2(bx - 5, by + 4)
+			]), bc)
+			draw_line(Vector2(bx - 5, by - 4), Vector2(bx - 5, by + 4), bc.darkened(0.3), 1.5)
+			draw_circle(Vector2(bx + 3, by), 1.5, Color(gold.r, gold.g, gold.b, ba))
+		var rune_spd := 0.8
+		for ri in range(3):
+			var rang := float(ri) * (TAU / 3.0)
+			var rrx := cos(rang) * 28
+			var rry := -1.0 + b + sin(rang) * 11
+			var ra := 0.40
+			var rc := Color(cx.r, cx.g, cx.b, ra)
+			draw_circle(Vector2(rrx, rry), 4.5, Color(rc.r, rc.g, rc.b, ra * 0.25))
+			draw_line(Vector2(rrx - 3, rry), Vector2(rrx + 3, rry), rc, 1.5)
+			draw_line(Vector2(rrx, rry - 3), Vector2(rrx, rry + 3), rc, 1.5)
+			draw_line(Vector2(rrx - 2, rry - 2), Vector2(rrx + 2, rry + 2), rc, 1.0)
 
 	func _pv_natures_wrath() -> void:
-		var grn  := Color(0.22, 0.85, 0.35); var drk  := Color(0.08, 0.35, 0.12)
-		var bark := Color(0.38, 0.22, 0.10); var leaf := Color(0.18, 0.72, 0.28)
-		draw_colored_polygon(PackedVector2Array([Vector2(-8,22),Vector2(8,22),Vector2(6,-2),Vector2(-6,-2)]),bark)
-		draw_colored_polygon(PackedVector2Array([Vector2(-5,-2),Vector2(5,-2),Vector2(4,-14),Vector2(-4,-14)]),bark.lightened(0.1))
-		draw_line(Vector2(-8,18),Vector2(-18,28),drk,3.0); draw_line(Vector2(8,18),Vector2(18,28),drk,3.0)
-		draw_circle(Vector2(0,-20),16,drk)
-		draw_circle(Vector2(-10,-16),11,leaf); draw_circle(Vector2(10,-16),11,leaf)
-		draw_circle(Vector2(0,-26),13,grn)
+		var emrld := Color(0.12, 0.72, 0.32)
+		var emrld_l := Color(0.28, 0.95, 0.48)
+		var emrld_d := Color(0.06, 0.40, 0.18)
+		var bark := Color(0.36, 0.20, 0.08)
+		var bark_l := Color(0.54, 0.34, 0.14)
+		var bark_d := Color(0.22, 0.12, 0.04)
+		var gold := Color(0.88, 0.78, 0.18)
+		var vine := Color(0.20, 0.52, 0.16)
+		var spirit := Color(0.45, 1.00, 0.58)
+		var b := 0.0
+		draw_circle(Vector2(0, 24), 16, Color(0, 0, 0, 0.20))
+		draw_line(Vector2(-5, 18 + b), Vector2(-24, 28 + b), bark_d, 5.5)
+		draw_line(Vector2(-3, 20 + b), Vector2(-18, 30 + b), bark_d, 4.0)
+		draw_line(Vector2(-1, 20 + b), Vector2(-8, 30 + b), bark_d, 3.0)
+		draw_line(Vector2(1, 20 + b), Vector2(8, 30 + b), bark_d, 3.0)
+		draw_line(Vector2(3, 20 + b), Vector2(18, 30 + b), bark_d, 4.0)
+		draw_line(Vector2(5, 18 + b), Vector2(24, 28 + b), bark_d, 5.5)
+		draw_line(Vector2(0, 22 + b), Vector2(0, 30 + b), bark_d, 4.0)
+		draw_line(Vector2(-5, 18 + b), Vector2(-24, 28 + b), Color(bark_l.r, bark_l.g, bark_l.b, 0.40), 1.5)
+		draw_line(Vector2(5, 18 + b), Vector2(24, 28 + b), Color(bark_l.r, bark_l.g, bark_l.b, 0.40), 1.5)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-11, -12 + b), Vector2(11, -12 + b),
+			Vector2(13, 22 + b), Vector2(-13, 22 + b)
+		]), bark)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(4, -12 + b), Vector2(11, -12 + b),
+			Vector2(13, 22 + b), Vector2(6, 22 + b)
+		]), bark_d)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-11, -12 + b), Vector2(-4, -12 + b),
+			Vector2(-4, 22 + b), Vector2(-11, 22 + b)
+		]), Color(bark_l.r, bark_l.g, bark_l.b, 0.45))
+		var ra := 0.52
+		draw_line(Vector2(-6, -8 + b), Vector2(-8, 0 + b), Color(gold.r, gold.g, gold.b, ra * 0.65), 1.2)
+		draw_line(Vector2(-8, 0 + b), Vector2(-5, 6 + b), Color(gold.r, gold.g, gold.b, ra * 0.55), 1.0)
+		draw_line(Vector2(4, -6 + b), Vector2(6, 2 + b), Color(gold.r, gold.g, gold.b, ra * 0.60), 1.0)
+		draw_line(Vector2(-2, 6 + b), Vector2(3, 12 + b), Color(gold.r, gold.g, gold.b, ra * 0.45), 0.9)
+		draw_arc(Vector2(-3, 2 + b), 8.0, -PI * 0.5, PI * 0.7, 10, vine, 2.0)
+		draw_arc(Vector2(3, 10 + b), 8.0, PI * 0.3, PI * 1.6, 10, vine, 2.0)
+		draw_arc(Vector2(-2, 16 + b), 6.0, -PI * 0.3, PI * 0.6, 8, vine, 1.5)
+		draw_arc(Vector2(-3, 2 + b), 8.0, -PI * 0.5, PI * 0.7, 10, Color(gold.r, gold.g, gold.b, 0.35), 0.7)
+		draw_line(Vector2(-9, -6 + b), Vector2(-3, -9 + b), bark_d, 2.5)
+		draw_line(Vector2(3, -9 + b), Vector2(9, -6 + b), bark_d, 2.5)
+		draw_circle(Vector2(-6, -5 + b), 4.5, Color(emrld.r, emrld.g, emrld.b, ra))
+		draw_circle(Vector2(6, -5 + b), 4.5, Color(emrld.r, emrld.g, emrld.b, ra))
+		draw_circle(Vector2(-6, -5 + b), 2.8, Color(emrld_l.r, emrld_l.g, emrld_l.b, ra + 0.10))
+		draw_circle(Vector2(6, -5 + b), 2.8, Color(emrld_l.r, emrld_l.g, emrld_l.b, ra + 0.10))
+		draw_circle(Vector2(-6, -5 + b), 1.5, Color(1, 1, 1, ra * 0.90))
+		draw_circle(Vector2(6, -5 + b), 1.5, Color(1, 1, 1, ra * 0.90))
+		draw_line(Vector2(-2, -4 + b), Vector2(-2, 0 + b), bark_d, 1.5)
+		draw_line(Vector2(2, -4 + b), Vector2(2, 0 + b), bark_d, 1.5)
+		draw_arc(Vector2(0, 3 + b), 6.0, PI * 0.10, PI * 0.90, 10, bark_d, 2.5)
+		draw_arc(Vector2(0, 3 + b), 5.5, PI * 0.15, PI * 0.85, 10, Color(gold.r, gold.g, gold.b, 0.50), 1.0)
+		for _i in range(3):
+			var _cx := float(_i - 1) * 7.0
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(_cx - 2, -14 + b), Vector2(_cx + 2, -14 + b),
+				Vector2(_cx + 1.5, -18 + b), Vector2(_cx - 1.5, -18 + b)
+			]), Color(emrld_l.r, emrld_l.g, emrld_l.b, 0.82))
+			draw_line(Vector2(_cx - 1, -14 + b), Vector2(_cx, -17 + b), Color(1, 1, 1, 0.45), 0.7)
+		draw_circle(Vector2(0, -22 + b), 16, emrld_d)
+		draw_circle(Vector2(-14, -20 + b), 13, emrld)
+		draw_circle(Vector2(14, -20 + b), 13, emrld)
+		draw_circle(Vector2(-7, -32 + b), 12, emrld_l)
+		draw_circle(Vector2(7, -32 + b), 12, emrld_l)
+		draw_circle(Vector2(0, -38 + b), 12, emrld_l.lightened(0.05))
+		draw_circle(Vector2(-10, -40 + b), 8, Color(emrld_l.r, emrld_l.g, emrld_l.b, 0.88))
+		draw_circle(Vector2(10, -40 + b), 8, Color(emrld_l.r, emrld_l.g, emrld_l.b, 0.88))
+		draw_circle(Vector2(0, -44 + b), 7, Color(emrld_l.r, emrld_l.g, emrld_l.b, 0.80))
+		for _i in range(6):
+			var _la := float(_i) * TAU / 6.0
+			var _lx := cos(_la) * 20.0
+			var _ly := sin(_la) * 9.0 - 28.0 + b
+			var _lpa := 0.42
+			draw_circle(Vector2(_lx, _ly), 3.5, Color(emrld_l.r, emrld_l.g, emrld_l.b, _lpa))
+			draw_circle(Vector2(_lx, _ly), 2.0, Color(1, 1, 1, _lpa * 0.65))
+		for _i in range(3):
+			var _sa := float(_i) * TAU / 3.0
+			var _sx := cos(_sa) * 26.0
+			var _sy := sin(_sa) * 11.0 - 10.0 + b
+			var _spa := 0.38
+			draw_circle(Vector2(_sx, _sy), 4.5, Color(spirit.r, spirit.g, spirit.b, _spa * 0.40))
+			draw_circle(Vector2(_sx, _sy), 3.0, Color(spirit.r, spirit.g, spirit.b, _spa))
+			draw_circle(Vector2(_sx, _sy), 1.5, Color(1, 1, 1, _spa + 0.10))
+		var aa := 0.14
+		draw_arc(Vector2(0, -12 + b), 32, 0, TAU, 36, Color(emrld_l.r, emrld_l.g, emrld_l.b, aa), 4.0)
 
 	func _pv_void_titan() -> void:
-		var void2 := Color(0.18, 0.08, 0.38); var purp := Color(0.50, 0.25, 0.90)
-		var dark := Color(0.08, 0.04, 0.18); var crys := Color(0.72, 0.45, 1.00)
-		draw_colored_polygon(PackedVector2Array([Vector2(-12,6),Vector2(-3,6),Vector2(-4,22),Vector2(-13,22)]),dark)
-		draw_colored_polygon(PackedVector2Array([Vector2(3,6),Vector2(12,6),Vector2(13,22),Vector2(4,22)]),dark)
-		draw_colored_polygon(PackedVector2Array([Vector2(-14,-8),Vector2(14,-8),Vector2(12,8),Vector2(-12,8)]),void2)
-		draw_colored_polygon(PackedVector2Array([Vector2(-10,-8),Vector2(10,-8),Vector2(9,2),Vector2(-9,2)]),purp.darkened(0.25))
-		draw_colored_polygon(PackedVector2Array([Vector2(-14,-8),Vector2(-20,-4),Vector2(-18,4),Vector2(-13,2)]),void2.lightened(0.1))
-		draw_colored_polygon(PackedVector2Array([Vector2(14,-8),Vector2(20,-4),Vector2(18,4),Vector2(13,2)]),void2.lightened(0.1))
-		draw_circle(Vector2(0,-18),11,dark)
-		draw_colored_polygon(PackedVector2Array([Vector2(-7,-20),Vector2(7,-20),Vector2(6,-16),Vector2(-6,-16)]),crys)
-		draw_colored_polygon(PackedVector2Array([Vector2(0,-6),Vector2(-5,0),Vector2(0,6),Vector2(5,0)]),crys)
+		var void2 := Color(0.14, 0.06, 0.28)
+		var void_l := Color(0.28, 0.14, 0.52)
+		var dark := Color(0.06, 0.02, 0.12)
+		var purp := Color(0.50, 0.25, 0.90)
+		var purp_l := Color(0.72, 0.50, 1.00)
+		var vblue := Color(0.22, 0.40, 1.00)
+		var crys := Color(0.72, 0.45, 1.00)
+		var crys_l := Color(0.90, 0.72, 1.00)
+		var b := 0.0
+		draw_circle(Vector2(0, 24), 18, Color(0, 0, 0, 0.28))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-15, 12 + b), Vector2(-3, 12 + b),
+			Vector2(-4, 22 + b), Vector2(-16, 22 + b)
+		]), dark)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(3, 12 + b), Vector2(15, 12 + b),
+			Vector2(16, 22 + b), Vector2(4, 22 + b)
+		]), dark)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-15, 12 + b), Vector2(-3, 12 + b),
+			Vector2(-3, 14 + b), Vector2(-15, 14 + b)
+		]), void_l)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(3, 12 + b), Vector2(15, 12 + b),
+			Vector2(15, 14 + b), Vector2(3, 14 + b)
+		]), void_l)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-14, 4 + b), Vector2(-3, 4 + b),
+			Vector2(-3, 12 + b), Vector2(-14, 12 + b)
+		]), void2)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(3, 4 + b), Vector2(14, 4 + b),
+			Vector2(14, 12 + b), Vector2(3, 12 + b)
+		]), void2)
+		draw_line(Vector2(-13, 6 + b), Vector2(-4, 6 + b), Color(purp.r, purp.g, purp.b, 0.45), 0.9)
+		draw_line(Vector2(4, 6 + b), Vector2(13, 6 + b), Color(purp.r, purp.g, purp.b, 0.45), 0.9)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-17, -10 + b), Vector2(17, -10 + b),
+			Vector2(15, 4 + b), Vector2(-15, 4 + b)
+		]), void2)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-17, -10 + b), Vector2(17, -10 + b),
+			Vector2(14, -8 + b), Vector2(-14, -8 + b)
+		]), void_l)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(12, -10 + b), Vector2(17, -10 + b),
+			Vector2(15, 4 + b), Vector2(11, 4 + b)
+		]), dark)
+		draw_line(Vector2(-12, -8 + b), Vector2(-6, -2 + b), Color(vblue.r, vblue.g, vblue.b, 0.55), 1.0)
+		draw_line(Vector2(-6, -2 + b), Vector2(-8, 2 + b), Color(vblue.r, vblue.g, vblue.b, 0.42), 0.9)
+		draw_line(Vector2(5, -7 + b), Vector2(9, -1 + b), Color(vblue.r, vblue.g, vblue.b, 0.50), 1.0)
+		var vc_s := 8.0
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(0, -5 - vc_s * 0.6 + b), Vector2(-vc_s * 0.5, -3 + b),
+			Vector2(0, -3 + vc_s * 0.6 + b), Vector2(vc_s * 0.5, -3 + b)
+		]), crys)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(0, -5 - vc_s * 0.6 + b), Vector2(-vc_s * 0.5, -3 + b),
+			Vector2(0, -3 + vc_s * 0.5 + b), Vector2(vc_s * 0.45, -3 + b)
+		]), Color(purp_l.r, purp_l.g, purp_l.b, 0.75))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-2, -5 - vc_s * 0.3 + b), Vector2(-vc_s * 0.2, -3 + b),
+			Vector2(-2, -3 + vc_s * 0.3 + b), Vector2(vc_s * 0.15, -3 + b)
+		]), Color(crys_l.r, crys_l.g, crys_l.b, 0.70))
+		draw_circle(Vector2(-1, -3 + b), 2.5, Color(1, 1, 1, 0.82))
+		draw_circle(Vector2(0, -3 + b), vc_s + 4.0, Color(crys.r, crys.g, crys.b, 0.16))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-17, -10 + b), Vector2(-26, -6 + b),
+			Vector2(-28, 2 + b), Vector2(-24, 6 + b),
+			Vector2(-17, 4 + b)
+		]), void2)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-17, -10 + b), Vector2(-26, -6 + b),
+			Vector2(-23, -5 + b), Vector2(-17, -8 + b)
+		]), void_l)
+		draw_line(Vector2(-26, -6 + b), Vector2(-28, 2 + b), Color(purp.r, purp.g, purp.b, 0.52), 1.2)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-22, -10 + b), Vector2(-18, -10 + b), Vector2(-20, -18 + b)
+		]), purp_l)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-27, -6 + b), Vector2(-24, -8 + b), Vector2(-28, -14 + b)
+		]), purp_l)
+		draw_circle(Vector2(-24, -5 + b), 3.0, Color(vblue.r, vblue.g, vblue.b, 0.62))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(17, -10 + b), Vector2(26, -6 + b),
+			Vector2(28, 2 + b), Vector2(24, 6 + b),
+			Vector2(17, 4 + b)
+		]), void2)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(17, -10 + b), Vector2(26, -6 + b),
+			Vector2(23, -5 + b), Vector2(17, -8 + b)
+		]), void_l)
+		draw_line(Vector2(26, -6 + b), Vector2(28, 2 + b), Color(purp.r, purp.g, purp.b, 0.52), 1.2)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(18, -10 + b), Vector2(22, -10 + b), Vector2(20, -18 + b)
+		]), purp_l)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(24, -8 + b), Vector2(27, -6 + b), Vector2(28, -14 + b)
+		]), purp_l)
+		draw_circle(Vector2(24, -5 + b), 3.0, Color(vblue.r, vblue.g, vblue.b, 0.62))
+		draw_circle(Vector2(0, -22 + b), 12, dark)
+		draw_circle(Vector2(0, -23 + b), 11, void2)
+		draw_circle(Vector2(0, -24 + b), 9.5, void_l)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-11, -24 + b), Vector2(11, -24 + b),
+			Vector2(10, -14 + b), Vector2(-10, -14 + b)
+		]), void2.lightened(0.08))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(7, -24 + b), Vector2(11, -24 + b),
+			Vector2(10, -14 + b), Vector2(6, -14 + b)
+		]), dark)
+		var va := 0.65
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-9, -24 + b), Vector2(9, -24 + b),
+			Vector2(7, -19 + b), Vector2(-7, -19 + b)
+		]), Color(crys.r, crys.g, crys.b, va))
+		draw_line(Vector2(-9, -24 + b), Vector2(9, -24 + b), Color(crys_l.r, crys_l.g, crys_l.b, va * 0.70), 0.9)
+		draw_rect(Rect2(-11, -31 + b, 22, 5), void2)
+		draw_rect(Rect2(-11, -31 + b, 22, 2), void_l)
+		for _i in range(3):
+			var _sx := float(_i - 1) * 7.0
+			var _sh := 8.0 if abs(float(_i) - 1) < 0.5 else 5.5
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(_sx - 2, -31 + b), Vector2(_sx + 2, -31 + b),
+				Vector2(_sx, -31 - _sh + b)
+			]), purp_l)
+			draw_circle(Vector2(_sx, -31 - _sh + b), 2.0, Color(crys_l.r, crys_l.g, crys_l.b, 0.88))
+		for _i in range(6):
+			var _oa := float(_i) * TAU / 6.0
+			var _ox := cos(_oa) * 22.0
+			var _oy := sin(_oa) * 10.0 - 6.0 + b
+			var _oa2 := 0.48
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(_ox - 3, _oy - 2), Vector2(_ox + 2, _oy - 3),
+				Vector2(_ox + 3, _oy + 2), Vector2(_ox - 2, _oy + 3)
+			]), Color(void_l.r, void_l.g, void_l.b, _oa2))
+			draw_circle(Vector2(_ox, _oy), 2.0, Color(purp.r, purp.g, purp.b, _oa2 * 0.70))
+			draw_circle(Vector2(_ox, _oy), 1.0, Color(crys.r, crys.g, crys.b, _oa2))
+		var rda := 0.12
+		draw_arc(Vector2(0, -6 + b), 32, 0, TAU, 36, Color(purp.r, purp.g, purp.b, rda), 3.5)
+		draw_arc(Vector2(0, -6 + b), 36, 0, TAU, 40, Color(vblue.r, vblue.g, vblue.b, rda * 0.65), 2.0)
 
 	# ── Hero-exclusive visuals (idx 50-52) ────────────────────────────────────
 

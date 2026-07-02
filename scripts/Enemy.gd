@@ -15,8 +15,7 @@ var boss_stage : int   = 1   # 1-10
 
 var wave_id          : int   = -1
 var is_poisoned      : bool  = false
-var poison_stacks    : int   = 0
-var poison_timer     : float = 0.0
+var _poison_sources  : Dictionary = {}   # {source_node: {timer, bonus}} — one slot per tower
 var damage_taken_mult: float = 1.0
 var melee_resist     : float = 0.0
 var hits_taken       : int   = 0
@@ -26,10 +25,7 @@ var _taunt_timer     : float = 0.0
 var _path          : Array   = []
 var _current_wp    : int     = 1
 var _anim_time     : float   = 0.0
-var _slow_timer      : float   = 0.0
-var _chrono_timer    : float   = 0.0   # chrono mage stackable 15% slow timer
-var _mild_slow_timer : float   = 0.0   # dual debuff: 10% slow, 1s
-var _frost_slow_timer: float   = 0.0   # frost herald: 5% slow, 2s
+var _slow_sources    : Dictionary = {}  # {source_node: {timer, factor}} — per-source, stacks multiplicatively
 
 var brittle_bonus       : float   = 0.0   # stone guardian: next hit deals +20 extra damage
 var _brittle_popin_t    : float   = 0.0   # 0→0.15 scale-in animation
@@ -76,25 +72,17 @@ func setup(path: Array, enemy_hp: float, enemy_speed: float,
 	add_to_group("enemies")
 
 
-func apply_mild_slow(duration: float) -> void:
-	_mild_slow_timer = max(_mild_slow_timer, duration)
-	_recalc_speed()
-
-func apply_frost_slow(duration: float) -> void:
-	_frost_slow_timer = max(_frost_slow_timer, duration)
-	_recalc_speed()
-
 func is_slowed() -> bool:
-	return _slow_timer > 0.0 or _chrono_timer > 0.0 or _mild_slow_timer > 0.0 or _frost_slow_timer > 0.0
+	return not _slow_sources.is_empty()
 
-func apply_slow(duration: float, factor: float = 0.5) -> void:
-	if _base_speed > 0.0:
-		_slow_timer = max(_slow_timer, duration)
-		_recalc_speed()
-
-func apply_chrono_slow(duration: float) -> void:
-	# Chrono Mage: 15% slow, stacks multiplicatively with apply_slow
-	_chrono_timer = max(_chrono_timer, duration)
+func apply_slow(source: Node, duration: float, factor: float) -> void:
+	if _base_speed <= 0.0:
+		return
+	var existing : Dictionary = _slow_sources.get(source, {})
+	_slow_sources[source] = {
+		"timer": max(existing.get("timer", 0.0), duration),
+		"factor": factor
+	}
 	_recalc_speed()
 
 func _recalc_speed() -> void:
@@ -104,21 +92,17 @@ func _recalc_speed() -> void:
 		speed = 0.0
 		return
 	var s := _base_speed
-	if _slow_timer > 0.0:
-		s *= 0.75 if is_boss else 0.5    # regular slow: 50% (25% on bosses)
-	if _chrono_timer > 0.0:
-		s *= 0.925 if is_boss else 0.85  # chrono slow: 15% (7.5% on bosses)
-	if _mild_slow_timer > 0.0:
-		s *= 0.90                        # dual debuff: 10% slow (no boss resistance)
-	if _frost_slow_timer > 0.0:
-		s *= 0.95                        # frost herald: 5% slow
+	for _src in _slow_sources:
+		var _f : float = _slow_sources[_src]["factor"] * (0.5 if is_boss else 1.0)
+		s *= (1.0 - _f)
 	speed = s
 
 func _recalc_damage_mult() -> void:
-	var mult         := 1.0
-	var poison_bonus : float = 0.10 if not is_boss else 0.05
-	mult += poison_stacks * poison_bonus
-	var taunt_bonus  : float = 0.20 if not is_boss else 0.10
+	var mult := 1.0
+	for _src in _poison_sources:
+		var _b : float = _poison_sources[_src]["bonus"]
+		mult += _b * (0.5 if is_boss else 1.0)
+	var taunt_bonus : float = 0.20 if not is_boss else 0.10
 	if is_taunted:
 		mult += taunt_bonus
 	damage_taken_mult = mult
@@ -136,10 +120,13 @@ func apply_bleed() -> void:
 	_bleed_duration  = max(_bleed_duration, 3.0)   # refresh/extend bleed to 3s
 
 
-func apply_poison(duration: float) -> void:
-	is_poisoned   = true
-	poison_timer  = max(poison_timer, duration)   # refresh duration, don't shorten
-	poison_stacks = min(poison_stacks + 1, 3)
+func apply_poison_source(source_id: String, duration: float, bonus: float) -> void:
+	var existing : Dictionary = _poison_sources.get(source_id, {})
+	_poison_sources[source_id] = {
+		"timer": max(existing.get("timer", 0.0), duration),
+		"bonus": bonus
+	}
+	is_poisoned = true
 	_recalc_damage_mult()
 
 
@@ -193,29 +180,16 @@ func _process(delta: float) -> void:
 		if _bleed_trail[i]["age"] >= 1.5:
 			_bleed_trail.remove_at(i)
 
-	var _speed_changed := false
-	if _slow_timer > 0.0:
-		_slow_timer -= delta
-		if _slow_timer <= 0.0:
-			_slow_timer = 0.0
-			_speed_changed = true
-	if _chrono_timer > 0.0:
-		_chrono_timer -= delta
-		if _chrono_timer <= 0.0:
-			_chrono_timer = 0.0
-			_speed_changed = true
-	if _mild_slow_timer > 0.0:
-		_mild_slow_timer -= delta
-		if _mild_slow_timer <= 0.0:
-			_mild_slow_timer = 0.0
-			_speed_changed = true
-	if _frost_slow_timer > 0.0:
-		_frost_slow_timer -= delta
-		if _frost_slow_timer <= 0.0:
-			_frost_slow_timer = 0.0
-			_speed_changed = true
-	if _speed_changed:
-		_recalc_speed()
+	if not _slow_sources.is_empty():
+		var _slow_expired : Array = []
+		for _src in _slow_sources:
+			_slow_sources[_src]["timer"] -= delta
+			if _slow_sources[_src]["timer"] <= 0.0:
+				_slow_expired.append(_src)
+		if not _slow_expired.is_empty():
+			for _src in _slow_expired:
+				_slow_sources.erase(_src)
+			_recalc_speed()
 	# Brittle icon pop-in
 	if _brittle_popin_t > 0.0:
 		_brittle_popin_t = max(0.0, _brittle_popin_t - delta)
@@ -234,11 +208,29 @@ func _process(delta: float) -> void:
 			is_taunted = false
 			_recalc_speed()
 			_recalc_damage_mult()
-	if poison_timer > 0.0:
-		poison_timer -= delta
-		if poison_timer <= 0.0:
-			is_poisoned   = false
-			poison_stacks = 0
+	if not _poison_sources.is_empty():
+		var _to_erase : Array = []
+		var _changed  := false
+		for _src in _poison_sources:
+			var _entry : Dictionary = _poison_sources[_src]
+			if _entry.get("fading", false):
+				_entry["bonus"] -= 0.01 * delta
+				if _entry["bonus"] <= 0.0:
+					_to_erase.append(_src)
+				_changed = true
+			else:
+				_entry["timer"] -= delta
+				if _entry["timer"] <= 0.0:
+					if _src == "poison_tower" and GameData.turret_has_special("poison_tower"):
+						_entry["fading"] = true
+					else:
+						_to_erase.append(_src)
+					_changed = true
+		if not _to_erase.is_empty():
+			for _src in _to_erase:
+				_poison_sources.erase(_src)
+			is_poisoned = not _poison_sources.is_empty()
+		if _changed:
 			_recalc_damage_mult()
 	if GameData.buff_dot_dps > 0.0:
 		_dot_timer += delta
@@ -377,8 +369,10 @@ func _draw() -> void:
 		_draw_enemy()
 	if is_slowed():
 		# Use the longest remaining slow timer for alpha, so faint slows still show
-		var sa := clampf(maxf(maxf(_slow_timer, _chrono_timer), maxf(_mild_slow_timer, _frost_slow_timer)), 0.0, 1.0)
-		# Clamp to a visible minimum so short-duration slows (e.g. 5%) are always readable
+		var _sa_max : float = 0.0
+		for _src in _slow_sources:
+			_sa_max = maxf(_sa_max, _slow_sources[_src]["timer"])
+		var sa := clampf(_sa_max, 0.0, 1.0)
 		sa = maxf(sa, 0.35)
 		var r  := 24.0 if is_boss else 18.0
 		draw_circle(Vector2.ZERO, r, Color(0.45, 0.82, 1.0, 0.18 * sa))
@@ -513,31 +507,34 @@ func _draw_boss() -> void:
 func _draw_slime() -> void:
 	var t    := _anim_time
 	var w    := sin(t * 3.8) * 2.2
-	var col  := Color(0.18, 0.78, 0.25)
-	var dark := Color(0.08, 0.46, 0.14)
-	var lite := Color(0.40, 0.95, 0.48)
+	var col  : Color
+	var dark : Color
+	var lite : Color
+	if boss_stage <= 1:
+		col  = Color(0.18, 0.78, 0.25); dark = Color(0.08, 0.46, 0.14); lite = Color(0.40, 0.95, 0.48)
+	else:
+		col  = Color(0.18, 0.55, 0.72); dark = Color(0.08, 0.30, 0.46); lite = Color(0.40, 0.72, 0.90)
 	# Drop shadow
 	draw_circle(Vector2(1, 19), 13, Color(0, 0, 0, 0.18))
-	# Body layers for depth
-	draw_circle(Vector2(0, 3 + w * 0.15), 18 + w * 0.4, dark)
+	# Body layers for depth — dark uses same center as main body so border is always gap-free
+	draw_circle(Vector2(0, 2 + w * 0.10), 19 + w * 0.4, dark)
 	draw_circle(Vector2(0, 2 + w * 0.10), 17 + w * 0.4, col)
-	# Translucent inner glow
-	draw_circle(Vector2(0, 2), 13, Color(lite.r, lite.g, lite.b, 0.22))
-	# Internal bubbles
-	draw_circle(Vector2( 6, 5), 4.5, Color(lite.r, lite.g, lite.b, 0.30))
-	draw_circle(Vector2(-5, 7), 3.0, Color(lite.r, lite.g, lite.b, 0.22))
-	draw_circle(Vector2( 5, 7), 2.0, Color(lite.r, lite.g, lite.b, 0.18))
-	# Primary specular highlight
-	draw_circle(Vector2(-5, -7), 6.5, Color(1, 1, 1, 0.50))
-	draw_circle(Vector2(-4, -9), 3.0, Color(1, 1, 1, 0.75))
-	# Outline
-	draw_circle(Vector2(0, 2), 18, dark, false, 2.0)
+	# Inner glow (pre-multiplied opaque)
+	draw_circle(Vector2(0, 2), 13, col.lerp(lite, 0.22))
+	# Internal bubbles (pre-multiplied opaque)
+	draw_circle(Vector2( 6, 5), 4.5, col.lerp(lite, 0.30))
+	draw_circle(Vector2(-5, 7), 3.0, col.lerp(lite, 0.22))
+	draw_circle(Vector2( 5, 7), 2.0, col.lerp(lite, 0.18))
+	# Primary specular highlight (pre-multiplied opaque)
+	draw_circle(Vector2(-5, -7), 6.5, col.lerp(Color(1, 1, 1), 0.50))
+	draw_circle(Vector2(-4, -9), 3.0, col.lerp(Color(1, 1, 1), 0.75))
 	# Sclera
 	draw_circle(Vector2(-6, -1), 5.5, Color(0.96, 0.98, 0.94))
 	draw_circle(Vector2( 6, -1), 5.5, Color(0.96, 0.98, 0.94))
 	# Iris
-	draw_circle(Vector2(-5.5, -1), 3.5, Color(0.05, 0.48, 0.14))
-	draw_circle(Vector2( 6.5, -1), 3.5, Color(0.05, 0.48, 0.14))
+	var iris := Color(0.05, 0.48, 0.14) if boss_stage <= 1 else Color(0.05, 0.28, 0.62)
+	draw_circle(Vector2(-5.5, -1), 3.5, iris)
+	draw_circle(Vector2( 6.5, -1), 3.5, iris)
 	# Pupil
 	draw_circle(Vector2(-5.5, -1), 2.0, Color(0.02, 0.02, 0.02))
 	draw_circle(Vector2( 6.5, -1), 2.0, Color(0.02, 0.02, 0.02))
@@ -553,9 +550,13 @@ func _draw_slime() -> void:
 func _draw_goblin() -> void:
 	var t       := _anim_time
 	var bob     := sin(t * 3.2) * 1.2
-	var skin    := Color(0.32, 0.56, 0.16)
-	var skin_d  := Color(0.18, 0.34, 0.08)
-	var skin_l  := Color(0.48, 0.72, 0.26)
+	var skin    : Color
+	var skin_d  : Color
+	var skin_l  : Color
+	if boss_stage <= 3:
+		skin = Color(0.32, 0.56, 0.16); skin_d = Color(0.18, 0.34, 0.08); skin_l = Color(0.48, 0.72, 0.26)
+	else:
+		skin = Color(0.46, 0.26, 0.50); skin_d = Color(0.28, 0.14, 0.30); skin_l = Color(0.62, 0.40, 0.66)
 	var leather := Color(0.32, 0.20, 0.08)
 	var leath_l := Color(0.50, 0.34, 0.16)
 	var steel   := Color(0.52, 0.50, 0.46)
@@ -732,122 +733,128 @@ func _draw_goblin() -> void:
 
 
 func _draw_skeleton() -> void:
-	var t    := _anim_time
-	var bob  := sin(t * 2.8) * 1.5
-	var bone := Color(0.86, 0.84, 0.74)
-	var bone_d:= Color(0.58, 0.55, 0.44)
-	var bone_l:= Color(0.96, 0.94, 0.88)
-	var dark := Color(0.12, 0.10, 0.08)
-	var glow := Color(0.05, 0.90, 0.58)
-	var rust := Color(0.55, 0.32, 0.12)
+	var t      := _anim_time
+	var bob    := sin(t * 2.8) * 0.75
+	var gp     := 0.6 + sin(t * 3.5) * 0.4
+	var bone   := Color(0.86, 0.84, 0.74)
+	var bone_d := Color(0.55, 0.54, 0.44)
+	var bone_l := Color(0.96, 0.95, 0.91)
+	var dark   := Color(0.10, 0.08, 0.06)
+	var glow   := Color(0.12, 1.00, 0.47) if boss_stage <= 5 else Color(0.90, 0.55, 0.05)
+	var cloak  := Color(0.094, 0.063, 0.165)   # #18102a
+	var cowl   := Color(0.047, 0.039, 0.102)   # #0c0a1a
+	var rune_a := 0.4 + sin(t * 4.0) * 0.3
 
 	# Shadow
-	draw_circle(Vector2(1, 21 + bob), 11, Color(0, 0, 0, 0.16))
+	draw_circle(Vector2(1, 22 + bob), 12, Color(0, 0, 0, 0.22))
 
-	# Pelvis / hip bones
+	# Dark cloak body
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(-8, 4 + bob), Vector2(8, 4 + bob),
-		Vector2(10, 16 + bob), Vector2(-10, 16 + bob)
-	]), bone)
+		Vector2(-16, -8 + bob), Vector2(16, -8 + bob),
+		Vector2(18,  22 + bob), Vector2(14, 18 + bob),
+		Vector2(12,  22 + bob), Vector2( 8, 20 + bob),
+		Vector2( 4,  24 + bob), Vector2( 0, 21 + bob),
+		Vector2(-4,  24 + bob), Vector2(-8, 20 + bob),
+		Vector2(-12, 18 + bob), Vector2(-14, 22 + bob),
+		Vector2(-18, 22 + bob)
+	]), cloak)
+	# Cloak left-face highlight
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(-8, 4 + bob), Vector2(8, 4 + bob),
-		Vector2(10, 16 + bob), Vector2(-10, 16 + bob)
-	]), bone_d)
-	draw_polyline(PackedVector2Array([
-		Vector2(-8, 4 + bob), Vector2(8, 4 + bob),
-		Vector2(10, 16 + bob), Vector2(-10, 16 + bob),
-		Vector2(-8, 4 + bob)
-	]), bone_d, 1.2)
-	# Hip line detail
-	draw_line(Vector2(-8, 10 + bob), Vector2(8, 10 + bob), bone_d, 1.5)
+		Vector2(-16, -8 + bob), Vector2(-3, -8 + bob),
+		Vector2( -3, 22 + bob), Vector2(-12, 18 + bob),
+		Vector2(-14, 22 + bob), Vector2(-18, 22 + bob)
+	]), Color(0.31, 0.20, 0.47, 0.28))
 
-	# Leg bones
-	draw_line(Vector2(-5, 16 + bob), Vector2(-6, 22 + bob), bone, 4.0)
-	draw_line(Vector2( 5, 16 + bob), Vector2( 6, 22 + bob), bone, 4.0)
-	draw_circle(Vector2(-5, 16 + bob), 3.5, bone)
-	draw_circle(Vector2( 5, 16 + bob), 3.5, bone)
-
-	# Spine
+	# Spine vertebrae (peek above cloak)
 	for i in range(4):
 		var sy := -6.0 + i * 4.0 + bob
 		draw_circle(Vector2(0, sy), 3.0, bone)
 		draw_circle(Vector2(0, sy), 3.0, bone_d, false, 1.0)
-		if i < 3:
-			draw_line(Vector2(0, sy + 2), Vector2(0, sy + 4), bone_d, 1.5)
 
-	# Ribcage — individual ribs with shading
-	for i in range(4):
-		var ry := -4.0 + i * 4.0 + bob
-		var rw := 9.0 - i * 0.8
-		# Left rib
-		draw_arc(Vector2(-rw * 0.2, ry), rw, -PI * 0.9, -PI * 0.1, 8, bone, 3.0)
-		draw_arc(Vector2(-rw * 0.2, ry), rw, -PI * 0.9, -PI * 0.1, 8, bone_l, 1.0)
-		# Right rib
-		draw_arc(Vector2( rw * 0.2, ry), rw, -PI * 0.9, -PI * 0.1, 8, bone, 3.0)
-		draw_arc(Vector2( rw * 0.2, ry), rw * 0.95, -PI * 0.9, -PI * 0.1, 8, bone_d, 1.0)
-
-	# Shoulder blades and collar bone
+	# Collar bone
 	draw_line(Vector2(-10, -8 + bob), Vector2(10, -8 + bob), bone, 4.0)
 	draw_line(Vector2(-10, -8 + bob), Vector2(10, -8 + bob), bone_l, 1.5)
-	draw_circle(Vector2(-10, -8 + bob), 4, bone)
-	draw_circle(Vector2( 10, -8 + bob), 4, bone)
+	draw_circle(Vector2(-10, -8 + bob), 3.5, bone)
+	draw_circle(Vector2( 10, -8 + bob), 3.5, bone)
 
-	# Upper arms
+	# Arms
 	draw_line(Vector2(-10, -8 + bob), Vector2(-20,  2 + bob), bone, 4.5)
 	draw_line(Vector2( 10, -8 + bob), Vector2( 20,  2 + bob), bone, 4.5)
 	draw_line(Vector2(-10, -8 + bob), Vector2(-20,  2 + bob), bone_l, 1.5)
 	draw_line(Vector2( 10, -8 + bob), Vector2( 20,  2 + bob), bone_l, 1.5)
-	# Elbow joints
 	draw_circle(Vector2(-20, 2 + bob), 3.5, bone)
 	draw_circle(Vector2( 20, 2 + bob), 3.5, bone)
-	# Forearms
 	draw_line(Vector2(-20, 2 + bob), Vector2(-22, 12 + bob), bone, 3.5)
 	draw_line(Vector2( 20, 2 + bob), Vector2( 22, 12 + bob), bone, 3.5)
 
-	# Rusted sword in right hand
-	draw_line(Vector2(22, 12 + bob), Vector2(30, -8 + bob), rust, 3.5)
-	draw_line(Vector2(22, 12 + bob), Vector2(30, -8 + bob), Color(0.72, 0.46, 0.20), 1.5)
-	draw_line(Vector2(24, 4 + bob), Vector2(32, 4 + bob), bone, 3.0)  # crossguard
-	draw_circle(Vector2(22, 12 + bob), 3, bone)  # grip wrap
+	# Magical rune sword (rotated -0.5 rad at right hand)
+	draw_set_transform(_wobble_offset + Vector2(22, 12 + bob + _knockback_arc_y), -0.5, Vector2.ONE)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-2, 0), Vector2(-1.5, -22), Vector2(0, -26),
+		Vector2(1.5, -22), Vector2(2, 0)
+	]), Color(0.35, 0.35, 0.44))
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-1.5, 0), Vector2(-1, -22), Vector2(0, -24), Vector2(-0.5, 0)
+	]), Color(0.59, 0.59, 0.71, 0.45))
+	for ri in range(3):
+		draw_rect(Rect2(-1, -8.0 - ri * 6.0, 2, 2), Color(glow.r, glow.g, glow.b, rune_a))
+	draw_rect(Rect2(-8, -2, 16, 3), bone_d)
+	draw_rect(Rect2(-7, -2, 14, 1.5), bone_l)
+	draw_set_transform(_wobble_offset + Vector2(0.0, _knockback_arc_y), 0.0, Vector2.ONE)
+
+	# Dark cowl behind skull (polygon approximation of bezier)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-16, -12 + bob), Vector2(-17, -20 + bob),
+		Vector2(-15, -30 + bob), Vector2(-9,  -36 + bob),
+		Vector2(  0, -37 + bob), Vector2( 5,  -37 + bob),
+		Vector2( 10, -35 + bob), Vector2(14,  -29 + bob),
+		Vector2( 16, -12 + bob)
+	]), cowl)
+	# Cowl left highlight
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-16, -12 + bob), Vector2(-17, -20 + bob),
+		Vector2(-12, -34 + bob), Vector2( -4, -37 + bob),
+		Vector2(  0, -37 + bob), Vector2(-10, -12 + bob)
+	]), Color(0.27, 0.16, 0.43, 0.38))
 
 	# SKULL
-	# Back of skull (shadow)
-	draw_circle(Vector2(1, -18 + bob), 12, bone_d)
-	# Main skull dome
-	draw_circle(Vector2(0, -19 + bob), 12, bone)
-	# Highlight on upper-left
-	draw_circle(Vector2(-4, -24 + bob), 6, Color(bone_l.r, bone_l.g, bone_l.b, 0.55))
-	# Outline
-	draw_circle(Vector2(0, -19 + bob), 12, bone_d, false, 1.5)
-
-	# Zygomatic arch / cheekbones
+	draw_circle(Vector2(1,  -18 + bob), 12, bone_d)
+	draw_circle(Vector2(0,  -19 + bob), 12, bone)
+	draw_circle(Vector2(-4, -24 + bob),  6, Color(bone_l.r, bone_l.g, bone_l.b, 0.55))
+	draw_circle(Vector2(0,  -19 + bob), 12, bone_d, false, 1.5)
 	draw_circle(Vector2(-10, -17 + bob), 4, bone)
 	draw_circle(Vector2( 10, -17 + bob), 4, bone)
 
-	# Deep eye sockets
+	# Eye sockets
 	draw_circle(Vector2(-4.5, -21 + bob), 5, dark)
 	draw_circle(Vector2( 4.5, -21 + bob), 5, dark)
-	# Glowing soul fire in sockets (pulses)
-	var gp := 0.6 + sin(t * 3.5) * 0.4
-	draw_circle(Vector2(-4.5, -21 + bob), 3.5, Color(glow.r, glow.g, glow.b, gp))
-	draw_circle(Vector2( 4.5, -21 + bob), 3.5, Color(glow.r, glow.g, glow.b, gp))
-	draw_circle(Vector2(-4.5, -21 + bob), 1.5, Color(1, 1, 1, gp * 0.8))
-	draw_circle(Vector2( 4.5, -21 + bob), 1.5, Color(1, 1, 1, gp * 0.8))
+	# Soul fire
+	var gr := 3.0 + sin(t * 5.0) * 0.5
+	draw_circle(Vector2(-4.5, -21 + bob), gr + 0.5, Color(glow.r, glow.g, glow.b, gp))
+	draw_circle(Vector2( 4.5, -21 + bob), gr + 0.5, Color(glow.r, glow.g, glow.b, gp))
+	draw_circle(Vector2(-4.5, -21 + bob), 1.8, Color(1, 1, 1, gp * 0.8))
+	draw_circle(Vector2( 4.5, -21 + bob), 1.8, Color(1, 1, 1, gp * 0.8))
+
+	# Floating soul particles
+	for i in range(4):
+		var pt := fmod(t * 0.8 + i * 0.9, PI * 2.0)
+		var px := cos(pt + i * 1.2) * (16.0 + i * 3.0)
+		var py := sin(pt * 1.5 + i) * 8.0 - 16.0 + bob
+		var pa := (sin(t * 3.0 + i) + 1.0) * 0.3
+		draw_circle(Vector2(px, py), 1.5, Color(glow.r, glow.g, glow.b, pa))
 
 	# Nasal cavity
 	draw_colored_polygon(PackedVector2Array([
 		Vector2(-2, -16 + bob), Vector2(2, -16 + bob),
-		Vector2(3, -12 + bob),  Vector2(-3, -12 + bob)
+		Vector2( 3, -12 + bob), Vector2(-3, -12 + bob)
 	]), dark)
-
-	# Teeth (upper jaw)
+	# Upper teeth
 	draw_rect(Rect2(-7, -12 + bob, 14, 4), bone)
-	draw_rect(Rect2(-7, -12 + bob, 14, 4), bone_d, false, 1.0)
+	draw_rect(Rect2(-7, -12 + bob, 14, 4), bone_d, false, 0.8)
 	for i in range(4):
 		draw_rect(Rect2(-6 + i * 4, -12 + bob, 3, 4), dark)
-	# Detached lower jaw (slightly open)
+	# Lower jaw (slightly open)
 	draw_rect(Rect2(-6, -8 + bob, 12, 4), bone)
-	draw_rect(Rect2(-6, -8 + bob, 12, 4), bone_d, false, 1.0)
 	for i in range(3):
 		draw_rect(Rect2(-5 + i * 4, -8 + bob, 3, 3), dark)
 
@@ -855,9 +862,13 @@ func _draw_skeleton() -> void:
 func _draw_orc() -> void:
 	var t       := _anim_time
 	var bob     := sin(t * 2.5) * 1.0
-	var skin    := Color(0.36, 0.52, 0.20)
-	var skin_d  := Color(0.22, 0.34, 0.12)
-	var skin_l  := Color(0.50, 0.66, 0.30)
+	var skin    : Color
+	var skin_d  : Color
+	var skin_l  : Color
+	if boss_stage <= 7:
+		skin = Color(0.36, 0.52, 0.20); skin_d = Color(0.22, 0.34, 0.12); skin_l = Color(0.50, 0.66, 0.30)
+	else:
+		skin = Color(0.52, 0.22, 0.14); skin_d = Color(0.34, 0.12, 0.08); skin_l = Color(0.68, 0.36, 0.26)
 	var iron    := Color(0.40, 0.40, 0.46)
 	var iron_d  := Color(0.24, 0.24, 0.30)
 	var iron_l  := Color(0.60, 0.60, 0.66)
@@ -1011,7 +1022,7 @@ func _draw_shadow() -> void:
 	var dark  := Color(0.12, 0.03, 0.22)
 	var mid   := Color(0.28, 0.06, 0.45)
 	var outer := Color(0.20, 0.04, 0.34)
-	var eye_c := Color(0.15, 1.00, 0.80)
+	var eye_c := Color(0.15, 1.00, 0.80) if boss_stage <= 9 else Color(1.0, 0.20, 0.20)
 	var wa    := sin(t * 2.2) * 4.0
 	var wb    := sin(t * 2.8 + 0.8) * 3.0
 	var wc    := sin(t * 3.5 + 1.6) * 2.5
@@ -1074,391 +1085,786 @@ func _draw_shadow() -> void:
 
 func _draw_boss_slime_king() -> void:
 	var t    := _anim_time
-	var w    := sin(t * 3.0) * 3.0
-	var col  := Color(0.18, 0.78, 0.28)
-	var dark := Color(0.08, 0.44, 0.14)
-	var gold := Color(0.95, 0.80, 0.15)
-	draw_circle(Vector2(0, 4), 28 + w * 0.5, col)
-	draw_circle(Vector2(0, 4), 28 + w * 0.5, dark, false, 2.0)
-	draw_circle(Vector2(-8, -6), 7, Color(0.45, 1.0, 0.55, 0.45))
-	var crown := PackedVector2Array([
-		Vector2(-14, -26), Vector2(-14, -36),
-		Vector2(-7, -30),  Vector2(0, -40),
-		Vector2(7, -30),   Vector2(14, -36), Vector2(14, -26)
-	])
-	draw_colored_polygon(crown, gold)
-	draw_polyline(crown, Color(0.75, 0.55, 0.05), 1.5)
-	draw_circle(Vector2(-10, -30), 3, Color(0.95, 0.15, 0.15))
-	draw_circle(Vector2(  0, -36), 3, Color(0.15, 0.55, 0.95))
-	draw_circle(Vector2( 10, -30), 3, Color(0.15, 0.95, 0.45))
-	draw_circle(Vector2(-9, -2), 6, Color(1, 1, 1))
-	draw_circle(Vector2( 9, -2), 6, Color(1, 1, 1))
-	draw_circle(Vector2(-8, -2), 3.5, Color(0.05, 0.28, 0.05))
-	draw_circle(Vector2(10, -2), 3.5, Color(0.05, 0.28, 0.05))
-	draw_arc(Vector2(0, 8), 7, 0.3, PI - 0.3, 10, dark, 2.0)
+	var bob  := sin(t * 1.5) * 4.0
+	var bk   := bob * 0.70        # bob scaled to match 70% sprite size
+	var w    := sin(t * 2.1) * 2.1
+	var bw   := w * 0.5
+	var col  := Color(0.059, 0.722, 0.180)
+	var dark := Color(0.020, 0.169, 0.055)
+	var gold_d := Color(0.478, 0.333, 0.0)
+	var gold   := Color(0.769, 0.541, 0.0)
+
+	# Toxic aura pulse (52 × 0.70 = 36.4)
+	var ar := 0.10 + sin(t * 3.5) * 0.05
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2(0.70, 0.616))
+	draw_circle(Vector2.ZERO, 52, Color(0.353, 1.0, 0.416, ar))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+	# Drop shadow
+	draw_set_transform(Vector2(1.4, 32 + bk), 0.0, Vector2(0.70, 0.126))
+	draw_circle(Vector2.ZERO, 32, Color(0, 0, 0, 0.28))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+	# 4 asymmetric tendrils
+	var tpos := [-20.0, -10.0, 4.0, 15.0]
+	for i in range(4):
+		var tx : float = tpos[i]
+		var nb := sin(t * 1.9 + float(i) * 1.1) * 2.8
+		draw_set_transform(Vector2(tx, 25 + nb + bk), 0.0, Vector2(0.70, 1.40))
+		draw_circle(Vector2.ZERO, 5.0, dark)
+		draw_set_transform(Vector2(tx, 25 + nb + bk), 0.0, Vector2(0.70, 1.47))
+		draw_circle(Vector2.ZERO, 3.8, col)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+	# Body (35 × 0.70 = 24.5, 33 × 0.70 = 23.1)
+	draw_set_transform(Vector2(0.7, 1.4 + bk + w * 0.06), 0.0, Vector2(0.70 + bw * 0.011, 0.70 - bw * 0.011))
+	draw_circle(Vector2.ZERO, 35, dark)
+	draw_set_transform(Vector2(0.0, 0.7 + bk + w * 0.06), 0.0, Vector2(0.70 + bw * 0.011, 0.70 - bw * 0.011))
+	draw_circle(Vector2.ZERO, 33, col)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+	# Internal darker blobs
+	draw_circle(Vector2(-7.0,  5.6 + bk), 4.9, Color(dark.r, dark.g, dark.b, 0.30))
+	draw_circle(Vector2( 8.4,  2.8 + bk), 3.5, Color(dark.r, dark.g, dark.b, 0.28))
+	draw_circle(Vector2(-2.1,  9.8 + bk), 2.8, Color(dark.r, dark.g, dark.b, 0.25))
+
+	# Specular highlight
+	draw_set_transform(Vector2(-5.6, -9.8 + bk), 0.0, Vector2(0.70, 0.315))
+	draw_circle(Vector2.ZERO, 11, Color(1, 1, 1, 0.38))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+	# Crown base
+	draw_rect(Rect2(-12, -25 + bk, 24, 4), gold_d)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-13, -25 + bk), Vector2(-12, -34 + bk),
+		Vector2( -7, -29 + bk), Vector2( -1, -38 + bk),
+		Vector2(  4, -29 + bk), Vector2( 10, -35 + bk),
+		Vector2( 13, -25 + bk)
+	]), gold)
+	draw_polyline(PackedVector2Array([
+		Vector2(-13, -25 + bk), Vector2(-12, -34 + bk),
+		Vector2( -7, -29 + bk), Vector2( -1, -38 + bk),
+		Vector2(  4, -29 + bk), Vector2( 10, -35 + bk),
+		Vector2( 13, -25 + bk)
+	]), Color(0.290, 0.188, 0.0), 1.2)
+
+	# Toxic crown gems with animated drips
+	var tgems : Array = [
+		[Vector2(-8, -29 + bk), Color(0.125, 1.0, 0.502)],
+		[Vector2(-1, -36 + bk), Color(0.753, 1.0, 0.0  )],
+		[Vector2( 7, -33 + bk), Color(0.0,   1.0, 0.690)]
+	]
+	for g in tgems:
+		var gpos : Vector2 = g[0]
+		var gc   : Color   = g[1]
+		draw_circle(gpos, 2.8, gc)
+		draw_circle(Vector2(gpos.x - 0.6, gpos.y - 0.6), 0.9, Color(1, 1, 1, 0.65))
+		var dp := maxf(0.0, sin(t * 1.5 + gpos.x) * 2.1)
+		if dp > 0.1:
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(gpos.x - 1.0, gpos.y + 2.8),
+				Vector2(gpos.x,       gpos.y + 2.8 + dp),
+				Vector2(gpos.x + 1.0, gpos.y + 2.8)
+			]), gc)
+
+	# 3 asymmetric eyes (radii 8/7/5 → 5.6/4.9/3.5)
+	var eyes : Array = [
+		[Vector2(-7.7, -5.6 + bk), 5.6],
+		[Vector2( 6.3, -7.0 + bk), 4.9],
+		[Vector2( 1.4,-14.0 + bk), 3.5]
+	]
+	var iris_c := Color(0.133, 0.867, 0.0)
+	for e in eyes:
+		var ep : Vector2 = e[0]
+		var er : float   = e[1]
+		draw_set_transform(ep, 0.0, Vector2(1.0, 0.76))
+		draw_circle(Vector2.ZERO, er, Color(0.847, 0.941, 0.847))
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		draw_circle(ep, er * 0.65, iris_c)
+		draw_circle(ep, er * 0.34, Color(0.024, 0.059, 0.016))
+		draw_circle(ep + Vector2(-er * 0.3, -er * 0.3), er * 0.18, Color(1, 1, 1, 0.85))
+
+	# Jagged angry mouth
+	draw_polyline(PackedVector2Array([
+		Vector2(-8.4, 6.3 + bk), Vector2(-5.6, 9.1 + bk),
+		Vector2(-2.8, 7.0 + bk), Vector2( 0.0, 9.8 + bk),
+		Vector2( 2.8, 7.0 + bk), Vector2( 5.6, 9.1 + bk),
+		Vector2( 8.4, 6.3 + bk)
+	]), dark, 1.8)
 
 
 func _draw_boss_goblin_warchief() -> void:
-	var skin    := Color(0.25, 0.60, 0.12)
-	var dark    := Color(0.12, 0.34, 0.06)
-	var armor_c := Color(0.55, 0.38, 0.18)
-	var wpaint  := Color(0.85, 0.20, 0.10)
-	var gold    := Color(0.95, 0.78, 0.15)
+	var t   := _anim_time
+	var bob := sin(t * 1.5) * 4.0
+	var sk  := Color(0.180, 0.376, 0.063)
+	var skd := Color(0.086, 0.188, 0.031)
+	var arm := Color(0.353, 0.220, 0.094)
+	var arl := Color(0.545, 0.376, 0.125)
+	var gld := Color(0.784, 0.659, 0.251)
+
+	draw_set_transform(Vector2(1, 30+bob), 0.0, Vector2(1.0, 0.28))
+	draw_circle(Vector2.ZERO, 18, Color(0,0,0,0.22))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(-14, -6), Vector2(14, -6),
-		Vector2(18, 20), Vector2(-18, 20)
-	]), armor_c)
-	draw_line(Vector2(-14, -6), Vector2(14, -6), gold, 2.0)
-	for sx in [-18, 18]:
-		draw_circle(Vector2(sx, -4), 10, armor_c)
-		draw_circle(Vector2(sx, -4), 10, dark, false, 1.5)
+		Vector2(-15,-6+bob), Vector2(15,-6+bob), Vector2(18,20+bob), Vector2(-18,20+bob)
+	]), arm)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-14,-6+bob), Vector2(14,-6+bob), Vector2(17,20+bob), Vector2(-17,20+bob)
+	]), arl)
+	draw_rect(Rect2(-14,-6+bob,28,2), gld)
+	draw_arc(Vector2(0,-2+bob), 12, 0.63, 2.51, 16, Color(0.565,0.439,0.251), 1.5)
+	for tp in [Vector2(-8,4+bob), Vector2(-1,5+bob), Vector2(7,4+bob)]:
+		draw_circle(tp, 3, Color(0.910,0.816,0.565))
+	for sx in [-18.0, 18.0]:
+		draw_circle(Vector2(sx,-4+bob), 12, arm)
+		draw_circle(Vector2(sx,-4+bob), 11, arl)
+		draw_arc(Vector2(sx,-4+bob), 11, -PI, 0, 8, gld, 1.5)
+	draw_circle(Vector2(1,-18+bob), 15, skd)
+	draw_circle(Vector2(0,-19+bob), 15, sk)
+	for sx2 in [-1.0, 1.0]:
 		draw_colored_polygon(PackedVector2Array([
-			Vector2(sx - 4, -12), Vector2(sx, -24), Vector2(sx + 4, -12)
-		]), Color(0.65, 0.48, 0.22))
-	draw_circle(Vector2(0, -18), 14, skin)
-	draw_circle(Vector2(0, -18), 14, dark, false, 1.0)
-	draw_circle(Vector2(-15, -18), 7, skin)
-	draw_circle(Vector2( 15, -18), 7, skin)
-	draw_line(Vector2(-8, -22), Vector2(-4, -16), wpaint, 2.5)
-	draw_line(Vector2( 8, -22), Vector2( 4, -16), wpaint, 2.5)
-	draw_line(Vector2(-6, -12), Vector2( 6, -12), wpaint, 2.0)
-	draw_circle(Vector2(-5, -20), 4, Color(0.95, 0.80, 0.10))
-	draw_circle(Vector2( 5, -20), 4, Color(0.95, 0.80, 0.10))
-	draw_circle(Vector2(-5, -20), 2, Color(0.05, 0.05, 0.05))
-	draw_circle(Vector2( 5, -20), 2, Color(0.05, 0.05, 0.05))
-	draw_circle(Vector2(0, -16), 3, dark)
+			Vector2(sx2*13,-22+bob), Vector2(sx2*26,-17+bob),
+			Vector2(sx2*24,-8+bob),  Vector2(sx2*13,-13+bob)
+		]), sk)
+	draw_rect(Rect2(-16,-28+bob, 5, 22), Color(0.784,0.196,0.039, 0.75))
+	draw_rect(Rect2( 4, -28+bob, 5, 22), Color(0.784,0.196,0.039, 0.75))
+	draw_rect(Rect2(-5, -28+bob, 3, 22), Color(0.784,0.196,0.039, 0.45))
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(-7, -10), Vector2(-3, -10), Vector2(-4, -4)
-	]), Color(0.95, 0.92, 0.82))
+		Vector2(-14,-24+bob), Vector2(-2,-27+bob), Vector2(-1,-23+bob), Vector2(-12,-21+bob)
+	]), skd)
 	draw_colored_polygon(PackedVector2Array([
-		Vector2( 7, -10), Vector2( 3, -10), Vector2( 4, -4)
-	]), Color(0.95, 0.92, 0.82))
-	draw_rect(Rect2(-14, -34, 28, 4), Color(0.88, 0.86, 0.76))
-	for bx in [-10, -3, 4]:
-		draw_rect(Rect2(bx, -42, 4, 10), Color(0.88, 0.86, 0.76))
+		Vector2(14,-24+bob), Vector2(2,-27+bob), Vector2(1,-23+bob), Vector2(12,-21+bob)
+	]), skd)
+	draw_circle(Vector2(-5,-21+bob), 4, Color(0.961,0.753,0.251))
+	draw_circle(Vector2( 5,-21+bob), 4, Color(0.961,0.753,0.251))
+	draw_circle(Vector2(-5,-21+bob), 2.5, Color(0.910,0.314,0.063))
+	draw_circle(Vector2( 5,-21+bob), 2.5, Color(0.910,0.314,0.063))
+	draw_circle(Vector2(-5,-21+bob), 1.4, Color(0.067,0.067,0.067))
+	draw_circle(Vector2( 5,-21+bob), 1.4, Color(0.067,0.067,0.067))
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-7,-9+bob), Vector2(7,-9+bob), Vector2(6,-4+bob), Vector2(-6,-4+bob)
+	]), Color(0.125,0.024,0.031))
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-4,-5+bob), Vector2(-2,-5+bob), Vector2(-3,-10+bob)
+	]), Color(0.910,0.878,0.784))
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(2,-5+bob), Vector2(4,-5+bob), Vector2(3,-10+bob)
+	]), Color(0.910,0.878,0.784))
+	var fc := [Color(0.878,0.125,0.125), Color(0.941,0.627,0.063), Color(0.125,0.753,0.251), Color(0.125,0.251,0.878), Color(0.753,0.125,0.753)]
+	for i in range(5):
+		var fa := -2.83 + i * 1.41
+		var fr := 28.0 + sin(t * 1.5 + i) * 2.0
+		draw_line(Vector2(cos(fa)*14, -19+bob+sin(fa)*14), Vector2(cos(fa)*fr, -19+bob+sin(fa)*fr), fc[i], 3.0)
+	draw_arc(Vector2(0,-19+bob), 5, PI, TAU, 8, gld, 2.0)
 
 
 func _draw_boss_lich() -> void:
 	var t    := _anim_time
-	var robe := Color(0.20, 0.05, 0.38)
-	var bone := Color(0.85, 0.84, 0.74)
-	var dark := Color(0.08, 0.02, 0.16)
-	var glow := Color(0.45, 0.10, 0.85)
+	var bob  := sin(t * 1.5) * 4.0
+	var ap   := 0.12 + sin(t * 2.0) * 0.05
+	var bone := Color(0.847, 0.835, 0.753)
+	var dark := Color(0.039, 0.008, 0.094)
+	var gv   := 0.65 + sin(t * 3.5) * 0.35
+	var op   := 0.7 + sin(t * 4.0) * 0.3
+
+	draw_circle(Vector2.ZERO, 38, Color(0.439, 0.063, 0.816, ap))
+	draw_set_transform(Vector2(1, 30 + bob), 0.0, Vector2(1.0, 0.28))
+	draw_circle(Vector2.ZERO, 18, Color(0,0,0,0.25))
+	draw_set_transform(Vector2(0.0, bob), 0.0, Vector2.ONE)
+	# Tattered robe outer (dark)
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(-14, -14), Vector2(14, -14),
-		Vector2(16, 10), Vector2(10, 22),
-		Vector2(0, 18), Vector2(-10, 22), Vector2(-16, 10)
-	]), robe)
-	draw_circle(Vector2(0, 0), 26.0 + sin(t * 2.0) * 3.0, Color(glow.r, glow.g, glow.b, 0.14))
-	draw_line(Vector2(-16, -8), Vector2(-16, 18), Color(0.55, 0.35, 0.12), 3.0)
-	draw_circle(Vector2(-16, -14), 8, glow)
-	draw_circle(Vector2(-16, -14), 8, Color(glow.r, glow.g, glow.b, 0.4), false, 2.0)
-	draw_circle(Vector2(-18, -16), 3, Color(1, 1, 1, 0.7))
-	draw_circle(Vector2(0, -22), 13, bone)
-	draw_circle(Vector2(0, -22), 13, dark, false, 1.5)
-	draw_circle(Vector2(-5, -24), 4.5, dark)
-	draw_circle(Vector2( 5, -24), 4.5, dark)
-	draw_circle(Vector2(-5, -24), 2.5, glow)
-	draw_circle(Vector2( 5, -24), 2.5, glow)
-	draw_rect(Rect2(-7, -14, 14, 5), bone)
+		Vector2(-14,-14), Vector2(14,-14), Vector2(16,10), Vector2(13,22),
+		Vector2(9,18), Vector2(5,26), Vector2(1,20), Vector2(-3,28),
+		Vector2(-7,22), Vector2(-11,28), Vector2(-13,20), Vector2(-16,10)
+	]), Color(0.039,0.008,0.094))
+	# Robe inner (lighter purple)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-13,-14), Vector2(13,-14), Vector2(15,10), Vector2(12,22),
+		Vector2(8,18), Vector2(4,26), Vector2(0,20), Vector2(-4,28),
+		Vector2(-8,22), Vector2(-12,28), Vector2(-12,20), Vector2(-15,10)
+	]), Color(0.118,0.016,0.220))
+	# Staff
+	draw_line(Vector2(-18,18), Vector2(-20,-16), Color(0.290,0.188,0.063), 3.0)
+	draw_circle(Vector2(-20,-20), 9, Color(0.439,0.063,0.816, op))
+	draw_circle(Vector2(-20,-20), 6, Color(0.784,0.392,1.0, op))
+	draw_circle(Vector2(-22,-22), 1.5, Color(1,1,1,0.8))
+	var oa := t * 3.0
+	draw_circle(Vector2(-20 + cos(oa)*9, -20 + sin(oa)*6), 2.5, Color(0.784,0.392,1.0,0.9))
+	# Arms / hands
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-13,-8), Vector2(-21,-2), Vector2(-19,10), Vector2(-13,10)
+	]), Color(0.118,0.016,0.220))
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(13,-8), Vector2(21,-2), Vector2(19,10), Vector2(13,10)
+	]), Color(0.118,0.016,0.220))
+	draw_line(Vector2(-19,8), Vector2(-22,14), Color(0.847,0.835,0.753), 2.5)
+	draw_line(Vector2(-19,8), Vector2(-24,12), Color(0.847,0.835,0.753), 2.5)
+	draw_line(Vector2(19,8),  Vector2(22,14),  Color(0.847,0.835,0.753), 2.5)
+	draw_line(Vector2(19,8),  Vector2(24,12),  Color(0.847,0.835,0.753), 2.5)
+	# Skull
+	draw_circle(Vector2(1,-22), 13, Color(0.416,0.408,0.345))
+	draw_circle(Vector2(0,-23), 13, bone)
+	# Eye sockets + purple glow
+	draw_circle(Vector2(-5,-25), 5.5, Color(0.039,0.031,0.031))
+	draw_circle(Vector2( 5,-25), 5.5, Color(0.039,0.031,0.031))
+	draw_circle(Vector2(-5,-25), 4, Color(0.510,0.157,0.863, gv))
+	draw_circle(Vector2( 5,-25), 4, Color(0.510,0.157,0.863, gv))
+	draw_circle(Vector2(-5,-25), 2, Color(0.863,0.627,1.0, gv))
+	draw_circle(Vector2( 5,-25), 2, Color(0.863,0.627,1.0, gv))
+	# Floating bone fragments
+	for i in range(4):
+		var fa := fmod(t * 0.7 + i * 1.57, TAU)
+		var fp := 22.0 + i * 5.0
+		var falpha := 0.4 + sin(t * 2.0 + i) * 0.3
+		draw_set_transform(Vector2(cos(fa)*fp, sin(fa*0.6)*fp*0.55-14 + bob), fa*2, Vector2.ONE)
+		draw_rect(Rect2(-3,-1,6,2), Color(0.847,0.835,0.753, falpha))
+	draw_set_transform(Vector2(0.0, bob), 0.0, Vector2.ONE)
+	# Jaw + teeth
+	draw_rect(Rect2(-7,-14,14,4), bone)
 	for i in range(3):
-		draw_rect(Rect2(-5 + i * 4, -14, 2, 4), dark)
-	for i in range(5):
-		var cx := -8.0 + i * 4.0
-		draw_colored_polygon(PackedVector2Array([
-			Vector2(cx, -34), Vector2(cx + 2, -42), Vector2(cx + 4, -34)
-		]), dark)
-	draw_rect(Rect2(-10, -36, 20, 4), dark)
+		draw_rect(Rect2(-5+i*4,-14,3,4), dark)
+	draw_rect(Rect2(-6,-10,12,4), bone)
+	# Dark crown + glow outline
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-13,-34), Vector2(-13,-40), Vector2(-7,-36),
+		Vector2(-2,-44),  Vector2(3,-36),   Vector2(8,-44),
+		Vector2(13,-36),  Vector2(13,-34)
+	]), Color(0.039,0.008,0.094))
+	draw_polyline(PackedVector2Array([
+		Vector2(-13,-34), Vector2(-13,-40), Vector2(-7,-36),
+		Vector2(-2,-44),  Vector2(3,-36),   Vector2(8,-44),
+		Vector2(13,-36),  Vector2(13,-34)
+	]), Color(0.510,0.157,0.863, 0.8), 1.5)
+	var cg := 0.6 + sin(t * 4.0) * 0.3
+	draw_circle(Vector2(-2,-44), 3, Color(0.706,0.314,1.0, cg))
+	draw_circle(Vector2( 8,-44), 2.5, Color(0.706,0.314,1.0, cg))
 
 
 func _draw_boss_golem() -> void:
-	var stone := Color(0.52, 0.50, 0.46)
-	var dark  := Color(0.28, 0.26, 0.22)
-	var light := Color(0.72, 0.70, 0.64)
-	var crack := Color(0.95, 0.65, 0.15)
-	draw_rect(Rect2(-18, -16, 36, 34), stone)
-	draw_rect(Rect2(-18, -16, 36, 34), dark, false, 2.0)
-	draw_line(Vector2(-18, -4), Vector2(18, -4), dark, 1.0)
-	draw_line(Vector2(-6, -16), Vector2(-6, 18), dark, 1.0)
-	draw_line(Vector2( 8, -16), Vector2( 8, 18), dark, 1.0)
-	draw_line(Vector2(-14, -10), Vector2(-4,  2), crack, 2.0)
-	draw_line(Vector2(  6,  -8), Vector2(16,  6), crack, 2.0)
-	draw_line(Vector2( -2,   2), Vector2(10, 14), crack, 1.5)
-	draw_rect(Rect2(-13, -32, 26, 18), stone)
-	draw_rect(Rect2(-13, -32, 26, 18), dark, false, 2.0)
-	draw_rect(Rect2(-10, -28, 7, 7), crack)
-	draw_rect(Rect2(  3, -28, 7, 7), crack)
-	draw_rect(Rect2( -9, -27, 5, 5), Color(1.0, 0.90, 0.55))
-	draw_rect(Rect2(  4, -27, 5, 5), Color(1.0, 0.90, 0.55))
-	draw_rect(Rect2(-32, -8, 14, 16), stone)
-	draw_rect(Rect2( 18, -8, 14, 16), stone)
-	draw_rect(Rect2(-32, -8, 14, 16), dark, false, 1.5)
-	draw_rect(Rect2( 18, -8, 14, 16), dark, false, 1.5)
+	var t   := _anim_time
+	var bob := sin(t * 1.5) * 4.0
+	var lg  := 0.15 + sin(t * 2.2) * 0.06
+	var cv  := 0.7 + sin(t * 3.0) * 0.3
+	var eg  := 0.6 + sin(t * 3.0) * 0.4
+	var st  := Color(0.345, 0.329, 0.314)
+	var std := Color(0.188, 0.180, 0.165)
+	var stl := Color(0.502, 0.490, 0.471)
+
+	draw_circle(Vector2(0,4), 40, Color(1.0,0.392,0.039, lg))
+	draw_set_transform(Vector2(2, 32 + bob), 0.0, Vector2(1.0, 0.27))
+	draw_circle(Vector2.ZERO, 22, Color(0,0,0,0.28))
+	draw_set_transform(Vector2(0.0, bob), 0.0, Vector2.ONE)
+	# Body
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-19,-16), Vector2(-22,-6), Vector2(-20,10), Vector2(-15,18),
+		Vector2(15,18), Vector2(20,10), Vector2(22,-6), Vector2(18,-18), Vector2(0,-22)
+	]), std)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-18,-16), Vector2(-21,-6), Vector2(-19,10), Vector2(-14,18),
+		Vector2(14,18), Vector2(19,10), Vector2(21,-6), Vector2(17,-18), Vector2(0,-22)
+	]), st)
+	# Seams
+	draw_line(Vector2(-20,-4), Vector2(20,-4), std, 1.0)
+	draw_line(Vector2(-7,-16),  Vector2(-7,18),  std, 1.0)
+	draw_line(Vector2(9,-16),   Vector2(9,18),   std, 1.0)
+	# Glowing cracks
+	draw_line(Vector2(-15,-10), Vector2(-5,2),   Color(1.0,0.471,0.039, cv), 2.5)
+	draw_line(Vector2(-5,2),    Vector2(-10,14), Color(1.0,0.471,0.039, cv), 2.5)
+	draw_line(Vector2(6,-8),    Vector2(16,6),   Color(1.0,0.471,0.039, cv), 2.5)
+	draw_line(Vector2(-15,-10), Vector2(-5,2),   Color(1.0,0.863,0.235, cv*0.8), 1.0)
+	# Boulder fists
+	for bx in [-32.0, 18.0]:
+		draw_circle(Vector2(bx+2,-2), 10, std)
+		draw_circle(Vector2(bx,-4), 10, st)
+		draw_circle(Vector2(bx-3,-6), 5, stl)
+	# Head
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-14,-32), Vector2(-15,-20), Vector2(15,-20),
+		Vector2(14,-32), Vector2(0,-36)
+	]), std)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-13,-32), Vector2(-14,-20), Vector2(14,-20),
+		Vector2(13,-32), Vector2(0,-36)
+	]), st)
+	# Glowing eyes
+	draw_rect(Rect2(-11,-30,9,8),  Color(0.102,0.102,0.031))
+	draw_rect(Rect2(2,-30,9,8),    Color(0.102,0.102,0.031))
+	draw_rect(Rect2(-10,-29,7,6),  Color(1.0,0.471,0.039, eg))
+	draw_rect(Rect2(3,-29,7,6),    Color(1.0,0.471,0.039, eg))
+	draw_rect(Rect2(-9,-28,5,4),   Color(1.0,0.902,0.314, eg*0.8))
+	draw_rect(Rect2(4,-28,5,4),    Color(1.0,0.902,0.314, eg*0.8))
+	# Stone crown
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-13,-36), Vector2(-13,-44), Vector2(-7,-40),
+		Vector2(0,-48), Vector2(7,-40), Vector2(13,-44), Vector2(13,-36)
+	]), std)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-12,-36), Vector2(-12,-43), Vector2(-6,-39),
+		Vector2(0,-47), Vector2(6,-39), Vector2(12,-43), Vector2(12,-36)
+	]), st)
+	draw_circle(Vector2(0,-47), 3.5, Color(1.0,0.471,0.039, eg))
+	draw_circle(Vector2(-11,-43), 2.5, Color(1.0,0.471,0.039, eg))
+	draw_circle(Vector2(11,-43),  2.5, Color(1.0,0.471,0.039, eg))
 
 
 func _draw_boss_werewolf() -> void:
-	var fur   := Color(0.38, 0.28, 0.18)
-	var dark  := Color(0.20, 0.14, 0.08)
-	var claws := Color(0.85, 0.82, 0.72)
-	var eye_c := Color(0.95, 0.72, 0.10)
+	var t   := _anim_time
+	var bob := sin(t * 1.5) * 4.0
+	var hw  := sin(t * 2.2) * 2.0
+	var fur := Color(0.353, 0.259, 0.157)
+	var frd := Color(0.180, 0.125, 0.078)
+	var clw := Color(0.847, 0.847, 0.784)
+
+	draw_circle(Vector2(4,-24), 34, Color(0.784,0.784,0.627,0.10))
+	draw_set_transform(Vector2(1, 30 + bob), 0.0, Vector2(1.0, 0.28))
+	draw_circle(Vector2.ZERO, 18, Color(0,0,0,0.25))
+	draw_set_transform(Vector2(0.0, bob), 0.0, Vector2.ONE)
+	# Body
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(-14, -8), Vector2(14, -8),
-		Vector2(18, 18), Vector2(-18, 18)
+		Vector2(-15,-8), Vector2(15,-8), Vector2(19,18), Vector2(-19,18)
+	]), frd)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-14,-8), Vector2(14,-8), Vector2(18,18), Vector2(-18,18)
 	]), fur)
-	for i in range(5):
-		draw_arc(Vector2(-10 + i * 5, -8), 4, -PI, 0, 6, dark, 1.0)
-	draw_circle(Vector2(4, -20), 13, fur)
-	draw_circle(Vector2(4, -20), 13, dark, false, 1.0)
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(-2, -18), Vector2(10, -18),
-		Vector2(14, -12), Vector2(-2, -12)
-	]), fur.darkened(0.2))
-	draw_circle(Vector2(12, -16), 3.5, dark)
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(0, -14), Vector2(3, -14), Vector2(1.5, -9)
-	]), claws)
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(5, -14), Vector2(8, -14), Vector2(6.5, -9)
-	]), claws)
-	draw_circle(Vector2(-2, -22), 4, eye_c)
-	draw_circle(Vector2( 6, -22), 4, eye_c)
-	draw_circle(Vector2(-2, -22), 2, Color(0.05, 0.05, 0.05))
-	draw_circle(Vector2( 6, -22), 2, Color(0.05, 0.05, 0.05))
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(-4, -30), Vector2(-10, -42), Vector2(2, -30)
-	]), fur)
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(8, -30), Vector2(16, -40), Vector2(18, -28)
-	]), fur)
-	draw_rect(Rect2(-24, -4, 10, 16), fur)
-	draw_rect(Rect2( 14, -4, 10, 16), fur)
-	for cx in [-24, -20, -16]:
+	# Fur bumps top
+	for i in range(6):
+		var bx := -12.0 + i * 5.0
+		draw_arc(Vector2(bx,-8), 4, -PI, 0, 6, frd, 4.0)
+		draw_arc(Vector2(bx,-8), 3.5, -PI, 0, 6, fur, 3.0)
+	# Arms
+	draw_rect(Rect2(-24,-4,10,18), frd); draw_rect(Rect2(14,-4,10,18), frd)
+	draw_rect(Rect2(-23,-4,9,18), fur);  draw_rect(Rect2(15,-4,9,18), fur)
+	# Claws (4 per arm)
+	for ci in range(4):
 		draw_colored_polygon(PackedVector2Array([
-			Vector2(cx, 12), Vector2(cx + 2, 12), Vector2(cx + 1, 18)
-		]), claws)
-	for cx in [14, 18, 22]:
+			Vector2(-24+ci*2.5,14), Vector2(-23+ci*2.5,14), Vector2(-23.5+ci*2.5,22)
+		]), clw)
 		draw_colored_polygon(PackedVector2Array([
-			Vector2(cx, 12), Vector2(cx + 2, 12), Vector2(cx + 1, 18)
-		]), claws)
+			Vector2(15+ci*2.5,14), Vector2(16+ci*2.5,14), Vector2(15.5+ci*2.5,22)
+		]), clw)
+	# Armor fragment
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-8,-4), Vector2(8,-4), Vector2(10,6), Vector2(-10,6)
+	]), Color(0.251,0.251,0.282))
+	draw_polyline(PackedVector2Array([
+		Vector2(-8,-4), Vector2(8,-4), Vector2(10,6), Vector2(-10,6), Vector2(-8,-4)
+	]), Color(0.376,0.376,0.408), 1.0)
+	# Head
+	draw_circle(Vector2(5,-20), 14, frd)
+	draw_circle(Vector2(4,-21), 14, fur)
+	# Snout
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-2,-16), Vector2(12,-16), Vector2(16,-11), Vector2(-1,-11)
+	]), frd)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-1,-16), Vector2(11,-16), Vector2(15,-11), Vector2(0,-11)
+	]), fur)
+	# Snarling teeth
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-2,-11), Vector2(14,-11), Vector2(13,-6), Vector2(-1,-6)
+	]), Color(0.102,0.055,0.031))
+	for i in range(4):
+		draw_rect(Rect2(-1+i*3.5,-11, 2.5,3), clw)
+	# Ears (animated)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-4,-30), Vector2(-10,-44+hw), Vector2(2,-30)
+	]), fur)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(8,-30), Vector2(16,-42+hw), Vector2(18,-28)
+	]), fur)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-4,-30), Vector2(-8,-40+hw), Vector2(1,-30)
+	]), Color(0.478,0.188,0.188))
+	# Eyes (golden, slit pupils)
+	draw_circle(Vector2(-2,-23), 5, Color(0.071,0.039,0.016))
+	draw_circle(Vector2( 7,-23), 5, Color(0.071,0.039,0.016))
+	draw_circle(Vector2(-2,-23), 4, Color(0.941,0.722,0.125))
+	draw_circle(Vector2( 7,-23), 4, Color(0.941,0.722,0.125))
+	draw_set_transform(Vector2(-2, -23 + bob), 0.0, Vector2(0.45, 1.0))
+	draw_circle(Vector2.ZERO, 2.2, Color(0.067,0.067,0.067))
+	draw_set_transform(Vector2(7, -23 + bob), 0.0, Vector2(0.45, 1.0))
+	draw_circle(Vector2.ZERO, 2.2, Color(0.067,0.067,0.067))
+	draw_set_transform(Vector2(0.0, bob), 0.0, Vector2.ONE)
+	draw_circle(Vector2(-3.5,-24.5), 1, Color(1,1,1,0.8))
+	draw_circle(Vector2(5.5,-24.5),  1, Color(1,1,1,0.8))
 
 
 func _draw_boss_dragon() -> void:
-	var t      := _anim_time
-	var scales := Color(0.22, 0.58, 0.18)
-	var dark   := Color(0.10, 0.30, 0.08)
-	var belly  := Color(0.72, 0.82, 0.42)
-	var fire_c := Color(0.95, 0.55, 0.10)
-	var wing_c := Color(0.18, 0.48, 0.14)
-	var flap   := sin(t * 5.0) * 6.0
+	var t    := _anim_time
+	var bob  := sin(t * 1.5) * 4.0
+	var flap := sin(t * 5.0) * 8.0
+	var sc   := Color(0.102, 0.439, 0.063)
+	var scd  := Color(0.039, 0.220, 0.031)
+	var ft   := (sin(t * 3.0) + 1.0) * 0.5
+	var fs   := 8.0 + sin(t * 6.0) * 4.0
+
+	draw_set_transform(Vector2(1, 28 + bob), 0.0, Vector2(1.0, 0.25))
+	draw_circle(Vector2.ZERO, 20, Color(0,0,0,0.25))
+	draw_set_transform(Vector2(0.0, bob), 0.0, Vector2.ONE)
+	# Wings
+	for sx in [-1.0, 1.0]:
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(sx*10,-10), Vector2(sx*34,-22-flap),
+			Vector2(sx*40,-4-flap*0.5), Vector2(sx*20,8)
+		]), scd)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(sx*10,-10), Vector2(sx*33,-21-flap),
+			Vector2(sx*39,-4-flap*0.5), Vector2(sx*19,8)
+		]), Color(0.082,0.353,0.047))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(sx*10,-10), Vector2(sx*28,-16-flap*0.6),
+			Vector2(sx*32,-2-flap*0.3), Vector2(sx*18,6)
+		]), Color(0.145,0.376,0.125,0.35))
+	# Body + belly
+	draw_circle(Vector2(0,4), 19, scd); draw_circle(Vector2(0,4), 18, sc)
+	draw_circle(Vector2(0,6), 12, Color(0.722,0.816,0.376))
+	# Neck
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(-10, -10), Vector2(-32, -20 - flap),
-		Vector2(-38, -4 - flap * 0.5), Vector2(-20, 8)
-	]), wing_c)
+		Vector2(-8,-10), Vector2(8,-10), Vector2(11,-5), Vector2(-11,-5)
+	]), scd)
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(10, -10), Vector2(32, -20 - flap),
-		Vector2(38, -4 - flap * 0.5), Vector2(20, 8)
-	]), wing_c)
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(-10, -10), Vector2(-26, -15 - flap * 0.6),
-		Vector2(-30, -2 - flap * 0.3), Vector2(-18, 6)
-	]), Color(0.25, 0.60, 0.20, 0.55))
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(10, -10), Vector2(26, -15 - flap * 0.6),
-		Vector2(30, -2 - flap * 0.3), Vector2(18, 6)
-	]), Color(0.25, 0.60, 0.20, 0.55))
-	draw_circle(Vector2(0, 4), 18, scales)
-	draw_circle(Vector2(0, 4), 18, dark, false, 1.5)
-	draw_circle(Vector2(0, 6), 12, belly)
-	draw_circle(Vector2(0, -16), 14, scales)
-	draw_circle(Vector2(0, -16), 14, dark, false, 1.0)
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(-7, -18), Vector2(7, -18),
-		Vector2(10, -10), Vector2(-10, -10)
-	]), scales.darkened(0.2))
-	draw_circle(Vector2(-4, -12), 2, dark)
-	draw_circle(Vector2( 4, -12), 2, dark)
-	draw_circle(Vector2(-5, -20), 4, Color(0.95, 0.80, 0.10))
-	draw_circle(Vector2( 5, -20), 4, Color(0.95, 0.80, 0.10))
-	draw_circle(Vector2(-5, -20), 2, Color(0.05, 0.05, 0.05))
-	draw_circle(Vector2( 5, -20), 2, Color(0.05, 0.05, 0.05))
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(-8, -28), Vector2(-12, -40), Vector2(-4, -26)
-	]), dark)
-	draw_colored_polygon(PackedVector2Array([
-		Vector2( 8, -28), Vector2( 12, -40), Vector2( 4, -26)
-	]), dark)
-	if sin(t * 3.0) > 0.2:
-		draw_circle(Vector2(0, -8), 6 + sin(t * 8) * 2, fire_c)
-		draw_circle(Vector2(0, -8), 4, Color(1.0, 0.95, 0.20))
+		Vector2(-7,-10), Vector2(7,-10), Vector2(10,-5), Vector2(-10,-5)
+	]), sc)
+	# Head
+	draw_circle(Vector2(1,-16), 15, scd); draw_circle(Vector2(0,-17), 15, sc)
+	# Curved horns (bezier approximated as polygon)
+	for sx2 in [-1.0, 1.0]:
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(sx2*7,-28), Vector2(sx2*8,-36), Vector2(sx2*9,-40),
+			Vector2(sx2*10,-28), Vector2(sx2*8,-26)
+		]), scd)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(sx2*7,-28), Vector2(sx2*7.5,-35), Vector2(sx2*8.5,-39),
+			Vector2(sx2*9.5,-28), Vector2(sx2*7.5,-26)
+		]), Color(0.157,0.627,0.125))
+	# Nostrils
+	draw_circle(Vector2(-4,-12), 2.5, scd); draw_circle(Vector2(4,-12), 2.5, scd)
+	# Eyes
+	draw_circle(Vector2(-5,-21), 5, Color(0.102,0.063,0.031))
+	draw_circle(Vector2( 5,-21), 5, Color(0.102,0.063,0.031))
+	draw_circle(Vector2(-5,-21), 4, Color(0.941,0.753,0.063))
+	draw_circle(Vector2( 5,-21), 4, Color(0.941,0.753,0.063))
+	draw_set_transform(Vector2(-5, -21 + bob), 0.0, Vector2(0.48,1.0))
+	draw_circle(Vector2.ZERO, 2.5, Color(0.067,0.067,0.067))
+	draw_set_transform(Vector2(5, -21 + bob), 0.0, Vector2(0.48,1.0))
+	draw_circle(Vector2.ZERO, 2.5, Color(0.067,0.067,0.067))
+	draw_set_transform(Vector2(0.0, bob), 0.0, Vector2.ONE)
+	draw_circle(Vector2(-6.5,-22.5), 1.2, Color(1,1,1,0.8))
+	draw_circle(Vector2(3.5,-22.5),  1.2, Color(1,1,1,0.8))
+	# Fire breath (animated)
+	draw_circle(Vector2(0,-7), fs+2, Color(0.941,0.471,0.039, ft*0.9))
+	draw_circle(Vector2(0,-7), fs,   Color(1.0,0.784,0.039,   ft*0.85))
+	draw_circle(Vector2(0,-7), fs*0.5, Color(1.0,0.980,0.314, ft*0.7))
 
 
 func _draw_boss_ice_giant() -> void:
-	var t     := _anim_time
-	var ice   := Color(0.55, 0.78, 0.92)
-	var dark  := Color(0.22, 0.45, 0.62)
-	var white := Color(0.90, 0.96, 1.00)
+	var t   := _anim_time
+	var bob := sin(t * 1.5) * 4.0
+	var ic  := Color(0.416, 0.690, 0.847)
+	var icd := Color(0.165, 0.376, 0.565)
+	var wh  := Color(0.847, 0.941, 1.0)
+	var cg  := 0.5 + sin(t * 4.0) * 0.3
+
+	draw_circle(Vector2(0,4), 42, Color(0.392,0.706,0.863,0.12))
+	draw_set_transform(Vector2(1, 30 + bob), 0.0, Vector2(1.0, 0.23))
+	draw_circle(Vector2.ZERO, 22, Color(0,0,0,0.25))
+	draw_set_transform(Vector2(0.0, bob), 0.0, Vector2.ONE)
+	# Body
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(-16, -12), Vector2(16, -12),
-		Vector2(20, 20), Vector2(-20, 20)
-	]), ice)
+		Vector2(-18,-14), Vector2(-22,-4), Vector2(-18,20),
+		Vector2(18,20), Vector2(22,-4), Vector2(18,-14)
+	]), icd)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-17,-14), Vector2(-21,-4), Vector2(-17,20),
+		Vector2(17,20), Vector2(21,-4), Vector2(17,-14)
+	]), ic)
+	# Seams
+	draw_line(Vector2(-20,-4), Vector2(20,-4), icd, 1.0)
+	draw_line(Vector2(-7,-14), Vector2(-7,20), icd, 1.0)
+	draw_line(Vector2(9,-14),  Vector2(9,20),  icd, 1.0)
+	# Crystal inner highlight
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-17,-14), Vector2(-3,-14), Vector2(-3,20), Vector2(-17,20)
+	]), Color(0.784,0.941,1.0, 0.25))
+	# Crystal chest emblem
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-8,-8), Vector2(0,-16), Vector2(8,-8),
+		Vector2(8,6), Vector2(0,12), Vector2(-8,6)
+	]), wh)
 	draw_polyline(PackedVector2Array([
-		Vector2(-16, -12), Vector2(16, -12),
-		Vector2(20, 20), Vector2(-20, 20), Vector2(-16, -12)
-	]), dark, 2.0)
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(-8, -8), Vector2(0, -16), Vector2(8, -8),
-		Vector2(8, 6), Vector2(0, 12), Vector2(-8, 6)
-	]), white)
-	draw_circle(Vector2(0, -24), 13, ice)
-	draw_circle(Vector2(0, -24), 13, dark, false, 1.5)
-	for i in range(5):
-		var cx := -8.0 + i * 4.0
+		Vector2(-8,-8), Vector2(0,-16), Vector2(8,-8),
+		Vector2(8,6), Vector2(0,12), Vector2(-8,6), Vector2(-8,-8)
+	]), icd, 1.5)
+	draw_circle(Vector2(0,-2), 5, Color(0.392,0.706,0.863, cg))
+	# Crystal arms
+	for ax in [-34.0, 17.0]:
+		draw_rect(Rect2(ax,-10,16,20), icd)
+		draw_rect(Rect2(ax+1,-10,14,20), ic)
+		draw_rect(Rect2(ax+1,-10,6,20), Color(0.784,0.941,1.0, 0.28))
+	# Head
+	draw_circle(Vector2(1,-24), 14, icd); draw_circle(Vector2(0,-25), 14, ic)
+	draw_circle(Vector2(-5,-30), 7, Color(0.784,0.941,1.0, 0.35))
+	# Eyes
+	draw_circle(Vector2(-4,-27), 4.5, icd); draw_circle(Vector2(4,-27), 4.5, icd)
+	draw_circle(Vector2(-4,-27), 3.5, Color(0.063,0.565,0.878))
+	draw_circle(Vector2( 4,-27), 3.5, Color(0.063,0.565,0.878))
+	draw_circle(Vector2(-4,-27), 2, wh); draw_circle(Vector2(4,-27), 2, wh)
+	# Ice crown (7 spikes)
+	draw_rect(Rect2(-13,-38,26,5), icd); draw_rect(Rect2(-12,-38,24,4), ic)
+	var spike_heights := [10.0, 13.0, 13.0, 16.0, 13.0, 13.0, 10.0]
+	for ci in range(7):
+		var cx := -12.0 + ci * 4.0
+		var ch : float = spike_heights[ci]
 		draw_colored_polygon(PackedVector2Array([
-			Vector2(cx, -36), Vector2(cx + 2, -46), Vector2(cx + 4, -36)
-		]), white)
-	draw_rect(Rect2(-10, -38, 20, 4), ice)
-	draw_circle(Vector2(-4, -26), 4, white)
-	draw_circle(Vector2( 4, -26), 4, white)
-	draw_circle(Vector2(-4, -26), 2.2, Color(0.15, 0.65, 0.95))
-	draw_circle(Vector2( 4, -26), 2.2, Color(0.15, 0.65, 0.95))
-	draw_rect(Rect2(-32, -10, 15, 18), ice)
-	draw_rect(Rect2( 17, -10, 15, 18), ice)
-	draw_rect(Rect2(-32, -10, 15, 18), dark, false, 1.5)
-	draw_rect(Rect2( 17, -10, 15, 18), dark, false, 1.5)
-	draw_circle(Vector2(0, -12), 10.0 + sin(t * 4.0) * 3.0, Color(0.75, 0.90, 1.0, 0.22))
+			Vector2(cx,-38), Vector2(cx+4,-38), Vector2(cx+2,-38-ch)
+		]), icd)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(cx+0.5,-38), Vector2(cx+3.5,-38), Vector2(cx+2,-38-ch+2)
+		]), Color(0.753,0.910,0.973))
+	# Frost particles
+	for fi in range(5):
+		var fa := fmod(t * 0.5 + fi * 1.257, TAU)
+		var fd := 30.0 + fi * 3.0
+		var fa2 := (sin(t * 2.5 + fi) + 1.0) * 0.22
+		draw_circle(Vector2(cos(fa)*fd, sin(fa*0.7)*fd*0.6-8), 2, Color(0.784,0.941,1.0, fa2))
 
 
 func _draw_boss_shadow_demon() -> void:
-	var t    := _anim_time
-	var dark := Color(0.12, 0.02, 0.22)
-	var mid  := Color(0.28, 0.05, 0.48)
-	var eye_c:= Color(1.0, 0.15, 0.08)
-	var glow := Color(0.65, 0.05, 0.85)
-	var wa   := sin(t * 2.5) * 8.0
-	draw_circle(Vector2(0, 0), 32 + sin(t * 2.5) * 3, Color(glow.r, glow.g, glow.b, 0.16))
-	draw_circle(Vector2(0, 2), 24, mid)
-	draw_circle(Vector2(0, 2), 24, dark, false, 2.5)
-	draw_circle(Vector2(0, 2), 18, dark)
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(-12, -22), Vector2(-18, -42), Vector2(-6, -24)
-	]), dark)
-	draw_colored_polygon(PackedVector2Array([
-		Vector2( 12, -22), Vector2( 18, -42), Vector2( 6, -24)
-	]), dark)
-	draw_circle(Vector2(-8, -8), 6, eye_c)
-	draw_circle(Vector2( 8, -8), 6, eye_c)
-	draw_circle(Vector2(-8, -8), 3, Color(1.0, 0.85, 0.10))
-	draw_circle(Vector2( 8, -8), 3, Color(1.0, 0.85, 0.10))
-	draw_arc(Vector2(0, 4), 12, 0.3, PI - 0.3, 16, eye_c, 2.5)
-	for i in range(4):
+	var t   := _anim_time
+	var bob := sin(t * 1.5) * 4.0
+	var wa  := sin(t * 2.5) * 8.0
+	var dk  := Color(0.118, 0.016, 0.188)
+	var mid := Color(0.188, 0.031, 0.314)
+
+	draw_circle(Vector2.ZERO, 40, Color(0.392,0.031,0.549,0.15))
+	draw_set_transform(Vector2(1, 28 + bob), 0.0, Vector2(1.0, 0.28))
+	draw_circle(Vector2.ZERO, 18, Color(0,0,0,0.30))
+	draw_set_transform(Vector2(0.0, bob), 0.0, Vector2.ONE)
+	# Body layers (3 circles)
+	draw_circle(Vector2(0,2), 26, Color(0.118,0.016,0.188))
+	draw_circle(Vector2(0,2), 24, mid)
+	draw_circle(Vector2(0,2), 18, dk)
+	# Demonic horns (bezier approximated)
+	for sx in [-1.0, 1.0]:
 		draw_colored_polygon(PackedVector2Array([
-			Vector2(-7 + i * 5, 8), Vector2(-5 + i * 5, 8),
-			Vector2(-6 + i * 5, 14)
-		]), Color(0.85, 0.85, 0.95))
+			Vector2(sx*10,-18), Vector2(sx*12,-26), Vector2(sx*16,-36),
+			Vector2(sx*18,-28+sx*2), Vector2(sx*14,-14)
+		]), Color(0.102,0.016,0.157))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(sx*10,-18), Vector2(sx*11.5,-25), Vector2(sx*15,-35),
+			Vector2(sx*17,-27+sx*2), Vector2(sx*13,-14)
+		]), Color(0.627,0.157,0.784,0.4))
+	# Tentacle tendrils bottom
+	var ta := [3.46, 3.84, 4.40, 4.78]
+	for i in range(4):
+		var tangle : float = ta[i]
+		var tw := sin(t * 2.2 + i * 0.8) * 6.0
+		var p1 := Vector2(cos(tangle)*14, 2+sin(tangle)*14)
+		var p2 := Vector2(cos(tangle)*26+tw, 2+sin(tangle)*26)
+		draw_line(p1, p2, mid, 5.0)
+	# Wavy arms
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(-22, -4), Vector2(-30, 2 + wa),
-		Vector2(-32, 14), Vector2(-26, 12), Vector2(-18, 6)
+		Vector2(-22,-4), Vector2(-30,2+wa), Vector2(-32,14), Vector2(-26,12), Vector2(-18,6)
 	]), mid)
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(22, -4), Vector2(30, 2 - wa),
-		Vector2(32, 14), Vector2(26, 12), Vector2(18, 6)
+		Vector2(22,-4), Vector2(30,2-wa), Vector2(32,14), Vector2(26,12), Vector2(18,6)
 	]), mid)
+	# 4 eyes: 2 large red (bottom), 2 smaller orange (top)
+	var eye_data := [
+		[Vector2(-9,-10), 7.0, Color(1.0,0.098,0.059)],
+		[Vector2(9,-10),  7.0, Color(1.0,0.098,0.059)],
+		[Vector2(-5,-18), 5.0, Color(0.863,0.706,0.039)],
+		[Vector2(5,-18),  5.0, Color(0.863,0.706,0.039)],
+	]
+	for i in range(4):
+		var eg := 0.7 + sin(t * 4.0 + i * 0.8) * 0.3
+		var ec : Color = eye_data[i][2]
+		draw_circle(eye_data[i][0], eye_data[i][1]+2, Color(ec.r,ec.g,ec.b,eg*0.4))
+		draw_circle(eye_data[i][0], eye_data[i][1],   Color(ec.r,ec.g,ec.b,eg))
+		draw_circle(eye_data[i][0], eye_data[i][1]*0.4, Color(1,1,0.784,eg*0.9))
+	# Wide grin + fangs
+	draw_arc(Vector2(0,4), 12, 0.3, PI-0.3, 16, Color(1.0,0.098,0.059,0.8), 2.5)
+	for fi in range(4):
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-7+fi*5,8), Vector2(-5+fi*5,8), Vector2(-6+fi*5,14)
+		]), Color(0.941,0.941,0.973,0.85))
+	# Orbiting void particles
+	for pi2 in range(6):
+		var pa := fmod(t * 0.7 + pi2 * 1.047, TAU)
+		var a2 := (sin(t * 2.0 + pi2) + 1.0) * 0.2
+		draw_circle(Vector2(cos(pa)*26, 2+sin(pa*0.8)*26*0.7), 1.8, Color(0.706,0.157,0.863,a2))
 
 
 func _draw_boss_helldrake() -> void:
-	var t      := _anim_time
-	var scales := Color(0.72, 0.12, 0.08)
-	var dark   := Color(0.38, 0.04, 0.04)
-	var belly  := Color(0.88, 0.62, 0.18)
-	var fire_c := Color(1.0, 0.60, 0.05)
-	var wing_c := Color(0.55, 0.08, 0.08)
-	var flap   := sin(t * 5.0) * 7.0
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(-10, -8), Vector2(-36, -22 - flap),
-		Vector2(-42, 0 - flap * 0.5), Vector2(-22, 10)
-	]), wing_c)
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(10, -8), Vector2(36, -22 - flap),
-		Vector2(42, 0 - flap * 0.5), Vector2(22, 10)
-	]), wing_c)
-	draw_circle(Vector2(0, 4), 20, scales)
-	draw_circle(Vector2(0, 4), 20, dark, false, 2.0)
-	draw_circle(Vector2(0, 6), 13, belly)
-	draw_circle(Vector2(0, -16), 15, scales)
-	draw_circle(Vector2(0, -16), 15, dark, false, 1.5)
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(-9, -16), Vector2(9, -16),
-		Vector2(13, -6), Vector2(-13, -6)
-	]), scales.darkened(0.25))
-	for fx in [-8, -3, 3, 8]:
+	var t    := _anim_time
+	var bob  := sin(t * 1.5) * 4.0
+	var flap := sin(t * 5.0) * 8.0
+	var sc   := Color(0.690, 0.094, 0.031)
+	var scd  := Color(0.345, 0.031, 0.031)
+	var fs   := 9.0 + sin(t * 6.0) * 5.0
+
+	draw_circle(Vector2(0,4), 44, Color(1.0,0.314,0.039, 0.16))
+	draw_set_transform(Vector2(1, 30 + bob), 0.0, Vector2(1.0, 0.27))
+	draw_circle(Vector2.ZERO, 22, Color(0,0,0,0.28))
+	draw_set_transform(Vector2(0.0, bob), 0.0, Vector2.ONE)
+	# Wings (wider than dragon)
+	for sx in [-1.0, 1.0]:
 		draw_colored_polygon(PackedVector2Array([
-			Vector2(fx, -9), Vector2(fx + 3, -9), Vector2(fx + 1.5, -4)
-		]), Color(0.92, 0.88, 0.80))
-	draw_circle(Vector2(-6, -20), 4.5, Color(1.0, 0.85, 0.10))
-	draw_circle(Vector2( 6, -20), 4.5, Color(1.0, 0.85, 0.10))
-	draw_circle(Vector2(-6, -20), 2.2, Color(0.05, 0.05, 0.05))
-	draw_circle(Vector2( 6, -20), 2.2, Color(0.05, 0.05, 0.05))
+			Vector2(sx*10,-8), Vector2(sx*38,-24-flap),
+			Vector2(sx*44,0-flap*0.5), Vector2(sx*22,10)
+		]), scd)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(sx*10,-8), Vector2(sx*37,-23-flap),
+			Vector2(sx*43,0-flap*0.5), Vector2(sx*21,10)
+		]), Color(0.502,0.031,0.031))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(sx*10,-8), Vector2(sx*30,-16-flap*0.6),
+			Vector2(sx*34,-2-flap*0.3), Vector2(sx*20,8)
+		]), Color(0.471,0.031,0.031,0.35))
+	# Body + belly
+	draw_circle(Vector2(0,4), 21, scd); draw_circle(Vector2(0,4), 20, sc)
+	draw_circle(Vector2(0,6), 13, Color(0.847,0.596,0.125))
+	# Inferno crown ring
+	for fi in range(6):
+		var fa := -2.51 + fi * 1.047
+		var fr := 19.0 + sin(t * 4.0 + fi) * 4.0
+		var fglow := 0.6 + sin(t * 5.0 + fi * 0.9) * 0.3
+		draw_circle(Vector2(cos(fa)*14, -16+sin(fa)*10), fr*0.22, Color(1.0,0.471,0.039, fglow))
+		draw_circle(Vector2(cos(fa)*14, -16+sin(fa)*10), fr*0.12, Color(1.0,0.863,0.196, fglow*0.7))
+	# Neck
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(-10, -28), Vector2(-15, -44), Vector2(-4, -26)
-	]), dark)
+		Vector2(-9,-8), Vector2(9,-8), Vector2(13,-4), Vector2(-13,-4)
+	]), scd)
 	draw_colored_polygon(PackedVector2Array([
-		Vector2( 10, -28), Vector2( 15, -44), Vector2( 4, -26)
-	]), dark)
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(-5, -28), Vector2(-8, -38), Vector2(0, -26)
-	]), Color(0.55, 0.08, 0.08))
-	draw_colored_polygon(PackedVector2Array([
-		Vector2( 5, -28), Vector2( 8, -38), Vector2(0, -26)
-	]), Color(0.55, 0.08, 0.08))
-	var fs := 8.0 + sin(t * 6.0) * 4.0
-	draw_circle(Vector2(0, -4), fs, fire_c)
-	draw_circle(Vector2(0, -4), fs * 0.6, Color(1.0, 0.95, 0.30))
-	draw_circle(Vector2(0, -4), fs * 0.3, Color(1.0, 1.0, 0.80))
+		Vector2(-8,-8), Vector2(8,-8), Vector2(12,-5), Vector2(-12,-5)
+	]), sc)
+	# Head
+	draw_circle(Vector2(1,-18), 16, scd); draw_circle(Vector2(0,-19), 16, sc)
+	# 4 horn pairs + center horn
+	var hd := [
+		[Vector2(-8,-30), Vector2(-14,-46)], [Vector2(8,-30), Vector2(14,-46)],
+		[Vector2(-4,-30), Vector2(-6,-44)],  [Vector2(4,-30),  Vector2(6,-44)]
+	]
+	for h in hd:
+		draw_colored_polygon(PackedVector2Array([h[0], h[1], h[1]+Vector2(3,4)]), scd)
+		draw_colored_polygon(PackedVector2Array([h[0]+Vector2(1,0), h[1]+Vector2(1,0), h[1]+Vector2(3,4)]), Color(0.878,0.157,0.094))
+	draw_colored_polygon(PackedVector2Array([Vector2(-2,-30), Vector2(0,-46), Vector2(3,-30)]), scd)
+	draw_colored_polygon(PackedVector2Array([Vector2(-1.5,-30), Vector2(0,-45), Vector2(2.5,-30)]), Color(0.878,0.157,0.094))
+	# Nostrils
+	draw_circle(Vector2(-5,-18), 3, scd); draw_circle(Vector2(5,-18), 3, scd)
+	# Eyes
+	draw_circle(Vector2(-6,-21), 5.5, Color(0.102,0.031,0.031))
+	draw_circle(Vector2( 6,-21), 5.5, Color(0.102,0.031,0.031))
+	draw_circle(Vector2(-6,-21), 4.5, Color(0.941,0.753,0.063))
+	draw_circle(Vector2( 6,-21), 4.5, Color(0.941,0.753,0.063))
+	draw_set_transform(Vector2(-6, -21 + bob), 0.0, Vector2(0.53,1.0))
+	draw_circle(Vector2.ZERO, 2.8, Color(0.067,0.067,0.067))
+	draw_set_transform(Vector2(6, -21 + bob), 0.0, Vector2(0.53,1.0))
+	draw_circle(Vector2.ZERO, 2.8, Color(0.067,0.067,0.067))
+	draw_set_transform(Vector2(0.0, bob), 0.0, Vector2.ONE)
+	# Always-on fire breath (3 layers)
+	draw_circle(Vector2(0,-7), fs+3, Color(1.0,0.392,0.039, 0.85))
+	draw_circle(Vector2(0,-7), fs,   Color(1.0,0.745,0.078, 0.85))
+	draw_circle(Vector2(0,-7), fs*0.55, Color(1.0,0.941,0.314, 0.7))
+	draw_circle(Vector2(0,-7), fs*0.25, Color(1.0,1.0,0.784,   0.6))
 
 
 func _draw_boss_dark_lord() -> void:
-	var t       := _anim_time
-	var armor_c := Color(0.15, 0.12, 0.20)
-	var armor_l := Color(0.30, 0.25, 0.38)
-	var gold    := Color(0.85, 0.68, 0.12)
-	var cape_c  := Color(0.45, 0.04, 0.04)
-	var eye_c   := Color(0.85, 0.08, 0.85)
-	var dark    := Color(0.05, 0.02, 0.10)
-	var cb      := sin(t * 1.8) * 4.0
+	var t   := _anim_time
+	var bob := sin(t * 1.5) * 4.0
+	var cb  := sin(t * 1.8) * 4.0
+	var arm := Color(0.118, 0.094, 0.157)
+	var arl := Color(0.204, 0.180, 0.282)
+	var gld := Color(0.816, 0.690, 0.094)
+	var eg  := 0.7 + sin(t * 3.0) * 0.3
+	var og  := 0.7 + sin(t * 3.5) * 0.3
+
+	draw_circle(Vector2.ZERO, 42, Color(0.706,0.039,0.706, 0.13))
+	draw_set_transform(Vector2(1, 30 + bob), 0.0, Vector2(1.0, 0.28))
+	draw_circle(Vector2.ZERO, 18, Color(0,0,0,0.28))
+	draw_set_transform(Vector2(0.0, bob), 0.0, Vector2.ONE)
+	# Billowing void cape
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(-14, -10), Vector2(14, -10),
-		Vector2(20 + cb, 24), Vector2(-20 - cb, 24)
-	]), cape_c)
+		Vector2(-14,-10), Vector2(14,-10), Vector2(20+cb,24), Vector2(-20-cb,24)
+	]), Color(0.227,0.024,0.024))
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(-14, -10), Vector2(14, -10),
-		Vector2(14, 8), Vector2(-14, 8)
-	]), armor_c)
+		Vector2(-13,-10), Vector2(13,-10), Vector2(19+cb,24), Vector2(-19-cb,24)
+	]), Color(0.353,0.031,0.031))
+	# Void stars on cape
+	for si in range(5):
+		var sx2 := -8.0 + si * 5.0 + cb * 0.3 * (si - 2)
+		var sy2 := 2.0 + si * 4.0
+		var sa := (sin(t * 1.5 + si) + 1.0) * 0.5
+		draw_circle(Vector2(sx2,sy2), 1.2, Color(0.784,0.588,1.0, sa*0.5))
+	# Armor body
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(-12, -8), Vector2(12, -8),
-		Vector2(10, 8), Vector2(-10, 8)
-	]), armor_l)
-	draw_line(Vector2(-12, -8), Vector2(12, -8), gold, 2.0)
-	draw_line(Vector2(0, -8), Vector2(0, 8), gold, 1.5)
-	draw_circle(Vector2(-16, -8), 10, armor_c)
-	draw_circle(Vector2( 16, -8), 10, armor_c)
-	for sx in [-16, 16]:
-		draw_arc(Vector2(sx, -8), 10, -PI, 0, 8, gold, 1.5)
+		Vector2(-13,-10), Vector2(13,-10), Vector2(13,8), Vector2(-13,8)
+	]), Color(0.031,0.008,0.063))
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-12,-10), Vector2(12,-10), Vector2(12,8), Vector2(-12,8)
+	]), arm)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-10,-8), Vector2(10,-8), Vector2(9,8), Vector2(-9,8)
+	]), arl)
+	draw_rect(Rect2(-12,-8,24,2), gld)
+	draw_line(Vector2(0,-8), Vector2(0,8), gld, 1.5)
+	# Shoulder pauldrons
+	for sx in [-16.0, 16.0]:
+		draw_circle(Vector2(sx,-8), 11, Color(0.031,0.008,0.063))
+		draw_circle(Vector2(sx,-8), 10, arm)
+		draw_arc(Vector2(sx,-8), 10, -PI, 0, 8, gld, 1.5)
 		draw_colored_polygon(PackedVector2Array([
-			Vector2(sx - 3, -16), Vector2(sx, -26), Vector2(sx + 3, -16)
-		]), gold)
-	draw_circle(Vector2(0, -22), 13, armor_c)
-	draw_circle(Vector2(0, -22), 13, armor_l, false, 1.5)
-	var crown := PackedVector2Array([
-		Vector2(-13, -32), Vector2(-13, -38),
-		Vector2(-7, -34),  Vector2(0, -44),
-		Vector2(7, -34),   Vector2(13, -38), Vector2(13, -32)
-	])
-	draw_colored_polygon(crown, gold)
-	draw_polyline(crown, Color(0.65, 0.50, 0.08), 1.5)
-	draw_circle(Vector2(0, -40), 3.5, eye_c)
-	draw_circle(Vector2(0, -40), 2.0, Color(1, 0.85, 1.0))
-	draw_rect(Rect2(-8, -26, 16, 4), dark)
-	draw_circle(Vector2(-4, -24), 3, eye_c)
-	draw_circle(Vector2( 4, -24), 3, eye_c)
-	draw_circle(Vector2(0, 0), 32, Color(eye_c.r, eye_c.g, eye_c.b,
-		0.12 + sin(t * 2.5) * 0.06))
+			Vector2(sx-3,-16), Vector2(sx,-28), Vector2(sx+3,-16)
+		]), gld)
+	# Arms
+	draw_rect(Rect2(-26,-4,12,18), Color(0.031,0.008,0.063))
+	draw_rect(Rect2(14,-4,12,18),  Color(0.031,0.008,0.063))
+	draw_rect(Rect2(-25,-4,11,18), arm)
+	draw_rect(Rect2(15,-4,11,18),  arm)
+	# Scepter
+	draw_set_transform(Vector2(-22, 12 + bob), 0.0, Vector2.ONE)
+	draw_line(Vector2.ZERO, Vector2(0,-24), Color(0.102,0.055,0.188), 4.0)
+	draw_rect(Rect2(-5,-26,10,4), gld)
+	draw_circle(Vector2(0,-30), 7, Color(0.706,0.039,0.706, og))
+	draw_circle(Vector2(0,-30), 4, Color(1.0,0.706,1.0, og))
+	draw_circle(Vector2(-1.5,-31.5), 1.2, Color(1,1,1,0.8))
+	var oa := t * 2.5
+	draw_circle(Vector2(cos(oa)*7, -30+sin(oa)*5), 2, Color(0.863,0.392,0.863,0.7))
+	draw_set_transform(Vector2(0.0, bob), 0.0, Vector2.ONE)
+	# Head
+	draw_circle(Vector2(1,-22), 14, Color(0.031,0.008,0.063))
+	draw_circle(Vector2(0,-23), 14, arm)
+	draw_circle(Vector2(-4,-28), 7, Color(arl.r,arl.g,arl.b,1.0))
+	draw_circle(Vector2(0,-23), 14, arl, false, 1.5)
+	draw_rect(Rect2(-8,-26,16,4), Color(0.031,0.008,0.063))
+	# Purple eye glow (3 layers)
+	draw_circle(Vector2(-4,-24), 6, Color(0.863,0.063,0.863, eg*0.4))
+	draw_circle(Vector2( 4,-24), 6, Color(0.863,0.063,0.863, eg*0.4))
+	draw_circle(Vector2(-4,-24), 4, Color(0.863,0.063,0.863, eg))
+	draw_circle(Vector2( 4,-24), 4, Color(0.863,0.063,0.863, eg))
+	draw_circle(Vector2(-4,-24), 2, Color(1.0,0.784,1.0, eg))
+	draw_circle(Vector2( 4,-24), 2, Color(1.0,0.784,1.0, eg))
+	# Ornate crown
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-14,-34), Vector2(-14,-40), Vector2(-8,-36),
+		Vector2(-4,-46),  Vector2(0,-40),   Vector2(4,-46),
+		Vector2(8,-36),   Vector2(14,-40),  Vector2(14,-34)
+	]), Color(0.031,0.008,0.063))
+	draw_polyline(PackedVector2Array([
+		Vector2(-14,-34), Vector2(-14,-40), Vector2(-8,-36),
+		Vector2(-4,-46),  Vector2(0,-40),   Vector2(4,-46),
+		Vector2(8,-36),   Vector2(14,-40),  Vector2(14,-34)
+	]), gld, 1.5)
+	var cg2 := 0.7 + sin(t * 4.0) * 0.3
+	draw_circle(Vector2(-4,-46), 3.5, Color(0.863,0.063,0.863, cg2))
+	draw_circle(Vector2( 4,-46), 3.5, Color(0.863,0.063,0.863, cg2))
+	# Big center crown gem (pulsing)
+	var bg := 0.8 + sin(t * 3.0) * 0.2
+	draw_circle(Vector2(0,-40), 5, Color(0.863,0.063,0.863, bg))
+	draw_circle(Vector2(0,-40), 3, Color(1.0,0.784,1.0, 0.9))
+	draw_circle(Vector2(-1,-41), 1.3, Color(1,1,1,0.9))
+	# Orbiting particles
+	for pi2 in range(5):
+		var pa := fmod(t * 1.2 + pi2 * 1.257, TAU)
+		var a2 := (sin(t * 2.0 + pi2) + 1.0) * 0.2
+		draw_circle(Vector2(cos(pa)*34, sin(pa)*34*0.7-10), 1.8, Color(0.784,0.196,0.784,a2))

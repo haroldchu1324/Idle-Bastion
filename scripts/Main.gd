@@ -193,6 +193,11 @@ var _pending_card_anim    : Array = []
 var _game_over     : bool  = false
 var _game_left     : bool  = false
 var _debug_dummy_mode : bool = false
+# Zone editor (F2 to toggle — drag zones horizontally, read coordinates on screen)
+var _zone_edit_mode  : bool    = false
+var _zone_drag_idx   : int     = -1
+var _zone_drag_start : Vector2 = Vector2.ZERO   # mouse pos at drag start
+var _zone_drag_orig  : float   = 0.0            # zone x at drag start
 
 # ── Hard mode debuff timers ───────────────────────────────────────────────────
 var _rot_cursed_towers  : Array = []   # towers currently penalized by curse_tower_rot
@@ -289,7 +294,7 @@ func _find_hero_spawn() -> Vector2i:
 	var cols : int = _build_grid._cols
 	var rows : int = _build_grid._rows
 	for r in range(rows):
-		var row : int = (rows / 2) + (r / 2 + 1) * (1 if r % 2 == 0 else -1)
+		var row : int = (rows >> 1) + ((r >> 1) + 1) * (1 if r % 2 == 0 else -1)
 		row = clamp(row, 0, rows - 1)
 		for c in range(cols):
 			var t := Vector2i(c, row)
@@ -418,11 +423,11 @@ func _start_boss_wave(boss_def: Array) -> void:
 	_wave_active = true
 	var enemy : Node2D = ENEMY_SCENE.instantiate()
 	add_child(enemy)
-	enemy.z_index = 6
 	var w    : int   = GameData.selected_world
 	var hp   : float = boss_def[0] * GameData.effective_world_hp_mult(w)
 	var spd  : float = boss_def[1] * GameData.relic_enemy_slow_mult() * GameData.effective_world_spd_mult(w)
 	var gold : float = boss_def[2] * GameData.total_gold_drop_mult() * GameData.effective_world_gold_mult(w)
+	enemy.z_index = 8
 	enemy.setup(PATH, hp, spd, gold, true, 0, _stage)
 	enemy.melee_resist = GameData.effective_world_melee_resist(w)
 	enemy.died.connect(_on_boss_died)
@@ -935,9 +940,10 @@ func _complete_stage_advance() -> void:
 		var tile_rects : Dictionary = {}
 		for tile in _build_grid.special_tiles:
 			var kind : String = _build_grid.special_tiles[tile]
+			var _tc : Vector2 = _build_grid.tile_center(tile)
 			tile_rects[kind] = Rect2(
-				_build_grid._island.position.x + tile.x * _build_grid.TILE_SIZE,
-				_build_grid._island.position.y + tile.y * _build_grid.TILE_SIZE,
+				_tc.x - _build_grid.TILE_SIZE * 0.5,
+				_tc.y - _build_grid.TILE_SIZE * 0.5,
 				_build_grid.TILE_SIZE, _build_grid.TILE_SIZE)
 		_hud.show_special_tiles_tutorial(tile_rects)
 		await _hud.special_tiles_tutorial_closed
@@ -1006,6 +1012,13 @@ func _trigger_game_over() -> void:
 		GameData.current_run_highest_stage = _stage
 	if GameData.current_run_highest_stage > GameData.all_time_highest_stage:
 		GameData.all_time_highest_stage = GameData.current_run_highest_stage
+	var _go_w : int = GameData.selected_world
+	var _go_d : String = GameData.selected_difficulty
+	if not GameData.stages_cleared.has(_go_w):
+		GameData.stages_cleared[_go_w] = {}
+	var _go_prev : int = GameData.stages_cleared[_go_w].get(_go_d, 0)
+	if GameData.current_run_highest_stage > _go_prev:
+		GameData.stages_cleared[_go_w][_go_d] = GameData.current_run_highest_stage
 	var gems_earned : int = _calc_gems()
 	GameData.save_game()
 	var turrets : Array = []
@@ -1031,8 +1044,13 @@ func _trigger_victory() -> void:
 	GameData.current_run_highest_stage = 10
 	if 10 > GameData.all_time_highest_stage:
 		GameData.all_time_highest_stage = 10
-	if GameData.selected_difficulty == "easy":
-		GameData.easy_mode_beaten = true
+	var _vic_w : int = GameData.selected_world
+	var _vic_d : String = GameData.selected_difficulty
+	if not GameData.stages_cleared.has(_vic_w):
+		GameData.stages_cleared[_vic_w] = {}
+	GameData.stages_cleared[_vic_w][_vic_d] = 10
+	if _vic_d == "easy":
+		GameData.easy_beaten_worlds[_vic_w] = true
 	# Daily quest completion on victory
 	if GameData.dq_mode == "mutated_w1":
 		GameData.dq_mutated_complete = true
@@ -1470,9 +1488,46 @@ func _input(event: InputEvent) -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
-		if event.keycode == KEY_SPACE and not _debug_dummy_mode:
+		if event.keycode == KEY_F2:
+			_zone_edit_mode = not _zone_edit_mode
+			_zone_drag_idx  = -1
+			_build_grid.queue_redraw()
+			return
+		if event.keycode == KEY_SPACE and not _debug_dummy_mode and not _hud.is_boss_buff_card_open():
 			_on_wave_btn_pressed()
 		return
+
+	# Zone editor drag
+	if _zone_edit_mode and not _build_grid._zones.is_empty():
+		if event is InputEventMouseButton:
+			var mb := event as InputEventMouseButton
+			if mb.button_index == MOUSE_BUTTON_LEFT:
+				if mb.pressed:
+					for i in range(_build_grid._zones.size()):
+						var zr : Rect2 = _build_grid._zones[i]
+						if zr.has_point(mb.position):
+							_zone_drag_idx  = i
+							_zone_drag_start = mb.position
+							_zone_drag_orig  = zr.position.x
+							break
+				else:
+					if _zone_drag_idx >= 0:
+						var zr : Rect2 = _build_grid._zones[_zone_drag_idx]
+						print("Zone %d final x = %d  (Rect2(%d, %d, %d, %d))" % [
+							_zone_drag_idx, int(zr.position.x),
+							int(zr.position.x), int(zr.position.y),
+							int(zr.size.x), int(zr.size.y)])
+					_zone_drag_idx = -1
+			get_viewport().set_input_as_handled()
+			return
+		if event is InputEventMouseMotion and _zone_drag_idx >= 0:
+			var delta_x : float = (event as InputEventMouseMotion).position.x - _zone_drag_start.x
+			var zr : Rect2 = _build_grid._zones[_zone_drag_idx]
+			_build_grid._zones[_zone_drag_idx] = Rect2(
+				_zone_drag_orig + delta_x, zr.position.y, zr.size.x, zr.size.y)
+			_build_grid.queue_redraw()
+			get_viewport().set_input_as_handled()
+			return
 
 	if not (event is InputEventMouseButton and
 			event.button_index == MOUSE_BUTTON_LEFT):

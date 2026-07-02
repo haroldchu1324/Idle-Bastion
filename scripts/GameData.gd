@@ -756,7 +756,7 @@ func turret_fire_rate_mult(turret_id: String) -> float:
 func turret_has_special(turret_id: String) -> bool:
 	return get_upgrade_tiers(turret_id + "_special") > 0
 
-static func get_world_path(world: int) -> Array:
+func get_world_path(world: int) -> Array:
 	match world:
 		1: return [
 			Vector2(-40,140),Vector2(850,140),Vector2(850,500),Vector2(250,500),Vector2(250,140),
@@ -837,6 +837,29 @@ static func get_world_path(world: int) -> Array:
 		]
 		_: return get_world_path(1)
 
+
+# Returns independent tile zones for worlds that need them.
+# Empty array = use single get_world_island() grid as before.
+static func get_world_zones(world: int) -> Array:
+	match world:
+		2: return [
+			Rect2(148, 170, 300, 120),   # top-left  5×2
+			Rect2(531, 170, 300, 120),   # top-right 5×2
+			Rect2(172, 350, 660, 120),   # bottom    11×2
+		]
+		3: return [
+			Rect2(167, 170, 660, 120),   # top    11×2
+			Rect2(167, 350, 660, 120),   # bottom 11×2
+		]
+		6: return [
+			Rect2(125, 230, 240, 180),   # left  4×3
+			Rect2(653, 230, 180, 180),   # right 3×3
+		]
+		8: return [
+			Rect2(246, 170, 480, 120),   # top    8×2
+			Rect2(267, 350, 480, 120),   # bottom 8×2
+		]
+		_: return []
 
 static func get_world_island(world: int) -> Rect2:
 	match world:

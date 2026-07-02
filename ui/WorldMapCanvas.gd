@@ -351,7 +351,7 @@ func _draw_world_nodes() -> void:
 			var col_idx : int   = i % 4
 			var row_idx : int   = i / 4
 			var rx      : float = col_idx * 313.0 + 2.0
-			var ry      : float = row_idx * 418.0 + 2.0
+			var ry      : float = row_idx * 418.0 + 2.0 + 20.0
 			var tint    : Color = Color(0.35, 0.30, 0.28) if state == "locked" else Color.WHITE
 			var pts  : PackedVector2Array = PackedVector2Array()
 			var uvs  : PackedVector2Array = PackedVector2Array()

@@ -27,12 +27,19 @@ var _prev_dist : float = INF
 var pushback_on_hit : bool = false
 
 # Ice-zone state
-var _is_zone       : bool       = false
-var _zone_timer    : float      = 3.0   # puddle lasts 3 seconds
-var _zone_radius   : float      = 45.0
-var _target_pos    : Vector2    = Vector2.ZERO
-var _landed        : bool       = false
-var _slowed_enemies: Dictionary = {}    # enemies already slowed by this puddle
+var _is_zone          : bool       = false
+var _zone_timer       : float      = 3.0   # puddle lasts 3 seconds
+var _zone_radius      : float      = 45.0
+var _target_pos       : Vector2    = Vector2.ZERO
+var _landed           : bool       = false
+var _slowed_enemies   : Dictionary = {}    # enemies already slowed by this puddle
+var _zone_initialized : bool       = false
+
+# Fire-zone state
+var _is_fire_zone      : bool  = false
+var _fire_zone_timer   : float = 3.0
+var _fire_zone_radius  : float = 40.0
+var _fire_zone_tick    : float = 0.0
 
 
 func setup(target: Node2D, damage: float) -> void:
@@ -48,6 +55,9 @@ func set_straight(dir: Vector2) -> void:
 func _process(delta: float) -> void:
 	if _is_zone:
 		_process_ice_zone(delta)
+		return
+	if _is_fire_zone:
+		_process_fire_zone(delta)
 		return
 
 	if _straight:
@@ -130,10 +140,15 @@ func _process_ice_zone(delta: float) -> void:
 			_landed  = true
 			position = _target_pos
 			add_to_group("ice_zones")
-			# If an existing puddle already covers this spot, discard self instead
+			if not _zone_initialized:
+				_zone_initialized = true
+				if GameData.turret_has_special("frost_spire"):
+					_zone_timer = 5.0
+			# If an existing puddle already covers this spot, refresh its timer and discard self
 			for other in get_tree().get_nodes_in_group("ice_zones"):
 				if other != self and is_instance_valid(other) and other._landed:
 					if position.distance_to(other.position) < _zone_radius * 0.8:
+						other._zone_timer = max(other._zone_timer, _zone_timer)
 						queue_free()
 						return
 		else:
@@ -149,8 +164,25 @@ func _process_ice_zone(delta: float) -> void:
 			if position.distance_to(enemy.position) < _zone_radius:
 				# Apply slow only once per enemy per puddle — never refresh while inside
 				if not _slowed_enemies.has(enemy):
-					enemy.apply_slow(3.0, 0.45)
+					var _slow_factor := 0.50 if GameData.turret_has_special("frost_spire") else 0.45
+					enemy.apply_slow(self, 3.0, _slow_factor)
 					_slowed_enemies[enemy] = true
+
+
+func _process_fire_zone(delta: float) -> void:
+	queue_redraw()
+	_fire_zone_timer -= delta
+	if _fire_zone_timer <= 0.0:
+		queue_free()
+		return
+	_fire_zone_tick -= delta
+	if _fire_zone_tick <= 0.0:
+		_fire_zone_tick = 1.0
+		for enemy in get_tree().get_nodes_in_group("enemies"):
+			if not is_instance_valid(enemy):
+				continue
+			if position.distance_to(enemy.position) < _fire_zone_radius:
+				enemy.take_damage(5.0)
 
 
 func _draw() -> void:
@@ -159,6 +191,7 @@ func _draw() -> void:
 		"arrow":              _draw_arrow_proj()
 		"bomb":               _draw_bomb_proj()
 		"ice_zone":           _draw_ice_zone_proj()
+		"fire_zone":          _draw_fire_zone_proj()
 		"hero_dragon_fire":   _draw_hero_dragon_fire()
 		"hero_shadow_dagger": _draw_hero_shadow_dagger()
 		"hero_void_sphere":   _draw_hero_void_sphere()
@@ -227,7 +260,8 @@ func _draw_ice_zone_proj() -> void:
 		]), Color(1.00, 1.00, 1.00, 0.45), 1.2)
 		draw_circle(Vector2(0, -4), 3, Color(1.00, 1.00, 1.00, 0.75))
 	else:
-		var a := clampf(_zone_timer / 3.0, 0.0, 1.0)
+		var _max_zone_t := 5.0 if GameData.turret_has_special("frost_spire") else 3.0
+		var a := clampf(_zone_timer / _max_zone_t, 0.0, 1.0)
 		draw_circle(Vector2.ZERO, _zone_radius, Color(0.20, 0.65, 1.00, 0.35 * a))
 		draw_arc(Vector2.ZERO, _zone_radius, 0.0, TAU, 36,
 			Color(0.40, 0.80, 1.00, 0.90 * a), 2.5)
@@ -243,6 +277,17 @@ func _draw_ice_zone_proj() -> void:
 			Vector2(0, -18), Vector2(-8, 2), Vector2(0, 9), Vector2(8, 2)
 		]), Color(0.70, 0.92, 1.00, 1.00 * a))
 		draw_circle(Vector2(0, -8), 4.5, Color(1.00, 1.00, 1.00, 0.90 * a))
+
+
+func _draw_fire_zone_proj() -> void:
+	var a := clampf(_fire_zone_timer / 3.0, 0.0, 1.0)
+	draw_circle(Vector2.ZERO, _fire_zone_radius, Color(0.90, 0.28, 0.05, 0.28 * a))
+	draw_arc(Vector2.ZERO, _fire_zone_radius, 0.0, TAU, 36, Color(1.00, 0.45, 0.08, 0.88 * a), 2.5)
+	draw_circle(Vector2.ZERO, _fire_zone_radius * 0.5, Color(1.00, 0.65, 0.10, 0.18 * a))
+	for i in range(6):
+		var ang := float(i) * TAU / 6.0 + _fire_zone_timer * 3.0
+		var fp  := Vector2(cos(ang), sin(ang)) * _fire_zone_radius * 0.65
+		draw_circle(fp, 4.5, Color(1.00, 0.55, 0.10, 0.85 * a))
 
 
 # ── Styled bullet draw functions ──────────────────────────────────────────────
