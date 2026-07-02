@@ -44,14 +44,20 @@ var _skip_next_center : bool = false
 var _tree_x_ofs       : float = 0.0
 var _content_center_x : float = 0.0
 
+var _panel_by_id        : Dictionary = {}   # {node_id: Panel}
+var _gem_display_box    : Control = null
+var _post_death_tut_overlay : Control = null
+var _heroes_tab_lock_overlay : Control = null
+
 
 # ── Entry ──────────────────────────────────────────────────────────────────────
 func setup(bold: Font, reg: Font) -> void:
 	_font_bold = bold
 	_font_reg  = reg
 	if is_instance_valid(_scroll):
-		# Already built on a previous visit — just refresh the gem count
+		# Already built on a previous visit — just refresh the gem count + hero lock
 		_update_gem_display()
+		_refresh_heroes_tab_lock()
 		return
 	_define_nodes()
 	_build_ui()
@@ -61,6 +67,8 @@ func setup(bold: Font, reg: Font) -> void:
 # ── Drag-to-pan ────────────────────────────────────────────────────────────────
 func _input(event: InputEvent) -> void:
 	if not is_instance_valid(_scroll):
+		return
+	if is_instance_valid(_post_death_tut_overlay):
 		return
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
@@ -250,6 +258,225 @@ func _define_nodes() -> void:
 		"All towers gain +1% attack speed.")
 	_towers_links.append({"from":"catapult_special","to":"all_spd_1"})
 
+	# ── RARE & EPIC SECTION ──────────────────────────────────────────────────────
+	# From all_spd_1 the tree forks:  LEFT → Rare towers   RIGHT → Epic towers
+	var RY := MY + MS * 10 + 130.0  # base Y below all_spd_1
+	var RS := 90.0                   # row step for rare/epic branches
+
+	# ── RARE (LEFT BRANCH, x: 0–420) ─────────────────────────────────────────────
+	_add_nd(_towers_nodes, "rare_mastery", "Rare\nMastery", 1, [20], ["all_spd_1"],
+		Vector2(170, RY), Vector2(BW, NH), Color(0.25, 0.55, 1.00),
+		"Unlocks upgrade paths for Rare Ranged and Rare Melee towers.")
+	_towers_links.append({"from":"all_spd_1","to":"rare_mastery"})
+
+	# Rare Ranged trunk (x ~ 80)
+	_add_nd(_towers_nodes, "rare_ranged_dmg_1", "Rare Ranged\n+1% Damage", 1, [6], ["rare_mastery"],
+		Vector2(80, RY+RS), Vector2(NW, NH), DMG_C,
+		"All rare ranged towers deal +1% damage.")
+	_towers_links.append({"from":"rare_mastery","to":"rare_ranged_dmg_1"})
+	_add_nd(_towers_nodes, "rare_ranged_rng_1", "Rare Ranged\n+5px Range", 1, [6], ["rare_ranged_dmg_1"],
+		Vector2(20, RY+RS*2), Vector2(NW, NH), RNG_C,
+		"All rare ranged towers gain +5 attack range.")
+	_towers_links.append({"from":"rare_ranged_dmg_1","to":"rare_ranged_rng_1"})
+	_add_nd(_towers_nodes, "rare_ranged_spd_1", "Rare Ranged\n+1% Atk Spd", 1, [6], ["rare_ranged_rng_1"],
+		Vector2(90, RY+RS*3), Vector2(NW, NH), SPD_C,
+		"All rare ranged towers gain +1% attack speed.")
+	_towers_links.append({"from":"rare_ranged_rng_1","to":"rare_ranged_spd_1"})
+	_add_nd(_towers_nodes, "flame_tower_special", "Flame Special", 1, [45], ["rare_ranged_spd_1"],
+		Vector2(30, RY+RS*4), Vector2(NW, SPH), SPC_C,
+		"Flame Tower: Wildfire\nEach enemy hit has a 10% chance to spawn a fire zone at their location. The zone lasts 3s and deals 5 damage per second to enemies inside.")
+	_towers_links.append({"from":"rare_ranged_spd_1","to":"flame_tower_special"})
+
+	# Rare Ranged west fork
+	_add_nd(_towers_nodes, "rare_ranged_dmg_2", "Rare Ranged\n+1% Damage", 1, [8], ["flame_tower_special"],
+		Vector2(0, RY+RS*5+10), Vector2(NW, NH), DMG_C,
+		"All rare ranged towers deal +1% damage.")
+	_towers_links.append({"from":"flame_tower_special","to":"rare_ranged_dmg_2"})
+	_add_nd(_towers_nodes, "frost_spire_special", "Frost Special", 1, [45], ["rare_ranged_dmg_2"],
+		Vector2(0, RY+RS*6+10), Vector2(NW, SPH), SPC_C,
+		"Frost Spire: Permafrost\nSlow zones last 5s (up from 3s) and slow intensity is increased to 50% (up from 45%).")
+	_towers_links.append({"from":"rare_ranged_dmg_2","to":"frost_spire_special"})
+
+	# Rare Ranged east fork
+	_add_nd(_towers_nodes, "rare_ranged_rng_2", "Rare Ranged\n+5px Range", 1, [8], ["flame_tower_special"],
+		Vector2(145, RY+RS*5+10), Vector2(NW, NH), RNG_C,
+		"All rare ranged towers gain +5 attack range.")
+	_towers_links.append({"from":"flame_tower_special","to":"rare_ranged_rng_2"})
+	_add_nd(_towers_nodes, "poison_tower_special", "Poison Special", 1, [45], ["rare_ranged_rng_2"],
+		Vector2(138, RY+RS*6+10), Vector2(NW, SPH), SPC_C,
+		"Poison Tower: Virulence\nPoison duration extended to 8s (up from 5s). Damage vulnerability increased to +15% (up from +10%).")
+	_towers_links.append({"from":"rare_ranged_rng_2","to":"poison_tower_special"})
+
+	# Rare Ranged merge
+	_add_nd(_towers_nodes, "sniper_tower_special", "Sniper Special", 1, [50],
+		["frost_spire_special","poison_tower_special"],
+		Vector2(30, RY+RS*7+25), Vector2(NW, SPH), SPC_C,
+		"Sniper Tower: Execution\nTargets below 25% HP take an extra ×1.5 damage multiplier on top of the normal HP scaling.")
+	_towers_links.append({"from":"frost_spire_special","to":"sniper_tower_special"})
+	_towers_links.append({"from":"poison_tower_special","to":"sniper_tower_special"})
+
+	# Rare Melee trunk (x ~ 290)
+	_add_nd(_towers_nodes, "rare_melee_dmg_1", "Rare Melee\n+1% Damage", 1, [6], ["rare_mastery"],
+		Vector2(285, RY+RS), Vector2(NW, NH), DMG_C,
+		"All rare melee towers deal +1% damage.")
+	_towers_links.append({"from":"rare_mastery","to":"rare_melee_dmg_1"})
+	_add_nd(_towers_nodes, "rare_melee_rng_1", "Rare Melee\n+3px Range", 1, [6], ["rare_melee_dmg_1"],
+		Vector2(340, RY+RS*2), Vector2(NW, NH), RNG_C,
+		"All rare melee towers gain +3 attack range.")
+	_towers_links.append({"from":"rare_melee_dmg_1","to":"rare_melee_rng_1"})
+	_add_nd(_towers_nodes, "rare_melee_spd_1", "Rare Melee\n+1% Atk Spd", 1, [6], ["rare_melee_rng_1"],
+		Vector2(265, RY+RS*3), Vector2(NW, NH), SPD_C,
+		"All rare melee towers gain +1% attack speed.")
+	_towers_links.append({"from":"rare_melee_rng_1","to":"rare_melee_spd_1"})
+	_add_nd(_towers_nodes, "elite_knight_special", "E.Knight Sp.", 1, [45], ["rare_melee_spd_1"],
+		Vector2(325, RY+RS*4), Vector2(NW, SPH), SPC_C,
+		"Elite Knight: Iron Discipline\nEvery 5th cleave stuns all enemies in range for 0.3s.")
+	_towers_links.append({"from":"rare_melee_spd_1","to":"elite_knight_special"})
+
+	# Rare Melee west fork
+	_add_nd(_towers_nodes, "rare_melee_dmg_2", "Rare Melee\n+1% Damage", 1, [8], ["elite_knight_special"],
+		Vector2(220, RY+RS*5+10), Vector2(NW, NH), DMG_C,
+		"All rare melee towers deal +1% damage.")
+	_towers_links.append({"from":"elite_knight_special","to":"rare_melee_dmg_2"})
+	_add_nd(_towers_nodes, "rare_melee_rng_2", "Rare Melee\n+3px Range", 1, [8], ["rare_melee_dmg_2"],
+		Vector2(225, RY+RS*6+10), Vector2(NW, NH), RNG_C,
+		"All rare melee towers gain +3 attack range.")
+	_towers_links.append({"from":"rare_melee_dmg_2","to":"rare_melee_rng_2"})
+
+	# Rare Melee east fork
+	_add_nd(_towers_nodes, "rare_melee_spd_2", "Rare Melee\n+1% Atk Spd", 1, [8], ["elite_knight_special"],
+		Vector2(385, RY+RS*5+10), Vector2(NW, NH), SPD_C,
+		"All rare melee towers gain +1% attack speed.")
+	_towers_links.append({"from":"elite_knight_special","to":"rare_melee_spd_2"})
+	_add_nd(_towers_nodes, "rare_melee_dmg_3", "Rare Melee\n+2% Damage", 1, [11], ["rare_melee_spd_2"],
+		Vector2(375, RY+RS*6+10), Vector2(NW, NH), DMG_C,
+		"All rare melee towers deal +2% damage.")
+	_towers_links.append({"from":"rare_melee_spd_2","to":"rare_melee_dmg_3"})
+
+	# Rare Melee merge
+	_add_nd(_towers_nodes, "iron_guard_special", "Iron Guard Sp.", 1, [50],
+		["rare_melee_rng_2","rare_melee_dmg_3"],
+		Vector2(280, RY+RS*7+25), Vector2(NW, SPH), SPC_C,
+		"Iron Guard: Earthshatter\nEvery 3rd slam strikes ALL enemies in range with knockback instead of just 3.")
+	_towers_links.append({"from":"rare_melee_rng_2","to":"iron_guard_special"})
+	_towers_links.append({"from":"rare_melee_dmg_3","to":"iron_guard_special"})
+
+	# Rare merged all-towers node
+	_add_nd(_towers_nodes, "rare_all_dmg_1", "+1% Damage\n(All Towers)", 1, [25],
+		["sniper_tower_special","iron_guard_special"],
+		Vector2(145, RY+RS*7+135), Vector2(BW, NH), DMG_C,
+		"All towers deal +1% damage. Requires completing both Rare Ranged and Rare Melee paths.")
+	_towers_links.append({"from":"sniper_tower_special","to":"rare_all_dmg_1"})
+	_towers_links.append({"from":"iron_guard_special","to":"rare_all_dmg_1"})
+
+	# ── EPIC (RIGHT BRANCH, x: 560–1010) ─────────────────────────────────────────
+	_add_nd(_towers_nodes, "epic_mastery", "Epic\nMastery", 1, [20], ["all_spd_1"],
+		Vector2(760, RY), Vector2(BW, NH), Color(0.85, 0.28, 0.95),
+		"Unlocks upgrade paths for Epic Ranged and Epic Melee towers.")
+	_towers_links.append({"from":"all_spd_1","to":"epic_mastery"})
+
+	var EPC_C := Color(0.85, 0.28, 0.95)  # purple — epic color
+
+	# Epic Ranged trunk (x ~ 680)
+	_add_nd(_towers_nodes, "epic_ranged_dmg_1", "Epic Ranged\n+1% Damage", 1, [7], ["epic_mastery"],
+		Vector2(660, RY+RS), Vector2(NW, NH), DMG_C,
+		"All epic ranged towers deal +1% damage.")
+	_towers_links.append({"from":"epic_mastery","to":"epic_ranged_dmg_1"})
+	_add_nd(_towers_nodes, "epic_ranged_rng_1", "Epic Ranged\n+5px Range", 1, [7], ["epic_ranged_dmg_1"],
+		Vector2(600, RY+RS*2), Vector2(NW, NH), RNG_C,
+		"All epic ranged towers gain +5 attack range.")
+	_towers_links.append({"from":"epic_ranged_dmg_1","to":"epic_ranged_rng_1"})
+	_add_nd(_towers_nodes, "epic_ranged_spd_1", "Epic Ranged\n+1% Atk Spd", 1, [7], ["epic_ranged_rng_1"],
+		Vector2(670, RY+RS*3), Vector2(NW, NH), SPD_C,
+		"All epic ranged towers gain +1% attack speed.")
+	_towers_links.append({"from":"epic_ranged_rng_1","to":"epic_ranged_spd_1"})
+	_add_nd(_towers_nodes, "tesla_tower_special", "Tesla Special", 1, [50], ["epic_ranged_spd_1"],
+		Vector2(605, RY+RS*4), Vector2(NW, SPH), EPC_C,
+		"Tesla Tower: Overcharge\nWhen switching targets, 30% chance to instantly zap a nearby enemy with a bonus lightning strike.")
+	_towers_links.append({"from":"epic_ranged_spd_1","to":"tesla_tower_special"})
+
+	# Epic Ranged west fork
+	_add_nd(_towers_nodes, "epic_ranged_dmg_2", "Epic Ranged\n+1% Damage", 1, [9], ["tesla_tower_special"],
+		Vector2(565, RY+RS*5+10), Vector2(NW, NH), DMG_C,
+		"All epic ranged towers deal +1% damage.")
+	_towers_links.append({"from":"tesla_tower_special","to":"epic_ranged_dmg_2"})
+	_add_nd(_towers_nodes, "infernal_core_special", "Infernal Sp.", 1, [50], ["epic_ranged_dmg_2"],
+		Vector2(555, RY+RS*6+10), Vector2(NW, SPH), EPC_C,
+		"Infernal Core: Infernal Overload\nBeam damage ramps to 5× max (up from 2×) over 5s of sustained lock.")
+	_towers_links.append({"from":"epic_ranged_dmg_2","to":"infernal_core_special"})
+
+	# Epic Ranged east fork
+	_add_nd(_towers_nodes, "epic_ranged_rng_2", "Epic Ranged\n+5px Range", 1, [9], ["tesla_tower_special"],
+		Vector2(758, RY+RS*5+10), Vector2(NW, NH), RNG_C,
+		"All epic ranged towers gain +5 attack range.")
+	_towers_links.append({"from":"tesla_tower_special","to":"epic_ranged_rng_2"})
+	_add_nd(_towers_nodes, "ballista_special", "Ballista Sp.", 1, [50], ["epic_ranged_rng_2"],
+		Vector2(748, RY+RS*6+10), Vector2(NW, SPH), EPC_C,
+		"Ballista: Siege Shot\nHP-based damage bonus now applies to bosses at 50% effectiveness.")
+	_towers_links.append({"from":"epic_ranged_rng_2","to":"ballista_special"})
+
+	# Epic Ranged merge
+	_add_nd(_towers_nodes, "arcane_cannon_special", "Arcane Sp.", 1, [55],
+		["infernal_core_special","ballista_special"],
+		Vector2(610, RY+RS*7+25), Vector2(NW, SPH), EPC_C,
+		"Arcane Cannon: Arcane Empowerment\nEach blue ray proc randomly grants this tower one permanent buff: +1% damage, +2px range, or +1% attack speed. Buffs are unique per tower and accumulate indefinitely.")
+	_towers_links.append({"from":"infernal_core_special","to":"arcane_cannon_special"})
+	_towers_links.append({"from":"ballista_special","to":"arcane_cannon_special"})
+
+	# Epic Melee trunk (x ~ 890)
+	_add_nd(_towers_nodes, "epic_melee_dmg_1", "Epic Melee\n+1% Damage", 1, [7], ["epic_mastery"],
+		Vector2(880, RY+RS), Vector2(NW, NH), DMG_C,
+		"All epic melee towers deal +1% damage.")
+	_towers_links.append({"from":"epic_mastery","to":"epic_melee_dmg_1"})
+	_add_nd(_towers_nodes, "epic_melee_rng_1", "Epic Melee\n+3px Range", 1, [7], ["epic_melee_dmg_1"],
+		Vector2(940, RY+RS*2), Vector2(NW, NH), RNG_C,
+		"All epic melee towers gain +3 attack range.")
+	_towers_links.append({"from":"epic_melee_dmg_1","to":"epic_melee_rng_1"})
+	_add_nd(_towers_nodes, "epic_melee_spd_1", "Epic Melee\n+1% Atk Spd", 1, [7], ["epic_melee_rng_1"],
+		Vector2(860, RY+RS*3), Vector2(NW, NH), SPD_C,
+		"All epic melee towers gain +1% attack speed.")
+	_towers_links.append({"from":"epic_melee_rng_1","to":"epic_melee_spd_1"})
+	_add_nd(_towers_nodes, "blade_assassin_special", "Blade Sp.", 1, [50], ["epic_melee_spd_1"],
+		Vector2(920, RY+RS*4), Vector2(NW, SPH), EPC_C,
+		"Blade Assassin: Whirlwind\nBlade spin proc chance raised to 25% and spin duration extended to 5s.")
+	_towers_links.append({"from":"epic_melee_spd_1","to":"blade_assassin_special"})
+
+	# Epic Melee west fork
+	_add_nd(_towers_nodes, "epic_melee_dmg_2", "Epic Melee\n+1% Damage", 1, [9], ["blade_assassin_special"],
+		Vector2(835, RY+RS*5+10), Vector2(NW, NH), DMG_C,
+		"All epic melee towers deal +1% damage.")
+	_towers_links.append({"from":"blade_assassin_special","to":"epic_melee_dmg_2"})
+	_add_nd(_towers_nodes, "epic_melee_rng_2", "Epic Melee\n+3px Range", 1, [9], ["epic_melee_dmg_2"],
+		Vector2(840, RY+RS*6+10), Vector2(NW, NH), RNG_C,
+		"All epic melee towers gain +3 attack range.")
+	_towers_links.append({"from":"epic_melee_dmg_2","to":"epic_melee_rng_2"})
+
+	# Epic Melee east fork
+	_add_nd(_towers_nodes, "epic_melee_spd_2", "Epic Melee\n+1% Atk Spd", 1, [9], ["blade_assassin_special"],
+		Vector2(980, RY+RS*5+10), Vector2(NW, NH), SPD_C,
+		"All epic melee towers gain +1% attack speed.")
+	_towers_links.append({"from":"blade_assassin_special","to":"epic_melee_spd_2"})
+	_add_nd(_towers_nodes, "epic_melee_dmg_3", "Epic Melee\n+2% Damage", 1, [12], ["epic_melee_spd_2"],
+		Vector2(970, RY+RS*6+10), Vector2(NW, NH), DMG_C,
+		"All epic melee towers deal +2% damage.")
+	_towers_links.append({"from":"epic_melee_spd_2","to":"epic_melee_dmg_3"})
+
+	# Epic Melee merge
+	_add_nd(_towers_nodes, "axe_warrior_special", "Axe Warrior Sp.", 1, [55],
+		["epic_melee_rng_2","epic_melee_dmg_3"],
+		Vector2(890, RY+RS*7+25), Vector2(NW, SPH), EPC_C,
+		"Axe Warrior: Pestilence\nCleave hits up to 4 enemies (up from 2) — all receive bleed and poison.")
+	_towers_links.append({"from":"epic_melee_rng_2","to":"axe_warrior_special"})
+	_towers_links.append({"from":"epic_melee_dmg_3","to":"axe_warrior_special"})
+
+	# Epic merged all-towers node
+	_add_nd(_towers_nodes, "epic_all_dmg_1", "+1% Damage\n(All Towers)", 1, [30],
+		["arcane_cannon_special","axe_warrior_special"],
+		Vector2(755, RY+RS*7+135), Vector2(BW, NH), DMG_C,
+		"All towers deal +1% damage. Requires completing both Epic Ranged and Epic Melee paths.")
+	_towers_links.append({"from":"arcane_cannon_special","to":"epic_all_dmg_1"})
+	_towers_links.append({"from":"axe_warrior_special","to":"epic_all_dmg_1"})
+
 	# ─── HEROES ───────────────────────────────────────────────────────────────
 	_heroes_nodes.clear(); _heroes_links.clear()
 
@@ -324,6 +551,36 @@ func _build_left_panel() -> void:
 	_tab_towers = _mk_tab_btn("Towers", Vector2(12, 78),  panel, "towers")
 	_tab_heroes = _mk_tab_btn("Heroes", Vector2(12, 134), panel, "heroes")
 
+	_heroes_tab_lock_overlay = Control.new()
+	_heroes_tab_lock_overlay.position     = _tab_heroes.position
+	_heroes_tab_lock_overlay.size         = _tab_heroes.size
+	_heroes_tab_lock_overlay.mouse_filter = MOUSE_FILTER_IGNORE
+	panel.add_child(_heroes_tab_lock_overlay)
+
+	var hdim := ColorRect.new()
+	hdim.color        = Color(0, 0, 0, 0.60)
+	hdim.size         = _tab_heroes.size
+	hdim.mouse_filter = MOUSE_FILTER_IGNORE
+	_heroes_tab_lock_overlay.add_child(hdim)
+
+	var hlock_path := "res://assets/statues/padlock.png"
+	if ResourceLoader.exists(hlock_path):
+		var hlsz := Vector2(36, 36)
+		var hlock_margin := 8.0
+		for side in range(2):
+			var hlock_icon := TextureRect.new()
+			hlock_icon.texture      = load(hlock_path)
+			hlock_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			hlock_icon.expand_mode  = TextureRect.EXPAND_IGNORE_SIZE
+			var hlx : float = hlock_margin if side == 0 else (_tab_heroes.size.x - hlsz.x - hlock_margin)
+			hlock_icon.position     = Vector2(hlx, (_tab_heroes.size.y - hlsz.y) * 0.5)
+			hlock_icon.size         = hlsz
+			hlock_icon.modulate     = Color(1, 1, 1, 0.80)
+			hlock_icon.mouse_filter = MOUSE_FILTER_IGNORE
+			_heroes_tab_lock_overlay.add_child(hlock_icon)
+
+	_refresh_heroes_tab_lock()
+
 	if DEBUG:
 		var rb := _mk_left_btn("Reset Upgrades", Vector2(12, 660), panel)
 		rb.pressed.connect(_on_reset_pressed)
@@ -384,6 +641,7 @@ func _build_gem_display() -> void:
 	hbox.mouse_filter = MOUSE_FILTER_IGNORE
 	hbox.add_theme_constant_override("separation", 5)
 	add_child(hbox)
+	_gem_display_box = hbox
 	hbox.add_child(_mk_blue_gem_icon(24.0))
 	_gem_lbl = Label.new()
 	_gem_lbl.add_theme_font_override("font", _font_bold)
@@ -395,7 +653,25 @@ func _build_gem_display() -> void:
 
 
 # ── Tab switching ──────────────────────────────────────────────────────────────
+func _has_any_hero() -> bool:
+	for hid in GameData.HERO_DEFS:
+		if GameData.get_tower_level(hid) >= 1:
+			return true
+	return false
+
+
+func _refresh_heroes_tab_lock() -> void:
+	if not is_instance_valid(_heroes_tab_lock_overlay):
+		return
+	var owned : bool = _has_any_hero()
+	_heroes_tab_lock_overlay.visible = not owned
+	if is_instance_valid(_tab_heroes):
+		_tab_heroes.disabled = not owned
+
+
 func _switch_tab(tab: String) -> void:
+	if tab == "heroes" and not _has_any_hero():
+		return
 	_active_tab = tab
 	_active_id  = ""
 	_close_popup()
@@ -671,6 +947,7 @@ func _build_node_panel(nd: Dictionary, all_nodes: Array) -> void:
 	panel.add_theme_stylebox_override("panel", ps)
 
 	_canvas.add_child(panel)
+	_panel_by_id[id] = panel
 
 	var tc : Color
 	if done: tc = C_DONE_BDR
@@ -976,6 +1253,11 @@ func _close_popup() -> void:
 	_active_id = ""
 
 
+func _gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed and is_instance_valid(_popup):
+		_close_popup()
+
+
 func _show_hover_popup(nd: Dictionary, source: Control) -> void:
 	_hide_hover_popup()
 	var col : Color = nd["color"]
@@ -984,7 +1266,7 @@ func _show_hover_popup(nd: Dictionary, source: Control) -> void:
 	var _desc_str : String = nd["desc"] as String
 	var _large : bool = _desc_str.length() > 80 or _desc_str.count("\n") >= 2
 	var _pw  : float = 360.0 if _large else 290.0
-	var _ph  : float = 170.0 if _large else 134.0
+	var _ph  : float = 170.0 if _large else 144.0
 	var _desc_bottom : float = 130.0 if _large else 100.0
 	var _sep_y  : float = _desc_bottom + 2.0
 	var _cost_y : float = _sep_y + 6.0
@@ -1104,6 +1386,192 @@ func _on_reset_pressed() -> void:
 	_update_gem_display()
 	_close_popup()
 	_rebuild_tree()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# POST-DEATH TUTORIAL — guide the player through their first upgrade purchase
+# ══════════════════════════════════════════════════════════════════════════════
+
+func start_post_death_tutorial() -> void:
+	if GameData.post_death_tutorial_seen:
+		return
+	if not is_instance_valid(_gem_display_box):
+		return
+	_switch_tab("towers")
+	# Wait a couple frames so scroll/layout has fully settled before measuring rects
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_show_post_death_spotlight(
+		_gem_display_box,
+		"These are the Blue Gems you earned from that run! Spend them on the nodes below to permanently upgrade your towers.",
+		Callable(), "Got it!", _advance_post_death_step2
+	)
+
+
+func _advance_post_death_step2() -> void:
+	if not _panel_by_id.has("tower_mastery") or not is_instance_valid(_panel_by_id["tower_mastery"]):
+		_finish_post_death_tutorial()
+		return
+	_show_post_death_spotlight(
+		_panel_by_id["tower_mastery"],
+		"Hover over a node to see exactly what it boosts. Click it to spend your gems and buy the upgrade!",
+		_finish_post_death_tutorial
+	)
+
+
+func _finish_post_death_tutorial() -> void:
+	if is_instance_valid(_post_death_tut_overlay):
+		_post_death_tut_overlay.queue_free()
+		_post_death_tut_overlay = null
+	GameData.post_death_tutorial_seen = true
+	GameData.save_game()
+
+
+# target: the Control to spotlight.
+# on_click_advance: if valid, clicking the target itself advances the tutorial (input is
+#   blocked everywhere else). If empty, a dim full-screen blocker + dismiss button is shown
+#   instead, calling on_dismiss when pressed.
+func _show_post_death_spotlight(target: Control, msg_text: String, on_click_advance: Callable,
+		dismiss_label: String = "", on_dismiss: Callable = Callable()) -> void:
+	if is_instance_valid(_post_death_tut_overlay):
+		_post_death_tut_overlay.queue_free()
+		_post_death_tut_overlay = null
+	if not is_instance_valid(target):
+		_finish_post_death_tutorial()
+		return
+
+	const DARK := Color(0.04, 0.04, 0.10, 0.82)
+	const GOLD := Color(1.0, 0.88, 0.28, 1.0)
+
+	var root := Control.new()
+	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	root.mouse_filter = MOUSE_FILTER_STOP
+	root.z_index      = 150
+	add_child(root)
+	move_child(root, get_child_count() - 1)
+	_post_death_tut_overlay = root
+
+	var pad   : float = 6.0
+	var brect := Rect2(target.get_global_rect().position, target.size)
+	# Right-aligned containers (e.g. the gem display) leave empty space on their
+	# left side — tighten the box to hug the actual content instead of the full container
+	if target is HBoxContainer and (target as HBoxContainer).alignment == BoxContainer.ALIGNMENT_END:
+		var content_w : float = target.get_combined_minimum_size().x
+		if content_w > 0.0 and content_w < brect.size.x:
+			brect.position.x = brect.end.x - content_w
+			brect.size.x     = content_w
+	var hl    := Rect2(brect.position.x - pad, brect.position.y - pad,
+						brect.size.x + pad * 2.0, brect.size.y + pad * 2.0)
+	hl.position.x = clampf(hl.position.x, 1.5, 1280.0)
+	hl.position.y = clampf(hl.position.y, 1.5, 720.0)
+	hl.size.x     = minf(hl.size.x, 1280.0 - hl.position.x - 1.5)
+	hl.size.y     = minf(hl.size.y, 720.0 - hl.position.y - 1.5)
+
+	var canvas := Control.new()
+	canvas.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	canvas.mouse_filter = MOUSE_FILTER_IGNORE
+	root.add_child(canvas)
+	canvas.draw.connect(func():
+		canvas.draw_rect(Rect2(0, 0, 1280, hl.position.y), DARK)
+		canvas.draw_rect(Rect2(0, hl.position.y, hl.position.x, hl.size.y), DARK)
+		canvas.draw_rect(Rect2(hl.end.x, hl.position.y, 1280.0 - hl.end.x, hl.size.y), DARK)
+		canvas.draw_rect(Rect2(0, hl.end.y, 1280, 720.0 - hl.end.y), DARK)
+		canvas.draw_rect(hl, GOLD, false, 2.5)
+	)
+
+	var use_dismiss : bool = not on_click_advance.is_valid()
+	if not use_dismiss:
+		# Block all input except the spotlighted target
+		var _mb := func(x: float, y: float, w: float, h: float):
+			var c := ColorRect.new()
+			c.color        = Color(0, 0, 0, 0)
+			c.position     = Vector2(x, y)
+			c.size         = Vector2(w, h)
+			c.mouse_filter = MOUSE_FILTER_STOP
+			root.add_child(c)
+		_mb.call(0.0, 0.0, 1280.0, hl.position.y)
+		_mb.call(0.0, hl.position.y, hl.position.x, hl.size.y)
+		_mb.call(hl.end.x, hl.position.y, 1280.0 - hl.end.x, hl.size.y)
+		_mb.call(0.0, hl.end.y, 1280.0, 720.0 - hl.end.y)
+	else:
+		var blocker := ColorRect.new()
+		blocker.color        = Color(0, 0, 0, 0)
+		blocker.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		blocker.mouse_filter = MOUSE_FILTER_STOP
+		root.add_child(blocker)
+
+	var ps := StyleBoxFlat.new()
+	ps.bg_color    = Color(0.06, 0.08, 0.16, 0.97)
+	ps.corner_radius_top_left    = 8; ps.corner_radius_top_right    = 8
+	ps.corner_radius_bottom_left = 8; ps.corner_radius_bottom_right = 8
+	ps.border_width_left = 2; ps.border_width_right  = 2
+	ps.border_width_top  = 2; ps.border_width_bottom = 2
+	ps.border_color = GOLD
+	var msg_panel := Panel.new()
+	var msg_h : float = 126.0 if use_dismiss else 100.0
+	msg_panel.position = Vector2(hl.position.x, hl.end.y + 16.0)
+	msg_panel.size     = Vector2(420.0, msg_h)
+	if msg_panel.position.y + msg_panel.size.y > 716.0:
+		msg_panel.position.y = hl.position.y - msg_h - 16.0
+	if msg_panel.position.y < 4.0:
+		msg_panel.position.y = 4.0
+	if msg_panel.position.x + msg_panel.size.x > 1270.0:
+		msg_panel.position.x = 1270.0 - msg_panel.size.x
+	if msg_panel.position.x < 4.0:
+		msg_panel.position.x = 4.0
+	msg_panel.add_theme_stylebox_override("panel", ps)
+	msg_panel.mouse_filter = MOUSE_FILTER_STOP
+	root.add_child(msg_panel)
+	var msg_lbl := _label_simple(msg_text, _font_bold, 15, Color(1.0, 0.95, 0.80))
+	msg_lbl.custom_minimum_size = Vector2(400.0, 74.0)
+	msg_lbl.position      = Vector2(10.0, 8.0)
+	msg_lbl.size          = Vector2(400.0, 74.0)
+	msg_lbl.mouse_filter  = MOUSE_FILTER_IGNORE
+	msg_panel.add_child(msg_lbl)
+
+	if not use_dismiss:
+		target.gui_input.connect(func(ev: InputEvent):
+			if ev is InputEventMouseButton and ev.button_index == MOUSE_BUTTON_LEFT and ev.pressed:
+				on_click_advance.call()
+		, CONNECT_ONE_SHOT)
+
+	# Always offer an explicit "Got it!" button so the player can advance without
+	# being forced to click the spotlighted target
+	var advance_cb : Callable = on_dismiss if on_dismiss.is_valid() else on_click_advance
+	if advance_cb.is_valid() or use_dismiss:
+		var ok_btn := Button.new()
+		ok_btn.text       = dismiss_label if dismiss_label != "" else "Got it!"
+		ok_btn.position   = Vector2(150.0, 88.0)
+		ok_btn.size       = Vector2(120.0, 32.0)
+		ok_btn.focus_mode = FOCUS_NONE
+		ok_btn.add_theme_font_override("font",           _font_bold)
+		ok_btn.add_theme_font_size_override("font_size", 14)
+		ok_btn.add_theme_color_override("font_color",         Color(0.10, 0.10, 0.12))
+		ok_btn.add_theme_color_override("font_hover_color",    Color(0.10, 0.10, 0.12))
+		ok_btn.add_theme_color_override("font_pressed_color",  Color(0.10, 0.10, 0.12))
+		ok_btn.add_theme_color_override("font_focus_color",    Color(0.10, 0.10, 0.12))
+		var bs := StyleBoxFlat.new()
+		bs.bg_color                   = Color(0.85, 0.85, 0.88)
+		bs.corner_radius_top_left     = 6; bs.corner_radius_top_right    = 6
+		bs.corner_radius_bottom_left  = 6; bs.corner_radius_bottom_right = 6
+		var bs_h := bs.duplicate() as StyleBoxFlat
+		bs_h.bg_color = Color(0.95, 0.95, 0.98)
+		ok_btn.add_theme_stylebox_override("normal", bs)
+		ok_btn.add_theme_stylebox_override("hover",  bs_h)
+		ok_btn.add_theme_stylebox_override("pressed", bs)
+		ok_btn.add_theme_stylebox_override("focus",  bs)
+		ok_btn.pressed.connect(advance_cb if advance_cb.is_valid() else _finish_post_death_tutorial)
+		msg_panel.add_child(ok_btn)
+
+
+func _label_simple(text: String, font: Font, size: int, color: Color) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.add_theme_font_override("font", font)
+	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_color_override("font_color", color)
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD
+	return l
 
 
 # ── Gem icon helpers ───────────────────────────────────────────────────────────

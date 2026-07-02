@@ -413,8 +413,18 @@ func _draw_world_n(world: int) -> void:
 	draw_polyline(pts, road_c, float(ROAD_W), true)
 
 	# 6 — bright centre stripe
-	draw_polyline(pts, Color(road_c.r + 0.12, road_c.g + 0.08, road_c.b + 0.06, 0.35),
-		float(ROAD_W) * 0.28, true)
+	var stripe_c := Color(road_c.r + 0.12, road_c.g + 0.08, road_c.b + 0.06, 0.35)
+	var stripe_w := float(ROAD_W) * 0.28
+	if world == 2:
+		draw_polyline(PackedVector2Array([
+			Vector2(-10,140),Vector2(870,140),Vector2(870,320),
+			Vector2(120,320),Vector2(120,500),Vector2(870,500),
+			Vector2(870,600),Vector2(-10,600)
+		]), stripe_c, stripe_w, false)
+		var sh := stripe_w * 0.5
+		draw_polyline(PackedVector2Array([Vector2(490,140 + sh),Vector2(490,320 - sh)]), stripe_c, stripe_w, false)
+	else:
+		draw_polyline(pts, stripe_c, stripe_w, true)
 
 	# 7 — themed road edge glow
 	_draw_world_edge_details(world, pts)
@@ -423,7 +433,26 @@ func _draw_world_n(world: int) -> void:
 
 func _draw_world_edge_details(world: int, pts: PackedVector2Array) -> void:
 	match world:
-		2:  draw_polyline(pts, Color(0.08, 0.35, 0.05, 0.22), float(ROAD_W) + 12.0, true)
+		2:
+			var gc := Color(0.08, 0.35, 0.05, 0.22)
+			var h  := float(ROAD_W)
+			var hh := h * 0.5
+			# Segments clipped to stop at corner boundaries — no overlap, no alpha doubling
+			draw_rect(Rect2(-10,      140 - hh, 490 - hh + 10, h), gc)  # top left
+			draw_rect(Rect2(490 + hh, 140 - hh, 380 - h,       h), gc)  # top right
+			draw_rect(Rect2(120 + hh, 320 - hh, 370 - h,       h), gc)  # mid left
+			draw_rect(Rect2(490 + hh, 320 - hh, 380 - h,       h), gc)  # mid right
+			draw_rect(Rect2(120 + hh, 500 - hh, 750 - h,       h), gc)  # lower
+			draw_rect(Rect2(-10,      600 - hh, 880 - hh,      h), gc)  # bottom
+			draw_rect(Rect2(870 - hh, 140 + hh, h, 180 - h), gc)  # right upper vertical
+			draw_rect(Rect2(490 - hh, 140 + hh, h, 180 - h), gc)  # inner vertical
+			draw_rect(Rect2(120 - hh, 320 + hh, h, 180 - h), gc)  # left vertical
+			draw_rect(Rect2(870 - hh, 500 + hh, h, 100 - h), gc)  # right lower vertical
+			# Corner squares — each drawn exactly once
+			for corner : Vector2 in [Vector2(870,140), Vector2(870,320), Vector2(490,140),
+					Vector2(490,320), Vector2(120,320), Vector2(120,500),
+					Vector2(870,500), Vector2(870,600)]:
+				draw_rect(Rect2(corner.x - hh, corner.y - hh, h, h), gc)
 		3:  draw_polyline(pts, Color(0.88, 0.72, 0.35, 0.18), float(ROAD_W) + 14.0, true)
 		4:  draw_polyline(pts, Color(0.55, 0.80, 1.00, 0.20), float(ROAD_W) + 14.0, true)
 		5:  draw_polyline(pts, Color(1.00, 0.40, 0.05, 0.22), float(ROAD_W) + 14.0, true)

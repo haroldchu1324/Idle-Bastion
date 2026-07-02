@@ -93,6 +93,7 @@ var _turret_result_card  : Control = null
 var _roll_turret_btn     : Button  = null
 var _roll_rare_btn       : Button  = null
 var _roll_epic_btn       : Button  = null
+var _fusion_icon_row     : Control = null
 var _upgrade_result_card : Control = null
 var _roll_status_lbl     : Label   = null
 var _upg_roll_status_lbl : Label   = null
@@ -150,6 +151,10 @@ var _dq_stat                : Control = null
 var _game_over_screen       : Control
 var _nav_flash              : ColorRect = null
 var _simple_menu_screen     : Control = null
+var _simple_menu_lock_refs  : Array   = []   # [{overlay, locked: [bool]}] — nav buttons locked until first defeat
+var _simple_menu_upgrades_row : Control = null
+var _upgrade_tree_instance     : Control = null
+var _post_death_tut_overlay    : Control = null
 var _main_menu_statues      : Array   = []
 var _run_results_screen     : Control
 var _run_results_loot_grid  : Control = null
@@ -187,6 +192,7 @@ var _wm_selected_world      : int           = 0
 var _wm_selected_difficulty : String        = "easy"
 var _wm_diff_easy_btn       : Button        = null
 var _wm_diff_hard_btn       : Button        = null
+var _wm_refresh_diff_btns   : Callable      = Callable()
 var _wm_hard_glow           : Panel         = null
 var _wm_hard_glow_style     : StyleBoxFlat  = null
 var _wm_hard_glow_tween     : Tween         = null
@@ -281,6 +287,8 @@ var _gear_menu           : Panel   = null
 var _recipe_btn          : Button  = null
 var _recipe_btn_badge    : Label   = null
 var _recipe_row_refs     : Array   = []   # [{result_id, badge_lbl, craft_btn, mat_refs:[{panel,id}]}]
+var _recipe_modal_scroll : ScrollContainer = null
+const RECIPE_ROW_H       : int     = 116
 
 const TOKEN_ICON_SCR = preload("res://ui/TokenIcon.gd")
 
@@ -812,9 +820,8 @@ func _advance_recipe_tutorial_step2() -> void:
 		return
 
 	# Scroll so the craft button is already visible when the overlay builds
-	if _recipe_scroll_offset != first_craft_idx:
-		_recipe_scroll_offset = first_craft_idx
-		_refresh_recipe_modal()
+	if is_instance_valid(_recipe_modal_scroll):
+		_recipe_modal_scroll.scroll_vertical = first_craft_idx * RECIPE_ROW_H
 		await get_tree().process_frame
 
 	# Rebuild overlay for step 2 (spotlighting the craft button)
@@ -1168,14 +1175,17 @@ func _build_gem_hud() -> void:
 
 
 func _build_loot_tab() -> void:
-	const C_LOOT := Color(0.38, 0.22, 0.56)
+	const C_LOOT  := Color(0.38, 0.22, 0.56)
+	const BTN_W   : int = 93    # 60% narrower than original 232
+	const BTN_X   : int = 1280 - BTN_W - 8
+	const BTN_Y   : int = 602
 	var btn := Button.new()
-	btn.text       = "🎒  Loot"
-	btn.position   = Vector2(1034, 602)
-	btn.size       = Vector2(232, 46)
+	btn.text       = "📦  Loot"
+	btn.position   = Vector2(BTN_X, BTN_Y)
+	btn.size       = Vector2(BTN_W, 46)
 	btn.focus_mode = FOCUS_NONE
 	btn.add_theme_font_override("font",           _font_bold)
-	btn.add_theme_font_size_override("font_size", 18)
+	btn.add_theme_font_size_override("font_size", 14)
 	btn.add_theme_color_override("font_color",    C_WHITE)
 	btn.add_theme_stylebox_override("normal",  _btn_style(C_LOOT))
 	btn.add_theme_stylebox_override("hover",   _btn_hover(C_LOOT))
@@ -1190,7 +1200,7 @@ func _build_loot_tab() -> void:
 	badge_s.set_corner_radius_all(12)
 	var badge_p := Panel.new()
 	badge_p.add_theme_stylebox_override("panel", badge_s)
-	badge_p.position     = Vector2(1034 + 232 - 13, 602 - 12)
+	badge_p.position     = Vector2(BTN_X + BTN_W - 13, BTN_Y - 12)
 	badge_p.size         = Vector2(26, 26)
 	badge_p.mouse_filter = MOUSE_FILTER_IGNORE
 	badge_p.visible      = false
@@ -1378,7 +1388,7 @@ func show_boss_card_idle(cards: Array, boss_screen_pos: Vector2) -> void:
 
 
 func fly_loot_cards_to_bag() -> void:
-	const LOOT_CENTER := Vector2(1150, 625)
+	const LOOT_CENTER := Vector2(1225, 625)
 	var chips := _idle_card_chips.duplicate()
 	_idle_card_chips.clear()
 	for i in chips.size():
@@ -2308,6 +2318,28 @@ func _fill_turrets_tab(page: Control) -> void:
 	page.add_child(epic_btn)
 	_roll_epic_btn = epic_btn
 
+	# ── Fusion Summons ─────────────────────────────────────────────────────────
+	var fus_sep := ColorRect.new()
+	fus_sep.color        = Color(1, 1, 1, 0.18)
+	fus_sep.position     = Vector2(8, 292)
+	fus_sep.size         = Vector2(w - 16, 1)
+	fus_sep.mouse_filter = MOUSE_FILTER_IGNORE
+	page.add_child(fus_sep)
+
+	var fus_hdr := _label("✨  Fusion Summons", _font_bold, 13, Color(1.0, 0.85, 0.4))
+	fus_hdr.position             = Vector2(0, 298)
+	fus_hdr.size                 = Vector2(w, 18)
+	fus_hdr.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	fus_hdr.mouse_filter         = MOUSE_FILTER_IGNORE
+	page.add_child(fus_hdr)
+
+	var icon_row := Control.new()
+	icon_row.position     = Vector2(8, 320)
+	icon_row.size         = Vector2(w - 16, 56)
+	icon_row.mouse_filter = MOUSE_FILTER_IGNORE
+	page.add_child(icon_row)
+	_fusion_icon_row = icon_row
+
 	# ── Debug: +10 000 Gold ────────────────────────────────────────────────────
 	var dbg_btn := Button.new()
 	dbg_btn.text         = "🐛  +10 000 Gold (Debug)"
@@ -3179,7 +3211,7 @@ func show_tower_info(tower, merge_count: int = 0) -> void:
 	var eff_dmg     : float  = (tower.damage + GameData.buff_damage_flat + wt_dmg + herc_bonus + relic_dmg) * dmg_mult * (1.0 + tower._tile_dmg_bonus)
 	var base_rate   : float  = d.get("fire_rate", tower.fire_rate)
 	var eff_rate    : float  = base_rate * spd_mult * (1.0 + wt_rate + tower._ranger_rate_bonus + tower._frost_speed_bonus + tower._tile_spd_bonus + relic_rate)
-	var dmg_pct     : float  = (dmg_mult - 1.0 + tower._tile_dmg_bonus) * 100.0
+	var dmg_pct     : float  = (dmg_mult - 1.0 + tower._tile_dmg_bonus + tower._ac_perm_dmg_pct) * 100.0
 	var dmg_suffix  : String = ""
 	var dmg_tags    : Array  = []
 	if dmg_pct > 0.0:           dmg_tags.append("+%.0f%%" % dmg_pct)
@@ -3187,7 +3219,7 @@ func show_tower_info(tower, merge_count: int = 0) -> void:
 	if tower._tile_dmg_bonus > 0.0: dmg_tags.append("🔴")
 	if relic_dmg > 0.0:         dmg_tags.append("★")
 	if not dmg_tags.is_empty(): dmg_suffix = " (%s)" % ", ".join(dmg_tags)
-	var spd_pct     : float  = (spd_mult - 1.0 + tower._tile_spd_bonus) * 100.0
+	var spd_pct     : float  = (spd_mult - 1.0 + tower._tile_spd_bonus + tower._ac_perm_spd_pct) * 100.0
 	var rate_suffix : String = ""
 	var rate_tags   : Array  = []
 	if spd_pct > 0.0:               rate_tags.append("+%.0f%%" % spd_pct)
@@ -3217,7 +3249,7 @@ func show_tower_info(tower, merge_count: int = 0) -> void:
 		"poison_cloud":  "Hits all enemies in range each shot. Spawns a persistent poison cloud that slowly expands along the path, dealing 2 damage/s to any enemy inside it.",
 		"frost_cannon_tri": "Fires at up to 3 separate targets per shot. Boss targets take +50% damage and receive a 10% slow that refreshes on repeat hits.",
 		"arcane_overload": "Every 5th attack triggers Arcane Overload — instant lasers hit ALL enemies in range (minimum 5 lasers). Counter never resets.",
-		"arcane_charge": "Persistent charge counter — every 15th hit fires a blue ray hitting all enemies in range. Counter never resets.",
+		"arcane_charge": "Persistent charge counter — every 15th hit fires a blue ray hitting all enemies in range for 2× damage. Counter never resets.",
 		"lock_beam":     "Locks onto one target until it dies or leaves range. Beam damage ramps from 1× to 2× over 5 seconds of continuous fire.",
 		"tempest_strike":         "Every 10th hit launches a slash that deals base damage + 5% of the target's max HP on impact.",
 		"infernal_serpent_summon":"Each hit has a 10% chance to summon a living fire serpent (100 damage per bite) that races around the battlefield once.",
@@ -3230,7 +3262,7 @@ func show_tower_info(tower, merge_count: int = 0) -> void:
 		"hercules_cleave": "Strikes the primary target and one additional enemy simultaneously. Gains +5 permanent damage after every wave cleared. Boss waves do not count.",
 		"pierce":        "Bolt pierces through up to 3 enemies in a line, hitting each for full damage.",
 		"shadow_weaver_phase": "Shadow phase: single-target attack. After 10 hits transforms for 5s — white laser fires every 0.5s hitting 5 enemies for 50% tower damage + 1% max HP (0.5% on bosses).",
-		"axe_warrior":   "Each swing hits up to 2 enemies in melee range, applying 1 Bleed stack and 1 Poison stack. Poisoned enemies take +10% damage from all sources for 5s.",
+		"axe_warrior":   "Each swing hits up to 2 enemies in melee range, applying 1 Bleed stack and 1 Poison stack. Poisoned enemies take +5% damage from all sources for 5s.",
 		"blade_spin":    "Dual melee strike hits 2 targets. Each attack has a 10% chance to summon 2 razor blades that orbit the tower for 3s, shredding any enemy they contact.",
 		"rock_drop":          "Fires at target. Every 3rd hit drops a brittle zone at the target's location for 2s. Enemies entering the zone take +20 bonus damage on their very next hit from any source.",
 		"dual_debuff":        "Hits 2 enemies per attack. Every other attack inflicts a random debuff on each target for 1 second. (Bleed, 10% Slow, or +10% damage taken — 5s cooldown per debuff per target.)",
@@ -3239,12 +3271,24 @@ func show_tower_info(tower, merge_count: int = 0) -> void:
 	}
 	var base_effect_desc : String = eff_map.get(tower.tower_effect, eff_map.get(d.get("effect", "none"), "No special effect."))
 	var special_map : Dictionary = {
-		"archer":   "★ Focused Shot: Stack cap raised to 3 (max 2.5×). Every hit beyond the cap adds cumulative +1 flat damage with no cap.",
-		"crossbow": "★ Triple Bolt: Fires 3 bolts instead of 2.",
-		"mage":     "★ Arcane Chain: Chain now hits 5 enemies.",
-		"catapult": "★ Barrage: Fires 2 shots per attack.",
-		"spearman": "★ War Cry: Every 3rd hit stuns enemies for 0.5s.",
-		"rogue":    "★ Hemorrhage: Bleed cap raised to 4. Enemies at max stacks are slowed by 5%.",
+		"archer":         "★ Focused Shot: Stack cap raised to 3 (max 2.5×). Every hit beyond the cap adds cumulative +1 flat damage with no cap.",
+		"crossbow":       "★ Triple Bolt: Fires 3 bolts instead of 2.",
+		"mage":           "★ Arcane Chain: Chain now hits 5 enemies.",
+		"catapult":       "★ Barrage: Fires 2 shots per attack.",
+		"spearman":       "★ War Cry: Every 3rd hit stuns enemies for 0.5s.",
+		"rogue":          "★ Hemorrhage: Bleed cap raised to 4. Enemies at max stacks are slowed by 5%.",
+		"flame_tower":    "★ Wildfire: Each enemy hit has a 10% chance to spawn a fire zone (3s, 5 dmg/s).",
+		"frost_spire":    "★ Permafrost: Slow zones last 5s (up from 3s). Slow intensity increased to 50% (up from 45%).",
+		"poison_tower":   "★ Virulence: Poison duration 8s (up from 5s). Damage vulnerability +15% (up from +10%).",
+		"sniper_tower":   "★ Execution: Enemies below 25% HP take ×1.5 extra damage on top of the HP scaling.",
+		"elite_knight":   "★ Iron Discipline: Every 5th cleave stuns all enemies in range for 0.3s.",
+		"iron_guard":     "★ Earthshatter: Every 3rd slam strikes ALL enemies in range (up from 3).",
+		"tesla_tower":    "★ Overcharge: 30% chance to zap a nearby enemy when switching targets.",
+		"infernal_core":  "★ Infernal Overload: Beam ramps to 5× max damage (up from 2×) over 5s of lock.",
+		"ballista":       "★ Siege Shot: HP-based bonus applies to bosses at 50% effectiveness.",
+		"arcane_cannon":  "★ Arcane Empowerment: Each ray proc randomly grants +1% dmg, +2px range, or +1% atk spd. Buffs are permanent and unique to this tower.",
+		"blade_assassin": "★ Whirlwind: Spin chance 25% (up from 10%), duration 5s (up from 3s). Bleed on spin contact.",
+		"axe_warrior":    "★ Pestilence: Cleave hits up to 4 enemies (up from 2).",
 	}
 	if GameData.turret_has_special(tid) and special_map.has(tid):
 		base_effect_desc += "\n" + special_map[tid]
@@ -3287,7 +3331,7 @@ func show_tower_info(tower, merge_count: int = 0) -> void:
 			if tower._blade_timer > 0.0:
 				counter_text = "SPIN %.1fs" % tower._blade_timer
 			else:
-				counter_text = "10% proc"
+				counter_text = "25% proc" if GameData.turret_has_special("blade_assassin") else "10% proc"
 		"dual_shot", "focused_shot":
 			pass   # no meaningful counter
 	if counter_text != "":
@@ -3351,6 +3395,7 @@ func show_notification(msg: String) -> void:
 
 func show_run_results(stage: int, kills: int, bosses: int, gems: int, turrets: Array, victory: bool = false, wave: int = 0) -> void:
 	_run_results_screen.visible = true
+	_run_results_screen.move_to_front()
 	if is_instance_valid(_gear_btn):
 		_gear_btn.visible = false
 
@@ -3411,10 +3456,11 @@ func show_run_results(stage: int, kills: int, bosses: int, gems: int, turrets: A
 		"epic": Color(0.72, 0.25, 0.90), "legendary": Color(1.00, 0.72, 0.10),
 		"fusion": Color(0.20, 1.00, 0.85),
 	}
-	const CARD_W : int = 58
-	const CARD_H : int = 76
-	const GAP    : int = 4
-	const COLS   : int = 10
+	const CARD_W   : int = 58
+	const CARD_H   : int = 76
+	const COL_GAP  : int = 4
+	const ROW_GAP  : int = 18
+	const COLS     : int = 10
 
 	var col : int = 0
 	var row : int = 0
@@ -3426,7 +3472,7 @@ func show_run_results(stage: int, kills: int, bosses: int, gems: int, turrets: A
 		var rc     : Color      = rarity_colors.get(rarity, C_WHITE)
 
 		var card := Panel.new()
-		card.position = Vector2(col * (CARD_W + GAP), row * (CARD_H + GAP))
+		card.position = Vector2(col * (CARD_W + COL_GAP), row * (CARD_H + ROW_GAP))
 		card.size     = Vector2(CARD_W, CARD_H)
 		var cs := StyleBoxFlat.new()
 		cs.bg_color = Color(rc.r * 0.14, rc.g * 0.14, rc.b * 0.14, 1.0)
@@ -3448,6 +3494,22 @@ func show_run_results(stage: int, kills: int, bosses: int, gems: int, turrets: A
 		count_lbl.size                 = Vector2(CARD_W, 16)
 		count_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		card.add_child(count_lbl)
+
+		var dmg_val := td.get("dmg_dealt", 0.0) as float
+		var dmg_str : String
+		if dmg_val >= 1_000_000_000.0:
+			dmg_str = "%.1fB" % (dmg_val / 1_000_000_000.0)
+		elif dmg_val >= 1_000_000.0:
+			dmg_str = "%.1fM" % (dmg_val / 1_000_000.0)
+		elif dmg_val >= 1_000.0:
+			dmg_str = "%.1fK" % (dmg_val / 1_000.0)
+		else:
+			dmg_str = "%.0f" % dmg_val
+		var dmg_lbl := _label(dmg_str, _font_reg, 9, Color(0.72, 0.80, 0.95))
+		dmg_lbl.position             = Vector2(card.position.x, card.position.y + CARD_H + 2)
+		dmg_lbl.size                 = Vector2(CARD_W, 12)
+		dmg_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		tower_grid.add_child(dmg_lbl)
 
 		col += 1
 		if col >= COLS:
@@ -3480,7 +3542,7 @@ func show_run_results(stage: int, kills: int, bosses: int, gems: int, turrets: A
 		var lrc     : Color     = rarity_colors_loot.get(lrarity, C_WHITE)
 
 		var lcard := Panel.new()
-		lcard.position = Vector2(lcol * (CARD_W + GAP), lrow * (CARD_H + GAP))
+		lcard.position = Vector2(lcol * (CARD_W + COL_GAP), lrow * (CARD_H + COL_GAP))
 		lcard.size     = Vector2(CARD_W, CARD_H)
 		var lcs := StyleBoxFlat.new()
 		lcs.bg_color = Color(lrc.r * 0.14, lrc.g * 0.14, lrc.b * 0.14, 1.0)
@@ -3553,36 +3615,36 @@ func _build_run_results_screen() -> void:
 	var tower_grid := Control.new()
 	tower_grid.name         = "tower_grid"
 	tower_grid.position     = Vector2(PAD + 8, 62)
-	tower_grid.size         = Vector2(LW - PAD - 8, 278)
+	tower_grid.size         = Vector2(LW - PAD - 8, 340)
 	tower_grid.mouse_filter = MOUSE_FILTER_IGNORE
 	overlay.add_child(tower_grid)
 
 	# ── Mid divider ───────────────────────────────────────────────────────────
 	var hdiv_mid := ColorRect.new()
 	hdiv_mid.color        = Color(1, 1, 1, 0.07)
-	hdiv_mid.position     = Vector2(PAD, 352)
+	hdiv_mid.position     = Vector2(PAD, 414)
 	hdiv_mid.size         = Vector2(LW, 2)
 	hdiv_mid.mouse_filter = MOUSE_FILTER_IGNORE
 	overlay.add_child(hdiv_mid)
 
 	# ── Left column bottom half: loot grid ────────────────────────────────────
 	var loot_hdr := _label("🎒  Loot Earned", _font_bold, 17, C_DIM)
-	loot_hdr.position             = Vector2(PAD + 8, 364)
+	loot_hdr.position             = Vector2(PAD + 8, 426)
 	loot_hdr.size                 = Vector2(LW - PAD - 8, 26)
 	loot_hdr.mouse_filter         = MOUSE_FILTER_IGNORE
 	overlay.add_child(loot_hdr)
 
 	var hdiv_loot := ColorRect.new()
 	hdiv_loot.color        = Color(1, 1, 1, 0.07)
-	hdiv_loot.position     = Vector2(PAD + 8, 394)
+	hdiv_loot.position     = Vector2(PAD + 8, 456)
 	hdiv_loot.size         = Vector2(LW - PAD - 8, 2)
 	hdiv_loot.mouse_filter = MOUSE_FILTER_IGNORE
 	overlay.add_child(hdiv_loot)
 
 	var loot_grid := Control.new()
 	loot_grid.name         = "loot_grid"
-	loot_grid.position     = Vector2(PAD + 8, 404)
-	loot_grid.size         = Vector2(LW - PAD - 8, 290)
+	loot_grid.position     = Vector2(PAD + 8, 466)
+	loot_grid.size         = Vector2(LW - PAD - 8, 244)
 	loot_grid.mouse_filter = MOUSE_FILTER_IGNORE
 	overlay.add_child(loot_grid)
 	_run_results_loot_grid = loot_grid
@@ -4067,9 +4129,10 @@ func _build_simple_menu_screen() -> Control:
 					_refresh_relics_screen(); _relic_screen.visible = true)],
 		["SHOP",       "res://assets/icon_shop.svg",     func(): _on_main_nav_pressed(1)],
 		["UPGRADES",   "res://assets/icon_upgrades.svg", func(): _on_main_nav_pressed(0)],
+		["DAILY QUESTS", "", func(): _on_main_nav_pressed(5)],
 	]
 
-	var by := (720 - (6 * BH + 5 * GAP)) / 2 + 50
+	var by := (720 - (7 * BH + 6 * GAP)) / 2 + 50
 	for entry_idx in range(entries.size()):
 		var entry = entries[entry_idx]
 		var lbl_text  : String   = entry[0]
@@ -4082,6 +4145,8 @@ func _build_simple_menu_screen() -> Control:
 		row.size         = Vector2(BW, BH)
 		row.mouse_filter = MOUSE_FILTER_STOP
 		row.scale        = Vector2.ONE
+		if lbl_text == "UPGRADES":
+			_simple_menu_upgrades_row = row
 		row.pivot_offset = Vector2(BW * 0.5, BH * 0.5)
 		root.add_child(row)
 
@@ -4098,14 +4163,22 @@ func _build_simple_menu_screen() -> Control:
 		# Icons much larger and very close to label
 		var icon_size := 40 if is_relics else 36
 		var icon_x    := 60
-		var icon_tex := TextureRect.new()
-		icon_tex.texture      = load(icon_path)
-		icon_tex.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		icon_tex.expand_mode  = TextureRect.EXPAND_IGNORE_SIZE
-		icon_tex.position     = Vector2(icon_x, (BH - icon_size) / 2)
-		icon_tex.size         = Vector2(icon_size, icon_size)
-		icon_tex.mouse_filter = MOUSE_FILTER_IGNORE
-		row.add_child(icon_tex)
+		var is_daily_quests : bool = (lbl_text == "DAILY QUESTS")
+		if is_daily_quests:
+			# Reuse the in-game archer turret art instead of a flat icon
+			var archer_prev := _TurretPreview.new()
+			archer_prev.turret_data = SummonSystem.TURRET_DEFS.get("archer", {})
+			archer_prev.position    = Vector2(icon_x + icon_size * 0.5 - 28.0, BH * 0.5 - 32.0)
+			row.add_child(archer_prev)
+		else:
+			var icon_tex := TextureRect.new()
+			icon_tex.texture      = load(icon_path)
+			icon_tex.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			icon_tex.expand_mode  = TextureRect.EXPAND_IGNORE_SIZE
+			icon_tex.position     = Vector2(icon_x, (BH - icon_size) / 2)
+			icon_tex.size         = Vector2(icon_size, icon_size)
+			icon_tex.mouse_filter = MOUSE_FILTER_IGNORE
+			row.add_child(icon_tex)
 
 		# Button label — immediately after icon, feels like one element
 		var label_x := 42 if is_relics else 40
@@ -4121,7 +4194,45 @@ func _build_simple_menu_screen() -> Control:
 		lbl.mouse_filter = MOUSE_FILTER_IGNORE
 		row.add_child(lbl)
 
+		# Lock overlay — every entry except Start Game stays locked until the
+		# player has lost their first run (GameData.dq_unlocked)
+		var requires_unlock : bool = (lbl_text != "START GAME")
+		var locked_state := [requires_unlock and not GameData.dq_unlocked]
+		if requires_unlock:
+			var lock_overlay := Control.new()
+			lock_overlay.position     = Vector2.ZERO
+			lock_overlay.size         = row.size
+			lock_overlay.mouse_filter = MOUSE_FILTER_IGNORE
+			lock_overlay.visible      = locked_state[0]
+			row.add_child(lock_overlay)
+
+			var dim := ColorRect.new()
+			dim.color        = Color(0, 0, 0, 0.60)
+			dim.size         = row.size
+			dim.mouse_filter = MOUSE_FILTER_IGNORE
+			lock_overlay.add_child(dim)
+
+			var lock_path := "res://assets/statues/padlock.png"
+			if ResourceLoader.exists(lock_path):
+				var lsz := Vector2(44, 44)
+				var lock_margin := 10.0
+				for side in range(2):
+					var lock_icon := TextureRect.new()
+					lock_icon.texture      = load(lock_path)
+					lock_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+					lock_icon.expand_mode  = TextureRect.EXPAND_IGNORE_SIZE
+					var lx : float = lock_margin if side == 0 else (BW - lsz.x - lock_margin)
+					lock_icon.position     = Vector2(lx, (BH - lsz.y) * 0.5)
+					lock_icon.size         = lsz
+					lock_icon.modulate     = Color(1, 1, 1, 0.80)
+					lock_icon.mouse_filter = MOUSE_FILTER_IGNORE
+					lock_overlay.add_child(lock_icon)
+
+			_simple_menu_lock_refs.append({"overlay": lock_overlay, "locked": locked_state})
+
 		row.gui_input.connect(func(ev: InputEvent):
+			if locked_state[0]:
+				return
 			if ev is InputEventMouseButton and ev.button_index == MOUSE_BUTTON_LEFT:
 				if ev.pressed:
 					btn_bg.modulate = Color(0.70, 0.70, 0.70)
@@ -4130,6 +4241,8 @@ func _build_simple_menu_screen() -> Control:
 					cb.call()
 		)
 		row.mouse_entered.connect(func():
+			if locked_state[0]:
+				return
 			btn_bg.modulate = Color(1.25, 1.25, 1.25)
 			if _btn_tweens.has(row) and is_instance_valid(_btn_tweens[row]):
 				_btn_tweens[row].kill()
@@ -4143,6 +4256,8 @@ func _build_simple_menu_screen() -> Control:
 			_btn_tweens["lift_" + str(row)] = lift_tw
 		)
 		row.mouse_exited.connect(func():
+			if locked_state[0]:
+				return
 			btn_bg.modulate = Color(1.00, 1.00, 1.00)
 			if _btn_tweens.has(row) and is_instance_valid(_btn_tweens[row]):
 				_btn_tweens[row].kill()
@@ -4187,12 +4302,116 @@ func show_main_menu() -> void:
 			btn.set_locked(!GameData.tutorial_complete)
 	if is_instance_valid(_dq_stat):
 		_dq_stat.set_locked(!GameData.dq_unlocked)
+	_refresh_simple_menu_locks()
 	_game_over_screen.visible = true
 	if is_instance_valid(_simple_menu_screen):
 		_simple_menu_screen.visible = true
 		for s in _main_menu_statues:
 			if is_instance_valid(s):
 				s.visible = false
+	if GameData.dq_unlocked and not GameData.post_death_tutorial_seen:
+		call_deferred("_start_post_death_tutorial")
+
+
+func _refresh_simple_menu_locks() -> void:
+	for ref in _simple_menu_lock_refs:
+		var unlocked : bool = GameData.dq_unlocked
+		ref["locked"][0] = not unlocked
+		if is_instance_valid(ref["overlay"]):
+			ref["overlay"].visible = not unlocked
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# POST-DEATH TUTORIAL — first time the player returns to the main menu after
+# losing their first run, guide them to the Upgrades screen and explain gems
+# ══════════════════════════════════════════════════════════════════════════════
+
+func _start_post_death_tutorial() -> void:
+	if not is_instance_valid(_simple_menu_upgrades_row):
+		return
+	if is_instance_valid(_post_death_tut_overlay):
+		return
+
+	const DARK := Color(0.04, 0.04, 0.10, 0.82)
+	const GOLD := Color(1.0, 0.88, 0.28, 1.0)
+
+	var root := Control.new()
+	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	root.mouse_filter = MOUSE_FILTER_IGNORE
+	root.z_index      = 150
+	add_child(root)
+	_post_death_tut_overlay = root
+
+	var pad   : float = 12.0
+	var brect := Rect2(_simple_menu_upgrades_row.global_position, _simple_menu_upgrades_row.size)
+	var hl    := Rect2(brect.position.x - pad, brect.position.y - pad,
+						brect.size.x + pad * 2.0, brect.size.y + pad * 2.0)
+
+	var canvas := Control.new()
+	canvas.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	canvas.mouse_filter = MOUSE_FILTER_IGNORE
+	root.add_child(canvas)
+	canvas.draw.connect(func():
+		canvas.draw_rect(Rect2(0, 0, 1280, hl.position.y), DARK)
+		canvas.draw_rect(Rect2(0, hl.position.y, hl.position.x, hl.size.y), DARK)
+		canvas.draw_rect(Rect2(hl.end.x, hl.position.y, 1280.0 - hl.end.x, hl.size.y), DARK)
+		canvas.draw_rect(Rect2(0, hl.end.y, 1280, 720.0 - hl.end.y), DARK)
+		canvas.draw_rect(hl, GOLD, false, 2.5)
+	)
+
+	var _mb := func(x: float, y: float, w: float, h: float):
+		var c := ColorRect.new()
+		c.color        = Color(0, 0, 0, 0)
+		c.position     = Vector2(x, y)
+		c.size         = Vector2(w, h)
+		c.mouse_filter = MOUSE_FILTER_STOP
+		root.add_child(c)
+	_mb.call(0.0, 0.0, 1280.0, hl.position.y)
+	_mb.call(0.0, hl.position.y, hl.position.x, hl.size.y)
+	_mb.call(hl.end.x, hl.position.y, 1280.0 - hl.end.x, hl.size.y)
+	_mb.call(0.0, hl.end.y, 1280.0, 720.0 - hl.end.y)
+
+	var ps := StyleBoxFlat.new()
+	ps.bg_color    = Color(0.06, 0.08, 0.16, 0.97)
+	ps.corner_radius_top_left    = 8; ps.corner_radius_top_right    = 8
+	ps.corner_radius_bottom_left = 8; ps.corner_radius_bottom_right = 8
+	ps.border_width_left = 2; ps.border_width_right  = 2
+	ps.border_width_top  = 2; ps.border_width_bottom = 2
+	ps.border_color = GOLD
+	var msg_panel := Panel.new()
+	msg_panel.position = Vector2(hl.end.x + 16.0, hl.position.y)
+	msg_panel.size     = Vector2(420.0, 110.0)
+	if msg_panel.position.x + msg_panel.size.x > 1270.0:
+		msg_panel.position.x = hl.position.x - 436.0
+	msg_panel.add_theme_stylebox_override("panel", ps)
+	msg_panel.mouse_filter = MOUSE_FILTER_IGNORE
+	root.add_child(msg_panel)
+	var msg_lbl := Label.new()
+	msg_lbl.text = "You completed your first run! Click UPGRADES to spend the Blue Gems you earned on permanent boosts."
+	msg_lbl.add_theme_font_override("font",           _font_bold)
+	msg_lbl.add_theme_font_size_override("font_size", 15)
+	msg_lbl.add_theme_color_override("font_color",    Color(1.0, 0.95, 0.80))
+	msg_lbl.autowrap_mode  = TextServer.AUTOWRAP_WORD
+	msg_lbl.custom_minimum_size = Vector2(400.0, 94.0)
+	msg_lbl.position       = Vector2(10.0, 8.0)
+	msg_lbl.size           = Vector2(400.0, 94.0)
+	msg_lbl.mouse_filter   = MOUSE_FILTER_IGNORE
+	msg_panel.add_child(msg_lbl)
+
+
+func _advance_post_death_tutorial_step2() -> void:
+	if is_instance_valid(_post_death_tut_overlay):
+		_post_death_tut_overlay.queue_free()
+		_post_death_tut_overlay = null
+	# Wait for the tree's own layout/scroll to settle now that the screen is visible
+	await get_tree().create_timer(0.3).timeout
+	if not is_instance_valid(_upgrades_screen) or not _upgrades_screen.visible:
+		return
+	if is_instance_valid(_upgrade_tree_instance) and _upgrade_tree_instance.has_method("start_post_death_tutorial"):
+		_upgrade_tree_instance.start_post_death_tutorial()
+	else:
+		GameData.post_death_tutorial_seen = true
+		GameData.save_game()
 
 
 func _back_to_menu(hide_node: Control) -> void:
@@ -4221,13 +4440,23 @@ func _on_main_nav_pressed(idx: int) -> void:
 	_nav_transition(func():
 		_game_over_screen.visible = false
 		match idx:
-			0: _upgrades_screen.visible = true
+			0:
+				_upgrades_screen.visible = true
+				if GameData.dq_unlocked and not GameData.post_death_tutorial_seen:
+					_advance_post_death_tutorial_step2()
 			1: _shop_screen.visible = true
 			2:
 				_world_map_screen.visible = true
 				_refresh_world_map()
-			3: _heroes_screen.visible = true
+			3:
+				_hero_refresh_sel_banner()
+				_refresh_hero_cards()
+				_heroes_screen.visible = true
 			4: _towers_screen.visible = true
+			5:
+				if is_instance_valid(_daily_quests_screen):
+					_refresh_daily_quests_screen()
+					_daily_quests_screen.visible = true
 	)
 
 
@@ -4257,6 +4486,7 @@ func _build_upgrades_screen() -> void:
 	tree.size         = Vector2(1280, 720)
 	tree.mouse_filter = MOUSE_FILTER_STOP
 	overlay.add_child(tree)
+	_upgrade_tree_instance = tree
 	overlay.visibility_changed.connect(func():
 		if overlay.visible:
 			tree.setup(_font_bold, _font_reg)
@@ -6860,9 +7090,9 @@ func _build_world_detail_screen() -> void:
 
 	# Wire difficulty toggle logic
 	var _hard_locked := func() -> bool:
-		return not GameData.easy_mode_beaten
+		return not GameData.easy_beaten_worlds.get(_wm_selected_world, false)
 
-	var _refresh_diff_btns := func():
+	_wm_refresh_diff_btns = func():
 		var is_easy   : bool = _wm_selected_difficulty == "easy"
 		var hard_lock : bool = _hard_locked.call()
 		# Force back to easy if hard is locked
@@ -6887,18 +7117,18 @@ func _build_world_detail_screen() -> void:
 			hard_btn.add_theme_color_override("font_hover_color", C_WHITE if not is_easy else Color(0.55, 0.55, 0.55))
 		# Animated glow only when hard is selected and unlocked
 		_set_hard_glow(not is_easy and not hard_lock)
-	_refresh_diff_btns.call()
+	_wm_refresh_diff_btns.call()
 
 	easy_btn.pressed.connect(func():
 		_wm_selected_difficulty = "easy"
-		_refresh_diff_btns.call()
+		_wm_refresh_diff_btns.call()
 		_refresh_wm_detail_mods()
 	)
 	hard_btn.pressed.connect(func():
 		if _hard_locked.call():
 			return
 		_wm_selected_difficulty = "hard"
-		_refresh_diff_btns.call()
+		_wm_refresh_diff_btns.call()
 		_refresh_wm_detail_mods()
 	)
 
@@ -6947,8 +7177,15 @@ func _on_world_node_pressed(world_num: int) -> void:
 	if not unlocked:
 		return
 
-	_wm_selected_world = world_num
+	_wm_selected_world      = world_num
+	_wm_selected_difficulty = "easy"
 	var idx := world_num - 1
+
+	# Refresh difficulty buttons to reflect the reset + new world's lock state
+	if _wm_refresh_diff_btns.is_valid():
+		_wm_refresh_diff_btns.call()
+	elif is_instance_valid(_wm_diff_hard_btn):
+		_wm_diff_hard_btn.text = "☠  Hard" if GameData.easy_beaten_worlds.get(world_num, false) else "🔒  Hard"
 
 	# Update canvas selection + click animation
 	if is_instance_valid(_wm_canvas):
@@ -7105,11 +7342,18 @@ func _refresh_world_map() -> void:
 				icon_lbl.text = ""
 				btn.disabled  = false
 
-		if w == 1 and state != "locked":
-			if GameData.all_time_highest_stage >= 10:
-				prog_lbl.text    = "★ Complete!"
+		if state != "locked":
+			var _wsc   : Dictionary = GameData.stages_cleared.get(w, {})
+			var _easy  : int = _wsc.get("easy", 0)
+			var _hard  : int = _wsc.get("hard", 0)
+			var _elbl  : String = "★" if _easy >= 10 else "%d/10" % _easy
+			var _hlbl  : String = "★" if _hard >= 10 else "%d/10" % _hard
+			if _easy == 0 and _hard == 0:
+				prog_lbl.text = "Not started"
+			elif not GameData.easy_beaten_worlds.get(w, false):
+				prog_lbl.text = "Easy: %s" % _elbl
 			else:
-				prog_lbl.text    = "%d / 10" % GameData.all_time_highest_stage
+				prog_lbl.text = "Easy: %s  Hard: %s" % [_elbl, _hlbl]
 			prog_lbl.visible = _wm_overlay_visible
 		else:
 			prog_lbl.visible = false
@@ -7254,62 +7498,7 @@ func _build_heroes_screen() -> void:
 	sel_panel.add_child(sel_box)
 	_hero_sel_container = sel_box
 
-	# Check if any hero is unlocked (level >= 1)
-	var has_any_hero := false
-	for hid in GameData.HERO_DEFS:
-		if GameData.get_tower_level(hid) >= 1:
-			has_any_hero = true
-			break
-
-	if not has_any_hero:
-		var no_hero_msg := _label("You don't have any heroes. Roll for a hero!", _font_reg, 16, C_DIM)
-		no_hero_msg.position             = Vector2(0, 12)
-		no_hero_msg.size                 = Vector2(900, 26)
-		no_hero_msg.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-		no_hero_msg.mouse_filter         = MOUSE_FILTER_IGNORE
-		no_hero_msg.position.x           = 80
-		sel_box.add_child(no_hero_msg)
-
-		var shop_btn := Button.new()
-		shop_btn.text       = "Go to Shop"
-		shop_btn.position   = Vector2(960, 20)
-		shop_btn.size       = Vector2(200, 40)
-		shop_btn.focus_mode = FOCUS_NONE
-		shop_btn.add_theme_font_override("font",           _font_bold)
-		shop_btn.add_theme_font_size_override("font_size", 15)
-		shop_btn.add_theme_color_override("font_color",    C_WHITE)
-		shop_btn.add_theme_stylebox_override("normal",  _btn_primary())
-		shop_btn.add_theme_stylebox_override("hover",   _btn_primary_hover())
-		shop_btn.add_theme_stylebox_override("pressed", _btn_primary_pressed())
-		shop_btn.add_theme_stylebox_override("focus",   _btn_primary())
-		shop_btn.pressed.connect(func():
-			overlay.visible      = false
-			_shop_screen.visible = true
-		)
-		sel_box.add_child(shop_btn)
-	else:
-		# Preview placeholder (replaced in _hero_refresh_selected)
-		_hero_sel_preview = _TurretPreview.new()
-		_hero_sel_preview.position = Vector2(16, 4)
-		sel_box.add_child(_hero_sel_preview)
-
-		_hero_sel_name = _label("", _font_bold, 18, C_WHITE)
-		_hero_sel_name.position = Vector2(80, 6); _hero_sel_name.size = Vector2(350, 26)
-		_hero_sel_name.mouse_filter = MOUSE_FILTER_IGNORE
-		sel_box.add_child(_hero_sel_name)
-
-		_hero_sel_stats = _label("", _font_reg, 14, C_DIM)
-		_hero_sel_stats.position = Vector2(80, 36); _hero_sel_stats.size = Vector2(700, 20)
-		_hero_sel_stats.mouse_filter = MOUSE_FILTER_IGNORE
-		sel_box.add_child(_hero_sel_stats)
-
-		var active_badge := _label("✓  Active", _font_bold, 14, Color(0.30, 0.90, 0.45))
-		active_badge.position = Vector2(1140, 26); active_badge.size = Vector2(90, 20)
-		active_badge.mouse_filter = MOUSE_FILTER_IGNORE
-		active_badge.visible = not GameData.selected_hero_id.is_empty()
-		sel_box.add_child(active_badge)
-
-		_hero_refresh_selected()
+	_hero_refresh_sel_banner()
 
 	# ── Scroll area ────────────────────────────────────────────────────────────
 	var scroll := ScrollContainer.new()
@@ -7403,6 +7592,74 @@ func _build_heroes_screen() -> void:
 	_hero_build_detail_panel(overlay)
 
 
+func _hero_refresh_sel_banner() -> void:
+	if not is_instance_valid(_hero_sel_container):
+		return
+	var sel_box := _hero_sel_container
+	for c in sel_box.get_children():
+		c.queue_free()
+	_hero_sel_preview = null
+	_hero_sel_name    = null
+	_hero_sel_stats   = null
+
+	# Check if any hero is unlocked (level >= 1)
+	var has_any_hero := false
+	for hid in GameData.HERO_DEFS:
+		if GameData.get_tower_level(hid) >= 1:
+			has_any_hero = true
+			break
+
+	if not has_any_hero:
+		var no_hero_msg := _label("You don't have any heroes. Roll for a hero!", _font_reg, 16, C_DIM)
+		no_hero_msg.position             = Vector2(0, 12)
+		no_hero_msg.size                 = Vector2(900, 26)
+		no_hero_msg.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+		no_hero_msg.mouse_filter         = MOUSE_FILTER_IGNORE
+		no_hero_msg.position.x           = 80
+		sel_box.add_child(no_hero_msg)
+
+		var shop_btn := Button.new()
+		shop_btn.text       = "Go to Shop"
+		shop_btn.position   = Vector2(960, 20)
+		shop_btn.size       = Vector2(200, 40)
+		shop_btn.focus_mode = FOCUS_NONE
+		shop_btn.add_theme_font_override("font",           _font_bold)
+		shop_btn.add_theme_font_size_override("font_size", 15)
+		shop_btn.add_theme_color_override("font_color",    C_WHITE)
+		shop_btn.add_theme_stylebox_override("normal",  _btn_primary())
+		shop_btn.add_theme_stylebox_override("hover",   _btn_primary_hover())
+		shop_btn.add_theme_stylebox_override("pressed", _btn_primary_pressed())
+		shop_btn.add_theme_stylebox_override("focus",   _btn_primary())
+		shop_btn.pressed.connect(func():
+			_heroes_screen.visible = false
+			_shop_screen.visible   = true
+		)
+		sel_box.add_child(shop_btn)
+	else:
+		# Preview placeholder (replaced in _hero_refresh_selected)
+		_hero_sel_preview = _TurretPreview.new()
+		_hero_sel_preview.position = Vector2(16, 4)
+		sel_box.add_child(_hero_sel_preview)
+
+		_hero_sel_name = _label("", _font_bold, 18, C_WHITE)
+		_hero_sel_name.position = Vector2(80, 6); _hero_sel_name.size = Vector2(350, 26)
+		_hero_sel_name.mouse_filter = MOUSE_FILTER_IGNORE
+		sel_box.add_child(_hero_sel_name)
+
+		_hero_sel_stats = _label("", _font_reg, 14, C_DIM)
+		_hero_sel_stats.position = Vector2(80, 36); _hero_sel_stats.size = Vector2(700, 20)
+		_hero_sel_stats.mouse_filter = MOUSE_FILTER_IGNORE
+		sel_box.add_child(_hero_sel_stats)
+
+		var active_badge := _label("✓  Active", _font_bold, 14, Color(0.30, 0.90, 0.45))
+		active_badge.position = Vector2(1140, 26); active_badge.size = Vector2(90, 20)
+		active_badge.mouse_filter = MOUSE_FILTER_IGNORE
+		active_badge.visible = not GameData.selected_hero_id.is_empty()
+		sel_box.add_child(active_badge)
+
+		_hero_refresh_selected()
+
+
 func _hero_refresh_selected() -> void:
 	if not is_instance_valid(_hero_sel_preview):
 		return
@@ -7436,6 +7693,7 @@ func _hero_make_card(parent: Control, def: Dictionary,
 					  cw: int, ch: int, rcol: Color) -> void:
 	var hero_id     : String = def.get("id", "")
 	var is_selected : bool   = (hero_id == GameData.selected_hero_id)
+	var is_owned    : bool   = GameData.get_tower_level(hero_id) >= 1
 	var card := Panel.new()
 	var cs := StyleBoxFlat.new()
 	cs.bg_color                   = Color(0.10, 0.18, 0.10) if is_selected else Color(0.10, 0.10, 0.18)
@@ -7447,7 +7705,19 @@ func _hero_make_card(parent: Control, def: Dictionary,
 	card.add_theme_stylebox_override("panel", cs)
 	card.custom_minimum_size = Vector2(cw, ch)
 	card.mouse_filter        = MOUSE_FILTER_STOP
+	card.modulate             = Color(1, 1, 1, 1) if is_owned else Color(0.62, 0.62, 0.62, 1)
 	parent.add_child(card)
+
+	# Hover highlight
+	var hs := cs.duplicate() as StyleBoxFlat
+	hs.bg_color     = Color(0.16, 0.16, 0.24)
+	hs.border_color = rcol
+	card.mouse_entered.connect(func():
+		card.add_theme_stylebox_override("panel", hs)
+	)
+	card.mouse_exited.connect(func():
+		card.add_theme_stylebox_override("panel", cs)
+	)
 
 	# Preview
 	var prev := _TurretPreview.new()
@@ -7515,7 +7785,7 @@ func _hero_make_card(parent: Control, def: Dictionary,
 	# Store ref for live highlight updates
 	_hero_card_refs.append({"id": hero_id, "style": cs, "badge": badge, "rcol": rcol,
 							"lvl_lbl": lvl_lbl, "copies_lbl": copies_lbl, "stat_lbl": stat_lbl,
-							"def": def})
+							"def": def, "card": card})
 
 	# Click → open detail
 	var cap_def := def
@@ -7800,7 +8070,7 @@ func _hero_show_detail(def: Dictionary) -> void:
 		"pierce":             "Each shot pierces through up to 3 enemies in a line at full damage.",
 		"poison_debuff":      "Poisons targets on hit — each stack increases damage taken by 10% for 5s. Stacks up to 3 times per target.",
 		"aoe_burst":          "An ancient dragon lord who unleashes explosive bursts that devastate up to 5 nearby enemies.",
-		"arcane_charge":      "Accumulates arcane power and unleashes devastating lasers every 15th hit.",
+		"arcane_charge":      "Accumulates arcane power and unleashes a blue ray hitting all enemies for 2× damage every 15th hit.",
 		"execute_shot":       "Burning arrows scale with the target's current HP — 2× damage at full HP, down to 1× at 0 HP.",
 	}
 
@@ -8101,6 +8371,9 @@ func _refresh_hero_cards() -> void:
 			continue
 		var lvl    : int = GameData.get_tower_level(hero_id)
 		var copies : int = GameData.get_tower_xp(hero_id)
+		if is_instance_valid(ref.get("card")):
+			var owned : bool = lvl >= 1
+			ref["card"].modulate = Color(1, 1, 1, 1) if owned else Color(0.62, 0.62, 0.62, 1)
 		if is_instance_valid(ref.get("lvl_lbl")):
 			ref["lvl_lbl"].text = "Lv.%d" % lvl
 		if is_instance_valid(ref.get("copies_lbl")):
@@ -8191,7 +8464,7 @@ func _build_towers_screen() -> void:
 		"poison_cloud":     "Hits all enemies in range each shot. Spawns a persistent poison cloud that slowly expands along the path, dealing 2 damage/s to any enemy inside it.",
 		"frost_cannon_tri": "Fires at up to 3 separate targets per shot. Boss targets take +50% damage and receive a 10% slow that refreshes on repeat hits.",
 		"arcane_overload":  "Every 5th attack triggers Arcane Overload — instant lasers hit ALL enemies in range (minimum 5 lasers). Counter never resets.",
-		"arcane_charge": "Every 15th hit fires a blue laser for 2× damage to all in range.",
+		"arcane_charge": "Every 15th hit fires a blue ray for 2× damage to all enemies in range.",
 		"lock_beam":     "Locks beam on one target; damage ramps 1× to 2× over 5s.",
 		"tempest_strike":          "Every 10th hit launches a slash that deals base damage + 5% of the target's max HP on impact.",
 		"infernal_serpent_summon": "Each hit has a 10% chance to summon a fire serpent (100 damage per bite) that laps the battlefield once.",
@@ -9317,9 +9590,65 @@ func update_recipe_notifications(available_fusions: Array, all_owned_ids: Dictio
 	# Refresh modal if it's open
 	if is_instance_valid(_recipe_modal) and _recipe_modal.visible:
 		_refresh_recipe_modal()
+	# Refresh fusion summon icons in summon panel
+	_rebuild_fusion_icons()
 	# First time a fusion becomes available → show recipe tutorial
 	if not GameData.recipe_tutorial_seen and available_fusions.size() > 0:
 		show_recipe_tutorial()
+
+
+func _rebuild_fusion_icons() -> void:
+	if not is_instance_valid(_fusion_icon_row):
+		return
+	for c in _fusion_icon_row.get_children():
+		c.queue_free()
+
+	const ICON_SZ : int = 52
+	const GAP     : int = 6
+	var x := 0
+	for fusion in _cached_fusions:
+		var result_id : String = fusion["recipe"]["result"]
+		var def : Dictionary   = SummonSystem.TURRET_DEFS.get(result_id, {})
+		if def.is_empty():
+			continue
+		var rarity : String = def.get("rarity", "common")
+		var rcol   : Color  = SummonSystem.RARITY_COLORS.get(rarity, C_WHITE)
+
+		# Tile-style frame
+		var tile_s := StyleBoxFlat.new()
+		tile_s.bg_color = Color(0.08, 0.08, 0.14)
+		tile_s.border_color = rcol
+		tile_s.set_border_width_all(2)
+		tile_s.set_corner_radius_all(6)
+		var tile := Panel.new()
+		tile.add_theme_stylebox_override("panel", tile_s)
+		tile.position     = Vector2(x, 0)
+		tile.size         = Vector2(ICON_SZ, ICON_SZ)
+		tile.mouse_filter = MOUSE_FILTER_STOP
+		tile.clip_children = CanvasItem.CLIP_CHILDREN_ONLY
+		tile.tooltip_text  = def.get("name", result_id)
+		_fusion_icon_row.add_child(tile)
+
+		# Hover highlight
+		var tile_h := tile_s.duplicate() as StyleBoxFlat
+		tile_h.bg_color = Color(0.18, 0.18, 0.30)
+		tile_h.border_color = Color(rcol.r, rcol.g, rcol.b, 1.0)
+		tile.mouse_entered.connect(func(): tile.add_theme_stylebox_override("panel", tile_h))
+		tile.mouse_exited.connect(func():  tile.add_theme_stylebox_override("panel", tile_s))
+
+		# Mini tower preview (uses same _TurretPreview; draws at cx=28,cy=32 internally)
+		var prev := _TurretPreview.new()
+		prev.turret_data = def
+		prev.position    = Vector2(2, 2)
+		tile.add_child(prev)
+
+		# Click to fusion summon
+		var cap_id := result_id
+		tile.gui_input.connect(func(ev: InputEvent):
+			if ev is InputEventMouseButton and ev.button_index == MOUSE_BUTTON_LEFT and ev.pressed:
+				recipe_fusion_requested.emit(cap_id)
+		)
+		x += ICON_SZ + GAP
 
 
 func _rebuild_recipe_cards() -> void:
@@ -9495,6 +9824,7 @@ func _build_recipe_modal() -> void:
 	scroll.vertical_scroll_mode      = ScrollContainer.SCROLL_MODE_AUTO
 	scroll.get_v_scroll_bar().custom_minimum_size = Vector2(6, 0)
 	card.add_child(scroll)
+	_recipe_modal_scroll = scroll
 
 	const RECIPE_NAMES : Array = [
 		"venom_drake", "frost_cannon", "arcane_overlord", "dragon_lich", "tempest_warden",
@@ -10742,6 +11072,10 @@ func show_hard_debuff_cards(debuffs: Array, stage: int) -> void:
 				)
 			)
 		)
+
+
+func is_boss_buff_card_open() -> bool:
+	return is_instance_valid(_boss_buff_overlay)
 
 
 func show_boss_buff_cards(buffs: Array, stage: int) -> void:

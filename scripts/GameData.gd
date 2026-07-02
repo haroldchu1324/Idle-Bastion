@@ -25,9 +25,11 @@ var tutorial_complete         : bool      = false
 var merge_tutorial_seen       : bool      = false
 var special_tiles_seen        : bool      = false
 var recipe_tutorial_seen      : bool      = false
+var post_death_tutorial_seen  : bool      = false
 var selected_world            : int       = 1     # in-memory only; set by HUD before scene reload
 var selected_difficulty       : String    = "easy"    # "easy" or "hard"; in-memory only
-var easy_mode_beaten          : bool      = false     # true once any world is beaten on easy
+var easy_beaten_worlds        : Dictionary = {}        # {world_num: true} — per-world easy clear
+var stages_cleared            : Dictionary = {}        # {world_num: {"easy": int, "hard": int}}
 var launching_into_game       : bool      = false # true only when Start World triggers reload
 var debug_dummy_mode          : bool      = false # true when launched via harold debug game button
 
@@ -332,8 +334,12 @@ func final_fire_rate_mult(_tower_idx: int) -> float: return 1.0
 func final_range_mult(_tower_idx: int)     -> float: return 1.0
 
 # ── Category upgrade bonuses ──────────────────────────────────────────────────
-const RANGED_TOWER_IDS : Array = ["archer", "crossbow", "mage", "catapult"]
-const MELEE_TOWER_IDS  : Array = ["spearman", "rogue"]
+const RANGED_TOWER_IDS      : Array = ["archer", "crossbow", "mage", "catapult"]
+const MELEE_TOWER_IDS       : Array = ["spearman", "rogue"]
+const RARE_RANGED_TOWER_IDS : Array = ["flame_tower", "frost_spire", "poison_tower", "sniper_tower"]
+const RARE_MELEE_TOWER_IDS  : Array = ["elite_knight", "iron_guard"]
+const EPIC_RANGED_TOWER_IDS : Array = ["tesla_tower", "infernal_core", "ballista", "arcane_cannon"]
+const EPIC_MELEE_TOWER_IDS  : Array = ["blade_assassin", "axe_warrior"]
 
 func _upg(node_id: String) -> bool:
 	return get_upgrade_tiers(node_id) > 0
@@ -350,7 +356,23 @@ func category_dmg_bonus(tower_id: String) -> float:
 		if _upg("melee_dmg_2"): b += 0.01
 		if _upg("melee_dmg_3"): b += 0.02
 		if _upg("melee_dmg_4"): b += 0.01
-	if _upg("all_dmg_1"): b += 0.01
+	elif RARE_RANGED_TOWER_IDS.has(tower_id):
+		if _upg("rare_ranged_dmg_1"): b += 0.01
+		if _upg("rare_ranged_dmg_2"): b += 0.01
+	elif RARE_MELEE_TOWER_IDS.has(tower_id):
+		if _upg("rare_melee_dmg_1"): b += 0.01
+		if _upg("rare_melee_dmg_2"): b += 0.01
+		if _upg("rare_melee_dmg_3"): b += 0.02
+	elif EPIC_RANGED_TOWER_IDS.has(tower_id):
+		if _upg("epic_ranged_dmg_1"): b += 0.01
+		if _upg("epic_ranged_dmg_2"): b += 0.01
+	elif EPIC_MELEE_TOWER_IDS.has(tower_id):
+		if _upg("epic_melee_dmg_1"): b += 0.01
+		if _upg("epic_melee_dmg_2"): b += 0.01
+		if _upg("epic_melee_dmg_3"): b += 0.02
+	if _upg("all_dmg_1"):      b += 0.01
+	if _upg("rare_all_dmg_1"): b += 0.01
+	if _upg("epic_all_dmg_1"): b += 0.01
 	return b
 
 func category_spd_bonus(tower_id: String) -> float:
@@ -364,6 +386,16 @@ func category_spd_bonus(tower_id: String) -> float:
 		if _upg("melee_spd_1"): b += 0.01
 		if _upg("melee_spd_2"): b += 0.01
 		if _upg("melee_spd_3"): b += 0.01
+	elif RARE_RANGED_TOWER_IDS.has(tower_id):
+		if _upg("rare_ranged_spd_1"): b += 0.01
+	elif RARE_MELEE_TOWER_IDS.has(tower_id):
+		if _upg("rare_melee_spd_1"): b += 0.01
+		if _upg("rare_melee_spd_2"): b += 0.01
+	elif EPIC_RANGED_TOWER_IDS.has(tower_id):
+		if _upg("epic_ranged_spd_1"): b += 0.01
+	elif EPIC_MELEE_TOWER_IDS.has(tower_id):
+		if _upg("epic_melee_spd_1"): b += 0.01
+		if _upg("epic_melee_spd_2"): b += 0.01
 	if _upg("all_spd_1"): b += 0.01
 	return b
 
@@ -377,6 +409,18 @@ func category_rng_flat_bonus(tower_id: String) -> float:
 		if _upg("melee_rng_1"): b += 3.0
 		if _upg("melee_rng_2"): b += 3.0
 		if _upg("melee_rng_3"): b += 3.0
+	elif RARE_RANGED_TOWER_IDS.has(tower_id):
+		if _upg("rare_ranged_rng_1"): b += 5.0
+		if _upg("rare_ranged_rng_2"): b += 5.0
+	elif RARE_MELEE_TOWER_IDS.has(tower_id):
+		if _upg("rare_melee_rng_1"): b += 3.0
+		if _upg("rare_melee_rng_2"): b += 3.0
+	elif EPIC_RANGED_TOWER_IDS.has(tower_id):
+		if _upg("epic_ranged_rng_1"): b += 5.0
+		if _upg("epic_ranged_rng_2"): b += 5.0
+	elif EPIC_MELEE_TOWER_IDS.has(tower_id):
+		if _upg("epic_melee_rng_1"): b += 3.0
+		if _upg("epic_melee_rng_2"): b += 3.0
 	return b
 
 # ── Tower level multipliers ───────────────────────────────────────────────────
@@ -577,6 +621,7 @@ func save_game() -> void:
 		"merge_tutorial_seen":    merge_tutorial_seen,
 		"special_tiles_seen":     special_tiles_seen,
 		"recipe_tutorial_seen":   recipe_tutorial_seen,
+		"post_death_tutorial_seen": post_death_tutorial_seen,
 		"dq_last_reset_date":     dq_last_reset_date,
 		"dq_kills_progress":      dq_kills_progress,
 		"dq_kills_complete":      dq_kills_complete,
@@ -588,7 +633,8 @@ func save_game() -> void:
 		"dq_unlocked":            dq_unlocked,
 		"relics_collected":       relics_collected,
 		"relic_levels":           relic_levels,
-		"easy_mode_beaten":       easy_mode_beaten,
+		"easy_beaten_worlds":     easy_beaten_worlds,
+		"stages_cleared":         stages_cleared,
 	}
 	var file := FileAccess.open_encrypted_with_pass(SAVE_PATH, FileAccess.WRITE, SAVE_KEY)
 	if file:
@@ -645,6 +691,7 @@ func load_game() -> void:
 	merge_tutorial_seen    = bool(d.get("merge_tutorial_seen",  false))
 	special_tiles_seen     = bool(d.get("special_tiles_seen",   false))
 	recipe_tutorial_seen   = bool(d.get("recipe_tutorial_seen", false))
+	post_death_tutorial_seen = bool(d.get("post_death_tutorial_seen", false))
 	dq_last_reset_date     = str(d.get("dq_last_reset_date",    ""))
 	dq_kills_progress      = int(d.get("dq_kills_progress",     0))
 	dq_kills_complete      = bool(d.get("dq_kills_complete",    false))
@@ -660,7 +707,19 @@ func load_game() -> void:
 	var rl = d.get("relic_levels", {})
 	if rl is Dictionary:
 		relic_levels = rl
-	easy_mode_beaten = bool(d.get("easy_mode_beaten", false))
+	var _ebw = d.get("easy_beaten_worlds", {})
+	easy_beaten_worlds = _ebw if _ebw is Dictionary else {}
+	# Migrate old saves: if easy_mode_beaten was true, treat world 1 as beaten on easy
+	if d.get("easy_mode_beaten", false) and not easy_beaten_worlds.has(1):
+		easy_beaten_worlds[1] = true
+	# Fallback: all_time_highest_stage was only ever set from W1 easy — if it's 10, W1 easy is done
+	if all_time_highest_stage >= 10 and not easy_beaten_worlds.has(1):
+		easy_beaten_worlds[1] = true
+	var _sc = d.get("stages_cleared", {})
+	stages_cleared = _sc if _sc is Dictionary else {}
+	# Migrate old saves: seed W1 easy stages from all_time_highest_stage
+	if all_time_highest_stage > 0 and not stages_cleared.has(1):
+		stages_cleared[1] = {"easy": all_time_highest_stage, "hard": 0}
 	_reconcile_hero_talents()
 
 func _reconcile_hero_talents() -> void:
@@ -703,8 +762,10 @@ static func get_world_path(world: int) -> Array:
 			Vector2(-40,140),Vector2(850,140),Vector2(850,500),Vector2(250,500),Vector2(250,140),
 			Vector2(850,140),Vector2(850,500),Vector2(250,500),Vector2(250,140),Vector2(-40,140),
 		]
-		2: return [  # Deep Forest — Z-snake (3 horizontal rails)
+		2: return [  # Deep Forest — Z-snake, right-half loop then full Z
 			Vector2(-10,140), Vector2(870,140),
+			Vector2(870,320), Vector2(490,320),
+			Vector2(490,140), Vector2(870,140),
 			Vector2(870,320), Vector2(120,320),
 			Vector2(120,500),  Vector2(870,500),
 			Vector2(870,600), Vector2(-10,600),
@@ -894,6 +955,8 @@ func reset_save() -> void:
 	blue_gems                 = 0
 	quest_tokens              = 0
 	upgrade_purchases         = {}
+	easy_beaten_worlds        = {}
+	stages_cleared            = {}
 	tower_levels              = {}
 	hero_talent_points        = {}
 	hero_talent_alloc         = {}
@@ -902,6 +965,7 @@ func reset_save() -> void:
 	merge_tutorial_seen       = false
 	special_tiles_seen        = false
 	recipe_tutorial_seen      = false
+	post_death_tutorial_seen  = false
 	dq_last_reset_date        = ""
 	dq_kills_progress         = 0
 	dq_kills_complete         = false

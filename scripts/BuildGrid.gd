@@ -48,11 +48,12 @@ func setup_world(world: int, path: Array) -> void:
 	if world > 1:
 		_compute_path_blocked(path)
 		_trim_to_target(world)
+	queue_redraw()
 
 
 # Max buildable tiles per world (from design spec). World 1 is always 45 (no path blocking).
 const _WORLD_MAX_TILES : Dictionary = {
-	2: 42, 3: 40, 4: 45, 5: 36, 6: 38, 7: 36, 8: 45, 9: 45, 10: 45
+	2: 44, 3: 40, 4: 45, 5: 36, 6: 38, 7: 36, 8: 45, 9: 45, 10: 45
 }
 
 func _trim_to_target(world: int) -> void:
@@ -211,12 +212,32 @@ func _draw() -> void:
 				var x0 := _island.position.x + c * TILE_SIZE
 				var y0 := _island.position.y + r * TILE_SIZE
 				draw_rect(Rect2(x0, y0, TILE_SIZE, TILE_SIZE), highlight_c)
+	# Draw each vertical edge exactly once: for column boundary cx_i, draw segment
+	# for row r if either adjacent tile is buildable.
+	for cx_i in range(_cols + 1):
+		var cx := _island.position.x + cx_i * float(TILE_SIZE)
+		for r in range(_rows):
+			var left_ok  := cx_i > 0        and not _path_blocked.has(Vector2i(cx_i - 1, r))
+			var right_ok := cx_i < _cols    and not _path_blocked.has(Vector2i(cx_i, r))
+			if left_ok or right_ok:
+				var y0 := _island.position.y + r * float(TILE_SIZE)
+				draw_line(Vector2(cx, y0), Vector2(cx, y0 + float(TILE_SIZE)), grid_c, 1.0)
+	# Draw each horizontal edge exactly once.
+	for ry_i in range(_rows + 1):
+		var ry := _island.position.y + ry_i * float(TILE_SIZE)
+		for c in range(_cols):
+			var top_ok    := ry_i > 0       and not _path_blocked.has(Vector2i(c, ry_i - 1))
+			var bottom_ok := ry_i < _rows   and not _path_blocked.has(Vector2i(c, ry_i))
+			if top_ok or bottom_ok:
+				var x0 := _island.position.x + c * float(TILE_SIZE)
+				draw_line(Vector2(x0, ry), Vector2(x0 + float(TILE_SIZE), ry), grid_c, 1.0)
+	# Corner arcs on outer corners of buildable tiles (drawn on top of straight lines).
 	for c in range(_cols):
 		for r in range(_rows):
 			if not _path_blocked.has(Vector2i(c, r)):
-				var x0 := _island.position.x + c * TILE_SIZE
-				var y0 := _island.position.y + r * TILE_SIZE
-				_draw_tile_smart_outline(c, r, x0, y0, grid_c)
+				var x0 := _island.position.x + c * float(TILE_SIZE)
+				var y0 := _island.position.y + r * float(TILE_SIZE)
+				_draw_tile_corner_arcs(c, r, x0, y0, grid_c)
 
 	# Special bonus tiles (World 2 Stage 5) — glass effect
 	for t in special_tiles:
@@ -307,15 +328,9 @@ func _is_bg(c: int, r: int) -> bool:
 	return _path_blocked.has(Vector2i(c, r))
 
 
-func _draw_tile_smart_outline(c: int, r: int, x0: float, y0: float, color: Color, rad: float = 8.0) -> void:
-	var x1 := x0 + TILE_SIZE
-	var y1 := y0 + TILE_SIZE
-
-	# Always draw all 4 sides with draw_rect — guaranteed to be visible on every tile
-	draw_rect(Rect2(x0, y0, TILE_SIZE, TILE_SIZE), color, false, 1.0)
-
-	# Rounded arc only at outer corners (both adjacent sides face background).
-	# Drawn on top of the rect outline to soften the corner.
+func _draw_tile_corner_arcs(c: int, r: int, x0: float, y0: float, color: Color, rad: float = 8.0) -> void:
+	var x1  := x0 + float(TILE_SIZE)
+	var y1  := y0 + float(TILE_SIZE)
 	var bg_t := _is_bg(c, r - 1)
 	var bg_r := _is_bg(c + 1, r)
 	var bg_b := _is_bg(c, r + 1)
